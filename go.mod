@@ -1,6 +1,6 @@
 module github.com/tta-lab/organon
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/odvcencio/gotreesitter v0.9.2

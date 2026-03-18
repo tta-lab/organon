@@ -9,26 +9,36 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: go mod download
-      - run: make test
-      - run: make build
+      - name: Download dependencies
+        run: go mod download
+      - name: Test
+        run: make test
+      - name: Build
+        run: make build
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: make fmt
-      - run: make vet
-      - uses: golangci/golangci-lint-action@v6
+      - name: Format
+        run: make fmt && git diff --exit-code --quiet -- '*.go'
+      - name: Vet
+        run: make vet
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.10
           args: --timeout=5m
