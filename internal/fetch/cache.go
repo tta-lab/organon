@@ -22,7 +22,7 @@ func TruncateContent(s string) string {
 	if utf8.RuneCountInString(s) <= MaxContentChars {
 		return s
 	}
-	return string([]rune(s)[:MaxContentChars]) + "\n[content truncated at 30,000 characters]"
+	return string([]rune(s)[:MaxContentChars]) + fmt.Sprintf("\n[content truncated at %d characters]", MaxContentChars)
 }
 
 // CachedFetchBackend wraps a Backend with a file-based daily cache.

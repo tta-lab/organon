@@ -83,6 +83,15 @@ func TestCachedFetchBackend_DateBasedTTL(t *testing.T) {
 	assert.Equal(t, "fresh content", content)
 }
 
+func TestNewCachedFetchBackend_FallbackOnBadDir(t *testing.T) {
+	// /dev/null/organon is not a valid directory — MkdirAll must fail
+	stub := &stubBackend{content: "direct"}
+	backend := NewCachedFetchBackend("/dev/null/organon", stub)
+	// Should return the fallback directly, not a *CachedFetchBackend
+	_, isCached := backend.(*CachedFetchBackend)
+	assert.False(t, isCached, "expected fallback backend when cache dir creation fails")
+}
+
 func TestResolve_DefaultsToDefuddle(t *testing.T) {
 	t.Setenv("BROWSER_GATEWAY_URL", "")
 	backend := Resolve()

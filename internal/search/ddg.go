@@ -233,6 +233,8 @@ func maybeDelaySearch(ctx context.Context) error {
 	delay := minGap - elapsed
 	// Set lastSearchTime speculatively before releasing the lock so concurrent
 	// callers see an updated time and don't compute overlapping delays.
+	// Tradeoff: a cancelled context still consumes a time slot, so the next
+	// real caller may wait up to minGap even though no request was sent.
 	lastSearchTime = time.Now()
 	lastSearchMu.Unlock()
 
