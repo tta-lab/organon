@@ -11,15 +11,19 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: make test
-      - uses: goreleaser/goreleaser-action@v6
+      - name: Test
+        run: make test
+      - name: Release
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: release --clean
