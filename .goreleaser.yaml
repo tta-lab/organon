@@ -1,0 +1,90 @@
+version: 2
+project_name: organon
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: src
+    binary: src
+    main: ./cmd/src
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: url
+    binary: url
+    main: ./cmd/url
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: web
+    binary: web
+    main: ./cmd/web
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    builds:
+      - src
+      - url
+      - web
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^chore"
+
+brews:
+  - name: organon
+    commit_author:
+      name: tta-lab-bot
+      email: bot@tta-lab.com
+    commit_msg_template: "feat(formula): update {{ .ProjectName }} to {{ .Tag }}"
+    directory: Formula
+    homepage: "https://github.com/tta-lab/organon"
+    description: "Structure-aware tools for AI agents"
+    license: "Apache-2.0"
+    install: |
+      bin.install "src"
+      bin.install "url"
+      bin.install "web"
+    test: |
+      system "#{bin}/src", "--help"
+      system "#{bin}/url", "--help"
+      system "#{bin}/web", "--help"
+    repository:
+      owner: tta-lab
+      name: homebrew-ttal
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
