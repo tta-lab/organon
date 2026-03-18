@@ -10,7 +10,7 @@ import (
 
 // ParseFile parses source bytes using tree-sitter for the given filename.
 // Returns the parsed tree and language name.
-func ParseFile(filename string, source []byte) (*gotreesitter.Tree, string, error) {
+func ParseFile(filename string, source []byte) (tree *gotreesitter.Tree, langName string, err error) {
 	entry := grammars.DetectLanguage(filename)
 	if entry == nil {
 		return nil, "", fmt.Errorf("unsupported file type: %s", filename)
@@ -20,10 +20,19 @@ func ParseFile(filename string, source []byte) (*gotreesitter.Tree, string, erro
 	if lang == nil {
 		return nil, "", fmt.Errorf("language grammar unavailable for: %s", filename)
 	}
-	parser := gotreesitter.NewParser(lang)
 
+	// Some grammars with external scanners may panic — recover gracefully.
+	defer func() {
+		if r := recover(); r != nil {
+			tree = nil
+			langName = ""
+			err = fmt.Errorf("parse %s: grammar panicked: %v", filename, r)
+		}
+	}()
+
+	parser := gotreesitter.NewParser(lang)
 	ts := entry.TokenSourceFactory(source, lang)
-	tree, err := parser.ParseWithTokenSource(source, ts)
+	tree, err = parser.ParseWithTokenSource(source, ts)
 	if err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", filename, err)
 	}

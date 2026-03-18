@@ -201,8 +201,40 @@ func runDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runComment(cmd *cobra.Command, args []string) error {
-	// Implemented in Task 4.
-	return fmt.Errorf("comment subcommand: not yet implemented (Task 4)")
+	filename := args[0]
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	symbolID, _ := cmd.Flags().GetString("symbol")
+	readOnly, _ := cmd.Flags().GetBool("read")
+	depth := getDepth(cmd)
+
+	if readOnly {
+		comment, err := srcop.ReadComment(filename, source, symbolID, depth)
+		if err != nil {
+			return err
+		}
+		fmt.Print(comment)
+		return nil
+	}
+
+	newComment, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+
+	result, err := srcop.WriteComment(filename, source, symbolID, newComment, depth)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(filename, result, 0o644); err != nil {
+		return err
+	}
+
+	return printTree(filename, result, depth)
 }
 
 func printTree(filename string, source []byte, depth int) error {
