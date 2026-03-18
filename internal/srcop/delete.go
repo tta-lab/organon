@@ -3,8 +3,8 @@ package srcop
 import (
 	"fmt"
 
-	"github.com/tta-lab/organon/internal/treesitter"
 	"github.com/tta-lab/organon/internal/tree"
+	"github.com/tta-lab/organon/internal/treesitter"
 )
 
 // Delete removes a symbol and its doc comment from the file.
