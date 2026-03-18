@@ -15,10 +15,12 @@ import (
 //go:embed queries/*.scm
 var queryFS embed.FS
 
+const kindMethod = "method"
+
 // Symbol represents an extracted code symbol.
 type Symbol struct {
 	Name      string // e.g., "main", "Config", "Validate"
-	Kind      string // e.g., "function", "type", "method", "field"
+	Kind      string // e.g., "function", "type", kindMethod, "field"
 	Parent    string // e.g., "Config" for method Validate (empty for top-level)
 	StartByte uint
 	EndByte   uint
@@ -54,7 +56,7 @@ func ExtractSymbols(filename string, source []byte, maxDepth int) ([]Symbol, err
 	}
 
 	// Fallback: heuristic walker
-	return extractHeuristic(parsedTree, source, maxDepth)
+	return extractHeuristic(parsedTree, source, maxDepth), nil
 }
 
 func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr string, maxDepth int) ([]Symbol, error) {
@@ -118,7 +120,7 @@ func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr str
 		kind := nodeTypeToKind(nodeType, isField)
 
 		parent := ""
-		if kind == "method" {
+		if kind == kindMethod {
 			parent = extractReceiverType(declNode, lang, source)
 		}
 
@@ -145,7 +147,7 @@ func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr str
 	return symbols, nil
 }
 
-func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int) ([]Symbol, error) {
+func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int) []Symbol {
 	lang := parsedTree.Language()
 	root := parsedTree.RootNode()
 	bt := gotreesitter.Bind(parsedTree)
@@ -200,7 +202,7 @@ func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int
 		}
 	}
 
-	return symbols, nil
+	return symbols
 }
 
 // nodeTypeToKind maps a tree-sitter node type to our kind string.
@@ -212,7 +214,7 @@ func nodeTypeToKind(nodeType string, isField bool) string {
 	case "function_declaration", "function_definition", "function_item":
 		return "function"
 	case "method_declaration", "method_definition":
-		return "method"
+		return kindMethod
 	case "type_declaration", "type_alias_declaration":
 		return "type"
 	case "class_declaration", "class_definition":
@@ -246,11 +248,9 @@ func extractReceiverType(methodNode *gotreesitter.Node, lang *gotreesitter.Langu
 		}
 		typeName := typeNode.Type(lang)
 		// Handle pointer receiver (*Config)
-		if typeName == "pointer_type" {
-			for j := 0; j < typeNode.NamedChildCount(); j++ {
-				inner := typeNode.NamedChild(j)
-				return string(source[inner.StartByte():inner.EndByte()])
-			}
+		if typeName == "pointer_type" && typeNode.NamedChildCount() > 0 {
+			inner := typeNode.NamedChild(0)
+			return string(source[inner.StartByte():inner.EndByte()])
 		}
 		return string(source[typeNode.StartByte():typeNode.EndByte()])
 	}
@@ -285,7 +285,9 @@ func findDocComment(source []byte, declStart int) int {
 		}
 
 		line := strings.TrimSpace(string(source[lineBegin:lineEnd]))
-		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "/**") || strings.HasPrefix(line, " *") || strings.HasPrefix(line, "*/") {
+		isComment := strings.HasPrefix(line, "//") || strings.HasPrefix(line, "#") ||
+			strings.HasPrefix(line, "/**") || strings.HasPrefix(line, " *") || strings.HasPrefix(line, "*/")
+		if isComment {
 			commentStart = lineBegin
 			pos = lineBegin - 1
 		} else if line == "" {
@@ -328,7 +330,7 @@ func formatSymbolLabel(s Symbol) string {
 	switch s.Kind {
 	case "function":
 		return fmt.Sprintf("func %s()", s.Name)
-	case "method":
+	case kindMethod:
 		if s.Parent != "" {
 			return fmt.Sprintf("func (%s) %s()", s.Parent, s.Name)
 		}
