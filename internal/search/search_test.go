@@ -134,6 +134,25 @@ func TestResolveSearcher_NoKey(t *testing.T) {
 	}
 }
 
+func TestCleanDuckDuckGoURL_Redirect(t *testing.T) {
+	encoded := "https%3A%2F%2Fexample.com%2Fpage"
+	raw := "//duckduckgo.com/l/?uddg=" + encoded
+	result := cleanDuckDuckGoURL(raw)
+	assert.Equal(t, "https://example.com/page", result)
+}
+
+func TestCleanDuckDuckGoURL_PlainURL(t *testing.T) {
+	raw := "https://example.com/page"
+	assert.Equal(t, raw, cleanDuckDuckGoURL(raw))
+}
+
+func TestCleanDuckDuckGoURL_WithExtraParams(t *testing.T) {
+	encoded := "https%3A%2F%2Fexample.com%2Fpage"
+	raw := "//duckduckgo.com/l/?uddg=" + encoded + "&rut=abc123"
+	result := cleanDuckDuckGoURL(raw)
+	assert.Equal(t, "https://example.com/page", result)
+}
+
 func TestFormatSearchResults_Empty(t *testing.T) {
 	out := formatSearchResults(nil)
 	assert.Contains(t, out, "No results found")

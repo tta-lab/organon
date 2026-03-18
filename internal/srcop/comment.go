@@ -44,7 +44,10 @@ func WriteComment(filename string, source []byte, symbolID string, comment []byt
 	}
 
 	sym := symbols[targetIdx]
-	lang, _ := treesitter.LangNameFromExt(filename)
+	lang, err := treesitter.LangNameFromExt(filename)
+	if err != nil {
+		return nil, fmt.Errorf("WriteComment: %w", err)
+	}
 	formatted := formatComment(string(comment), lang)
 
 	var result []byte

@@ -36,7 +36,7 @@ func runURL(cmd *cobra.Command, args []string) error {
 	full, _ := cmd.Flags().GetBool("full")
 	treeThreshold, _ := cmd.Flags().GetInt("tree-threshold")
 
-	backend := fetch.Resolve(nil)
+	backend := fetch.Resolve()
 	content, err := backend.Fetch(context.Background(), targetURL)
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", targetURL, err)

@@ -14,7 +14,7 @@ type Backend interface {
 // Resolve returns the appropriate backend based on environment.
 // If BROWSER_GATEWAY_URL is set, uses BrowserGatewayBackend (no cache).
 // Otherwise, uses DefuddleCLIBackend wrapped with daily file cache.
-func Resolve(httpClient interface{}) Backend {
+func Resolve() Backend {
 	gatewayURL := os.Getenv("BROWSER_GATEWAY_URL")
 	if gatewayURL != "" {
 		return NewBrowserGatewayBackend(gatewayURL, nil)

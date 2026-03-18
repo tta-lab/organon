@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestCachedFetchBackend_DateBasedTTL(t *testing.T) {
 
 func TestResolve_DefaultsToDefuddle(t *testing.T) {
 	t.Setenv("BROWSER_GATEWAY_URL", "")
-	backend := Resolve(nil)
+	backend := Resolve()
 	// Should be a CachedFetchBackend wrapping defuddle
 	_, ok := backend.(*CachedFetchBackend)
 	assert.True(t, ok, "expected CachedFetchBackend without BROWSER_GATEWAY_URL")
@@ -92,10 +93,35 @@ func TestResolve_DefaultsToDefuddle(t *testing.T) {
 
 func TestResolve_UsesGatewayWhenSet(t *testing.T) {
 	t.Setenv("BROWSER_GATEWAY_URL", "http://gateway.example.com")
-	backend := Resolve(nil)
+	backend := Resolve()
 	// Should be a browserGatewayBackend
 	_, ok := backend.(*browserGatewayBackend)
 	assert.True(t, ok, "expected browserGatewayBackend when BROWSER_GATEWAY_URL is set")
+}
+
+func TestSanitizeURL_PlainURL(t *testing.T) {
+	result := sanitizeURL("https://example.com/path/to/page")
+	assert.NotContains(t, result, "://")
+	assert.NotContains(t, result, "/")
+	assert.NotContains(t, result, "?")
+}
+
+func TestSanitizeURL_QueryString(t *testing.T) {
+	result1 := sanitizeURL("https://example.com/search?q=foo&page=2")
+	result2 := sanitizeURL("https://example.com/search?q=bar&page=3")
+	assert.NotContains(t, result1, "?")
+	assert.NotContains(t, result1, "=")
+	// Different queries produce different filenames
+	assert.NotEqual(t, result1, result2)
+	// Same query is deterministic
+	assert.Equal(t, result1, sanitizeURL("https://example.com/search?q=foo&page=2"))
+}
+
+func TestSanitizeURL_LongURL(t *testing.T) {
+	// URLs longer than 200 chars should be capped
+	longURL := "https://example.com/" + strings.Repeat("a", 250)
+	result := sanitizeURL(longURL)
+	assert.LessOrEqual(t, len(result), 200)
 }
 
 type stubBackend struct {

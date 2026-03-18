@@ -14,14 +14,15 @@ import (
 	"unicode/utf8"
 )
 
-// truncateContent truncates content to maxContentChars runes.
-const maxContentChars = 30_000
+// MaxContentChars is the rune limit applied by TruncateContent.
+const MaxContentChars = 30_000
 
-func truncateContent(s string) string {
-	if utf8.RuneCountInString(s) <= maxContentChars {
+// TruncateContent truncates content to MaxContentChars runes.
+func TruncateContent(s string) string {
+	if utf8.RuneCountInString(s) <= MaxContentChars {
 		return s
 	}
-	return string([]rune(s)[:maxContentChars]) + "\n[content truncated at 30,000 characters]"
+	return string([]rune(s)[:MaxContentChars]) + "\n[content truncated at 30,000 characters]"
 }
 
 // CachedFetchBackend wraps a Backend with a file-based daily cache.
@@ -32,10 +33,12 @@ type CachedFetchBackend struct {
 }
 
 // NewCachedFetchBackend creates a CachedFetchBackend wrapping the given fallback.
-func NewCachedFetchBackend(cacheDir string, fallback Backend) *CachedFetchBackend {
+// If the cache directory cannot be created, returns the fallback directly (caching disabled).
+func NewCachedFetchBackend(cacheDir string, fallback Backend) Backend {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: cachedfetch: failed to create cache dir %q: %v\n", cacheDir, err)
+		fmt.Fprintf(os.Stderr, "warning: cachedfetch: failed to create cache dir %q: %v — caching disabled\n", cacheDir, err)
 		slog.Warn("cachedfetch: failed to create cache dir, caching disabled", "dir", cacheDir, "error", err)
+		return fallback
 	}
 	return &CachedFetchBackend{cacheDir: cacheDir, fallback: fallback}
 }
@@ -98,5 +101,13 @@ func sanitizeURL(rawURL string) string {
 		h := sha256.Sum256([]byte(u.RawQuery))
 		base += "_q" + fmt.Sprintf("%x", h[:4])
 	}
+
+	// Cap at 200 chars to stay within filesystem filename limits.
+	const maxFilenameLen = 200
+	if len(base) > maxFilenameLen {
+		h := sha256.Sum256([]byte(base))
+		base = base[:maxFilenameLen-9] + "_" + fmt.Sprintf("%x", h[:4])
+	}
+
 	return base
 }

@@ -231,6 +231,9 @@ func maybeDelaySearch(ctx context.Context) error {
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
 	elapsed := time.Since(lastSearchTime)
 	delay := minGap - elapsed
+	// Set lastSearchTime speculatively before releasing the lock so concurrent
+	// callers see an updated time and don't compute overlapping delays.
+	lastSearchTime = time.Now()
 	lastSearchMu.Unlock()
 
 	if delay > 0 {
@@ -240,10 +243,6 @@ func maybeDelaySearch(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-
-	lastSearchMu.Lock()
-	lastSearchTime = time.Now()
-	lastSearchMu.Unlock()
 
 	return nil
 }

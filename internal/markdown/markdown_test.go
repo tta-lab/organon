@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tta-lab/organon/internal/fetch"
 )
 
 const testDoc = `# My Document
@@ -30,7 +32,8 @@ Set env vars.
 `
 
 func TestParseHeadings_Levels(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assert.Len(t, headings, 5)
 	assert.Equal(t, 1, headings[0].level)
 	assert.Equal(t, "My Document", headings[0].text)
@@ -41,14 +44,16 @@ func TestParseHeadings_Levels(t *testing.T) {
 }
 
 func TestAssignIDs_H1HasNoID(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assignIDs(headings)
 	assert.Empty(t, headings[0].id, "H1 should have no ID")
 	assert.NotEmpty(t, headings[1].id, "H2 should have ID")
 }
 
 func TestAssignIDs_Unique(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assignIDs(headings)
 	seen := map[string]bool{}
 	for _, h := range headings {
@@ -61,7 +66,8 @@ func TestAssignIDs_Unique(t *testing.T) {
 }
 
 func TestExtractSection_ValidID(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assignIDs(headings)
 
 	// Find the Installation section ID
@@ -82,9 +88,10 @@ func TestExtractSection_ValidID(t *testing.T) {
 }
 
 func TestExtractSection_InvalidID(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assignIDs(headings)
-	_, err := extractSection([]byte(testDoc), headings, "zz")
+	_, err = extractSection([]byte(testDoc), headings, "zz")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -116,7 +123,8 @@ func TestRenderContent_AutoTree(t *testing.T) {
 }
 
 func TestRenderContent_Section(t *testing.T) {
-	headings := parseHeadings([]byte(testDoc))
+	headings, err := parseHeadings([]byte(testDoc))
+	require.NoError(t, err)
 	assignIDs(headings)
 	var usageID string
 	for _, h := range headings {
@@ -142,12 +150,12 @@ func TestFormatNum(t *testing.T) {
 
 func TestTruncateContent_Short(t *testing.T) {
 	s := "hello world"
-	assert.Equal(t, s, truncateContent(s))
+	assert.Equal(t, s, fetch.TruncateContent(s))
 }
 
 func TestTruncateContent_Long(t *testing.T) {
 	s := strings.Repeat("a", 31000)
-	result := truncateContent(s)
+	result := fetch.TruncateContent(s)
 	assert.True(t, len(result) < len(s))
 	assert.Contains(t, result, "truncated")
 }

@@ -75,7 +75,10 @@ func main() {
 // IMPORTANT: Must use cmd.Root().PersistentFlags() — NOT cmd.Flags() —
 // because cmd.Flags() on subcommands does NOT include inherited persistent flags.
 func getDepth(cmd *cobra.Command) int {
-	depth, _ := cmd.Root().PersistentFlags().GetInt("depth")
+	depth, err := cmd.Root().PersistentFlags().GetInt("depth")
+	if err != nil {
+		panic("BUG: --depth flag not registered")
+	}
 	return depth
 }
 

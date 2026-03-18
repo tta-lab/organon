@@ -85,5 +85,5 @@ func (b *browserGatewayBackend) Fetch(ctx context.Context, url string) (string, 
 	}
 	sb.WriteString(extracted.Content)
 
-	return truncateContent(sb.String()), nil
+	return TruncateContent(sb.String()), nil
 }

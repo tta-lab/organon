@@ -2,7 +2,6 @@ package markdown
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	goldmarktext "github.com/yuin/goldmark/text"
 
+	"github.com/tta-lab/organon/internal/fetch"
 	"github.com/tta-lab/organon/internal/id"
 	"github.com/tta-lab/organon/internal/tree"
 )
@@ -26,7 +26,7 @@ type mdHeading struct {
 const DefaultTreeThreshold = 5000
 
 // parseHeadings parses markdown source and returns all headings with levels and byte offsets.
-func parseHeadings(source []byte) []mdHeading { //nolint:gocyclo
+func parseHeadings(source []byte) ([]mdHeading, error) { //nolint:gocyclo
 	md := goldmark.New()
 	reader := goldmarktext.NewReader(source)
 	doc := md.Parser().Parse(reader)
@@ -68,7 +68,7 @@ func parseHeadings(source []byte) []mdHeading { //nolint:gocyclo
 		})
 		return ast.WalkContinue, nil
 	}); err != nil {
-		slog.Warn("parseHeadings: ast.Walk returned an error", "error", err)
+		return nil, fmt.Errorf("parseHeadings: ast.Walk: %w", err)
 	}
 
 	// Fix offsets: walk back to the '#' characters at start of line
@@ -80,7 +80,7 @@ func parseHeadings(source []byte) []mdHeading { //nolint:gocyclo
 		headings[i].offset = off
 	}
 
-	return headings
+	return headings, nil
 }
 
 // assignIDs generates stable 2-char base62 IDs for each heading.
@@ -225,7 +225,10 @@ func RenderContent(
 		treeThreshold = DefaultTreeThreshold
 	}
 
-	headings := parseHeadings(source)
+	headings, err := parseHeadings(source)
+	if err != nil {
+		return nil, err
+	}
 	assignIDs(headings)
 
 	if section != "" {
@@ -240,22 +243,12 @@ func RenderContent(
 
 	if showTree || (!full && charCount > treeThreshold) {
 		if len(headings) == 0 {
-			return &MarkdownResult{Content: truncateContent(string(source)), Mode: "full"}, nil
+			return &MarkdownResult{Content: fetch.TruncateContent(string(source)), Mode: "full"}, nil
 		}
 		return &MarkdownResult{Content: renderTree(headings, source), Mode: "tree"}, nil
 	}
 
-	return &MarkdownResult{Content: truncateContent(string(source)), Mode: "full"}, nil
-}
-
-// truncateContent truncates content to maxContentChars runes.
-const maxContentChars = 30_000
-
-func truncateContent(s string) string {
-	if utf8.RuneCountInString(s) <= maxContentChars {
-		return s
-	}
-	return string([]rune(s)[:maxContentChars]) + "\n[content truncated at 30,000 characters]"
+	return &MarkdownResult{Content: fetch.TruncateContent(string(source)), Mode: "full"}, nil
 }
 
 // formatNum formats an integer with thousands separators.

@@ -88,6 +88,32 @@ func TestInsertBefore_AddsContent(t *testing.T) {
 	assert.True(t, placeholderIdx < validateIdx, "placeholder should be before Validate")
 }
 
+func TestInsertAfter_SymbolNotFound(t *testing.T) {
+	source := loadFixture(t)
+	_, err := InsertAfter("example.go", source, "zz", []byte("content"), 2)
+	assert.ErrorContains(t, err, "not found")
+}
+
+func TestInsertBefore_SymbolNotFound(t *testing.T) {
+	source := loadFixture(t)
+	_, err := InsertBefore("example.go", source, "zz", []byte("content"), 2)
+	assert.ErrorContains(t, err, "not found")
+}
+
+func TestDelete_RemovesDocComment(t *testing.T) {
+	source := loadFixture(t)
+	id := symbolIDFor(t, source, "Config")
+
+	result, err := Delete("example.go", source, id, 2)
+	require.NoError(t, err)
+
+	// Both the struct and its doc comment should be gone
+	assert.NotContains(t, string(result), "type Config struct")
+	assert.NotContains(t, string(result), "Config holds server configuration")
+	// Other symbols should remain
+	assert.Contains(t, string(result), "func main()")
+}
+
 func TestDelete_RemovesSymbol(t *testing.T) {
 	source := loadFixture(t)
 	id := symbolIDFor(t, source, "main")

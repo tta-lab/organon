@@ -8,6 +8,9 @@ import (
 
 // Replace replaces a symbol's byte range with new content.
 // Returns the modified file content.
+// Note: Replace does not remove the existing doc comment (DocStart..StartByte).
+// The caller is responsible for including or omitting comment text in newContent.
+// Use WriteComment to update the doc comment independently.
 func Replace(filename string, source []byte, symbolID string, newContent []byte, depth int) ([]byte, error) {
 	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
 	if err != nil {

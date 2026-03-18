@@ -21,5 +21,5 @@ func (b *defuddleCLIBackend) Fetch(ctx context.Context, url string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("defuddle parse failed: %w\noutput: %s", err, strings.TrimSpace(string(out)))
 	}
-	return truncateContent(string(out)), nil
+	return TruncateContent(string(out)), nil
 }
