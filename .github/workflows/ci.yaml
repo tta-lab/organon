@@ -34,7 +34,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Format
-        run: make fmt && git diff --exit-code --quiet -- '*.go'
+        run: |
+          make fmt
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Code not formatted. Run 'make fmt' and commit."
+            git status --porcelain
+            exit 1
+          fi
       - name: Vet
         run: make vet
       - name: Lint
