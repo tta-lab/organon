@@ -153,6 +153,84 @@ func TestCleanDuckDuckGoURL_WithExtraParams(t *testing.T) {
 	assert.Equal(t, "https://example.com/page", result)
 }
 
+func TestTavilySearcher_Search(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/search", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var reqBody struct {
+			APIKey     string `json:"api_key"`
+			Query      string `json:"query"`
+			MaxResults int    `json:"max_results"`
+		}
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		require.NoError(t, err)
+		assert.Equal(t, "test-tavily-key", reqBody.APIKey)
+		assert.Equal(t, "test query", reqBody.Query)
+		assert.Equal(t, 10, reqBody.MaxResults)
+
+		resp := map[string]interface{}{
+			"results": []map[string]string{
+				{"title": "Tavily Result 1", "url": "https://example.com/t1", "content": "First tavily result"},
+				{"title": "Tavily Result 2", "url": "https://example.com/t2", "content": "Second tavily result"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	searcher := &TavilySearcher{
+		apiKey:  "test-tavily-key",
+		baseURL: srv.URL,
+		client:  srv.Client(),
+	}
+
+	results, err := searcher.Search(context.Background(), "test query", 10)
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+	assert.Equal(t, "Tavily Result 1", results[0].Title)
+	assert.Equal(t, "https://example.com/t1", results[0].Link)
+	assert.Equal(t, "First tavily result", results[0].Snippet)
+	assert.Equal(t, 1, results[0].Position)
+}
+
+func TestTavilySearcher_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	searcher := &TavilySearcher{
+		apiKey:  "bad-key",
+		baseURL: srv.URL,
+		client:  srv.Client(),
+	}
+
+	_, err := searcher.Search(context.Background(), "test", 5)
+	assert.ErrorContains(t, err, "HTTP 401")
+}
+
+func TestResolveSearcher_TavilyKey(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "my-tavily-key")
+	t.Setenv("BRAVE_API_KEY", "my-brave-key")
+	searcher, err := resolveSearcher()
+	require.NoError(t, err)
+	_, ok := searcher.(*TavilySearcher)
+	assert.True(t, ok, "expected TavilySearcher when TAVILY_API_KEY is set")
+}
+
+func TestResolveSearcher_TavilyEmptyKeyError(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "")
+	searcher, err := resolveSearcher()
+	if err != nil {
+		assert.ErrorContains(t, err, "TAVILY_API_KEY")
+	} else {
+		assert.NotNil(t, searcher)
+	}
+}
+
 func TestFormatSearchResults_Empty(t *testing.T) {
 	out := formatSearchResults(nil)
 	assert.Contains(t, out, "No results found")
