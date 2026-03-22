@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -12,14 +13,16 @@ import (
 	"github.com/tta-lab/organon/internal/markdown"
 )
 
+// resolveID finds the section ID for a heading by text.
+// It parses [XX] bracket patterns from HeadingTree output and matches them via ReadSection.
+// This workaround is necessary because main_test.go is in package main and cannot access
+// the unexported parseHeadings/assignIDs internals used by edit_test.go's sectionIDFor.
 func resolveID(t *testing.T, source []byte, headingText string) string {
 	t.Helper()
-	// Try each known ID by reading section and checking if it contains the heading text
-	// Generate candidate IDs by trying the tree output
 	tree, err := markdown.HeadingTree(source)
 	require.NoError(t, err)
 
-	// Extract IDs from tree output by looking for [XX] patterns
+	// Extract IDs from [XX] bracket patterns in the tree output
 	var candidates []string
 	for i := 0; i < len(tree)-3; i++ {
 		if tree[i] == '[' {
@@ -38,23 +41,12 @@ func resolveID(t *testing.T, source []byte, headingText string) string {
 		if err != nil {
 			continue
 		}
-		if contains(content, headingText) {
+		if strings.Contains(content, headingText) {
 			return id
 		}
 	}
 	t.Fatalf("could not resolve ID for heading %q", headingText)
 	return ""
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && func() bool {
-		for i := 0; i <= len(s)-len(substr); i++ {
-			if s[i:i+len(substr)] == substr {
-				return true
-			}
-		}
-		return false
-	}()
 }
 
 func TestMarkdownDispatch_Tree(t *testing.T) {
@@ -79,7 +71,6 @@ func TestMarkdownDispatch_ReadSection(t *testing.T) {
 	content := []byte("# Doc\n\n## Section One\n\nContent here.\n\n## Section Two\n\nOther.\n")
 	require.NoError(t, os.WriteFile(f, content, 0o644))
 
-	// Get the section ID dynamically
 	id := resolveID(t, content, "Section One")
 
 	cmd := &cobra.Command{}
@@ -90,6 +81,40 @@ func TestMarkdownDispatch_ReadSection(t *testing.T) {
 
 	err := runTreeOrRead(cmd, []string{f})
 	assert.NoError(t, err)
+}
+
+func TestMarkdownDispatch_Replace(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	content := []byte("# Doc\n\n## Section One\n\nOld content.\n\n## Section Two\n\nOther.\n")
+	require.NoError(t, os.WriteFile(f, content, 0o644))
+
+	id := resolveID(t, content, "Section One")
+
+	// Pipe new content via stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = w.Write([]byte("## Section One\n\nNew content.\n"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+	require.NoError(t, cmd.Flags().Set("symbol", id))
+
+	err = runReplace(cmd, []string{f})
+	require.NoError(t, r.Close())
+	assert.NoError(t, err)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "New content.")
+	assert.NotContains(t, string(result), "Old content.")
+	assert.Contains(t, string(result), "## Section Two")
 }
 
 func TestMarkdownDispatch_CommentUnsupported(t *testing.T) {

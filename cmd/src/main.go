@@ -294,6 +294,9 @@ func runComment(cmd *cobra.Command, args []string) error {
 	return printTree(filename, result, depth)
 }
 
+// runMarkdownTreeOrRead handles the root command for .md files.
+// --tree and --depth flags are no-ops for markdown: the heading tree is always shown
+// (unless -s is given), since markdown structure is heading-based, not depth-bounded.
 func runMarkdownTreeOrRead(cmd *cobra.Command, filename string, source []byte) error {
 	symbolID, _ := cmd.Flags().GetString("symbol")
 	if symbolID != "" {
