@@ -101,3 +101,13 @@ func TestExtractSymbols_GoMethodReceiver(t *testing.T) {
 	}
 	t.Fatal("Validate method not found")
 }
+
+func TestExtractSymbols_MarkdownGrammarError(t *testing.T) {
+	// Documents that gotreesitter (pure Go, no cgo) cannot handle the markdown
+	// grammar's external scanner. ExtractSymbols must return an error, not panic.
+	// If this test fails (no error returned), it signals that gotreesitter has gained
+	// markdown support and the bypass in cmd/src may be revisitable.
+	source := []byte("# Hello\n\n## World\n\nText.\n")
+	_, err := ExtractSymbols("test.md", source, 2)
+	assert.Error(t, err, "expected error for markdown grammar; gotreesitter cannot handle its external scanner")
+}

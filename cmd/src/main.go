@@ -4,13 +4,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/srcop"
 	"github.com/tta-lab/organon/internal/tree"
 	"github.com/tta-lab/organon/internal/treesitter"
 )
+
+func isMarkdown(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".md" || ext == ".markdown" || ext == ".mdx"
+}
 
 func main() {
 	root := &cobra.Command{
@@ -89,6 +97,10 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if isMarkdown(filename) {
+		return runMarkdownTreeOrRead(cmd, filename, source)
+	}
+
 	depth := getDepth(cmd)
 	symbolID, _ := cmd.Flags().GetString("symbol")
 
@@ -132,6 +144,17 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read stdin: %w", err)
 	}
 
+	if isMarkdown(filename) {
+		result, err := markdown.ReplaceSection(source, symbolID, newContent)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filename, result, 0o644); err != nil {
+			return err
+		}
+		return printMarkdownTree(filename, result)
+	}
+
 	result, err := srcop.Replace(filename, source, symbolID, newContent, depth)
 	if err != nil {
 		return err
@@ -164,6 +187,22 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read stdin: %w", err)
 	}
 
+	if isMarkdown(filename) {
+		var result []byte
+		if afterID != "" {
+			result, err = markdown.InsertAfterSection(source, afterID, newContent)
+		} else {
+			result, err = markdown.InsertBeforeSection(source, beforeID, newContent)
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filename, result, 0o644); err != nil {
+			return err
+		}
+		return printMarkdownTree(filename, result)
+	}
+
 	var result []byte
 	if afterID != "" {
 		result, err = srcop.InsertAfter(filename, source, afterID, newContent, depth)
@@ -191,6 +230,17 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	symbolID, _ := cmd.Flags().GetString("symbol")
 	depth := getDepth(cmd)
 
+	if isMarkdown(filename) {
+		result, err := markdown.DeleteSection(source, symbolID)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filename, result, 0o644); err != nil {
+			return err
+		}
+		return printMarkdownTree(filename, result)
+	}
+
 	result, err := srcop.Delete(filename, source, symbolID, depth)
 	if err != nil {
 		return err
@@ -208,6 +258,10 @@ func runComment(cmd *cobra.Command, args []string) error {
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return err
+	}
+
+	if isMarkdown(filename) {
+		return fmt.Errorf("comment command not supported for markdown files; use replace -s <id> instead")
 	}
 
 	symbolID, _ := cmd.Flags().GetString("symbol")
@@ -238,6 +292,31 @@ func runComment(cmd *cobra.Command, args []string) error {
 	}
 
 	return printTree(filename, result, depth)
+}
+
+// runMarkdownTreeOrRead handles the root command for .md files.
+// --tree and --depth flags are no-ops for markdown: the heading tree is always shown
+// (unless -s is given), since markdown structure is heading-based, not depth-bounded.
+func runMarkdownTreeOrRead(cmd *cobra.Command, filename string, source []byte) error {
+	symbolID, _ := cmd.Flags().GetString("symbol")
+	if symbolID != "" {
+		content, err := markdown.ReadSection(source, symbolID)
+		if err != nil {
+			return err
+		}
+		fmt.Print(content)
+		return nil
+	}
+	return printMarkdownTree(filename, source)
+}
+
+func printMarkdownTree(_ string, source []byte) error {
+	treeStr, err := markdown.HeadingTree(source)
+	if err != nil {
+		return err
+	}
+	fmt.Print(treeStr)
+	return nil
 }
 
 func printTree(filename string, source []byte, depth int) error {
