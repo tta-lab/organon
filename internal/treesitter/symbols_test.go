@@ -151,6 +151,17 @@ func TestExtractSymbols_Cpp(t *testing.T) {
 	computeArea := findSymbol(symbols, "computeArea")
 	require.NotNil(t, computeArea)
 	assert.Equal(t, "function", computeArea.Kind)
+
+	// C++ constructors are captured as function (same declarator node as regular
+	// functions). Circle appears as both "class" (class_specifier) and "function"
+	// (constructor matched by function_definition rule). Exactly one class entry exists.
+	classCount := 0
+	for _, s := range symbols {
+		if s.Name == "Circle" && s.Kind == "class" {
+			classCount++
+		}
+	}
+	assert.Equal(t, 1, classCount, "Circle should appear exactly once as class")
 }
 
 func TestExtractSymbols_Tsx(t *testing.T) {
@@ -178,6 +189,46 @@ func TestExtractSymbols_Tsx(t *testing.T) {
 	counter := findSymbol(symbols, "Counter")
 	require.NotNil(t, counter)
 	assert.Equal(t, "class", counter.Kind)
+
+	// No symbol should appear as BOTH L1-method and L2-field (duplicate guard).
+	// extractFields skips children whose start bytes match existing L1 symbols.
+	l1Methods := map[string]bool{}
+	for _, s := range symbols {
+		if s.Level == 1 && s.Kind == kindMethod {
+			l1Methods[s.Name] = true
+		}
+	}
+	for _, s := range symbols {
+		if s.Level == 2 && s.Kind == kindField {
+			assert.False(t, l1Methods[s.Name],
+				"symbol %q should not appear as both L1-method and L2-field", s.Name)
+		}
+	}
+
+	// TSX methods inside Counter should have inferMethodParents set parent.
+	var increment *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "increment" && symbols[i].Kind == kindMethod {
+			increment = &symbols[i]
+			break
+		}
+	}
+	if increment != nil {
+		assert.Equal(t, "Counter", increment.Parent,
+			"TSX class methods should have parent set by inferMethodParents")
+	}
+}
+
+func TestExtractSymbols_TsxDepth1(t *testing.T) {
+	source, err := os.ReadFile("../../testdata/src/example.tsx")
+	require.NoError(t, err)
+
+	symbols, err := ExtractSymbols("example.tsx", source, 1)
+	require.NoError(t, err)
+
+	for _, s := range symbols {
+		assert.Equal(t, 1, s.Level, "depth=1 should only return level-1 symbols for TSX")
+	}
 }
 
 func TestExtractSymbols_Java(t *testing.T) {
@@ -200,6 +251,25 @@ func TestExtractSymbols_Java(t *testing.T) {
 	dog := findSymbol(symbols, "Dog")
 	require.NotNil(t, dog)
 	assert.Equal(t, "class", dog.Kind)
+
+	// Java methods should have parent set by inferMethodParents (byte-range containment).
+	// Find the speak method belonging to Dog (not the one in Animal interface).
+	var dogSpeak *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "speak" && symbols[i].Kind == "method" && symbols[i].Parent == "Dog" {
+			dogSpeak = &symbols[i]
+			break
+		}
+	}
+	require.NotNil(t, dogSpeak, "speak method inside Dog should have parent=\"Dog\" from inferMethodParents")
+}
+
+func TestNormalizeKind_Default(t *testing.T) {
+	// Unknown kind strings fall through to "symbol" — locks the contract so agents
+	// always see a renderable value even if a new upstream .scm capture name is added.
+	assert.Equal(t, "symbol", normalizeKind("unknown_future_kind"))
+	// kindField must round-trip through normalizeKind (was missing from switch).
+	assert.Equal(t, kindField, normalizeKind("field"))
 }
 
 func TestExtractSymbols_FallbackToResolveTagsQuery(t *testing.T) {
