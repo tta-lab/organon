@@ -3,10 +3,12 @@ package treesitter
 import (
 	"embed"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
 	"github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 
 	"github.com/tta-lab/organon/internal/id"
 	"github.com/tta-lab/organon/internal/tree"
@@ -15,7 +17,21 @@ import (
 //go:embed queries/*.scm
 var queryFS embed.FS
 
-const kindMethod = "method"
+// Symbol kind constants — must match normalizeKind output.
+const (
+	kindMethod      = "method"
+	kindFunction    = "function"
+	kindClass       = "class"
+	kindInterface   = "interface"
+	kindType        = "type"
+	kindImpl        = "impl"
+	kindModule      = "module"
+	kindConstant    = "constant"
+	kindVariable    = "variable"
+	kindMacro       = "macro"
+	kindConstructor = "constructor"
+	kindField       = "field"
+)
 
 // Symbol represents an extracted code symbol.
 type Symbol struct {
@@ -40,8 +56,11 @@ func (s Symbol) CanonicalName() string {
 }
 
 // ExtractSymbols parses a file and returns its symbols up to maxDepth.
-// Uses query-based extraction for Go, TypeScript, Python, Rust.
-// Falls back to heuristic AST walker for other languages.
+// Query resolution priority:
+// 1. Vendored upstream tags.scm (9 languages — embedded in queries/)
+// 2. ResolveTagsQuery (auto-inferred for any language with a grammar)
+// 3. Heuristic AST walker
+// Depth-2 fields use heuristic body-walker in all query-based paths.
 func ExtractSymbols(filename string, source []byte, maxDepth int) ([]Symbol, error) {
 	parsedTree, langName, err := ParseFile(filename, source)
 	if err != nil {
@@ -49,17 +68,58 @@ func ExtractSymbols(filename string, source []byte, maxDepth int) ([]Symbol, err
 	}
 	defer parsedTree.Release()
 
-	// Try query-based extraction first
+	// Tier 1: vendored tags.scm
 	queryFile := fmt.Sprintf("queries/%s.scm", langName)
-	if queryBytes, err := queryFS.ReadFile(queryFile); err == nil {
-		return extractWithQuery(parsedTree, source, string(queryBytes), maxDepth)
+	// TSX uses the same tags query as TypeScript
+	if langName == "tsx" {
+		queryFile = "queries/typescript.scm"
 	}
 
-	// Fallback: heuristic walker
+	queryStr := ""
+	if queryBytes, err := queryFS.ReadFile(queryFile); err == nil {
+		queryStr = string(queryBytes)
+	}
+
+	// Tier 2: ResolveTagsQuery (auto-inferred from grammar symbols).
+	// DetectLanguage is called a second time because ParseFile only returns langName;
+	// the entry is not threaded through. This is safe — registry is read-only after init.
+	if queryStr == "" {
+		if entry := grammars.DetectLanguage(filename); entry != nil {
+			queryStr = grammars.ResolveTagsQuery(*entry)
+		}
+		if queryStr == "" {
+			slog.Debug("no tags query found, using heuristic", "file", filename, "lang", langName)
+		}
+	}
+
+	// Use query-based extraction if we have a query
+	if queryStr != "" {
+		symbols, err := extractWithQuery(parsedTree, source, queryStr)
+		if err != nil {
+			// Query compile failed — fall through to heuristic and warn so the
+			// caller knows output is degraded (heuristic labels everything "symbol").
+			slog.Warn("query compile failed, using heuristic fallback",
+				"file", filename, "lang", langName, "err", err)
+			return extractHeuristic(parsedTree, source, maxDepth), nil
+		}
+		// Add depth-2 fields via heuristic body-walker, then infer method parents
+		// for languages without Go-style receiver syntax (Java, TypeScript, etc.).
+		if maxDepth >= 2 {
+			fields := extractFields(parsedTree, symbols)
+			symbols = append(symbols, fields...)
+			sort.Slice(symbols, func(i, j int) bool {
+				return symbols[i].StartByte < symbols[j].StartByte
+			})
+		}
+		inferMethodParents(symbols)
+		return symbols, nil
+	}
+
+	// Tier 3: heuristic walker (handles both levels)
 	return extractHeuristic(parsedTree, source, maxDepth), nil
 }
 
-func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr string, maxDepth int) ([]Symbol, error) {
+func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr string) ([]Symbol, error) {
 	lang := parsedTree.Language()
 	query, err := gotreesitter.NewQuery(queryStr, lang)
 	if err != nil {
@@ -69,72 +129,60 @@ func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr str
 	matches := query.Execute(parsedTree)
 
 	var symbols []Symbol
-	seenBytes := map[uint32]bool{} // avoid duplicates from overlapping patterns
+	seenBytes := map[uint32]bool{}
 
 	for _, match := range matches {
-		// Index captures by name (last one wins for duplicates)
 		captureMap := map[string]*gotreesitter.QueryCapture{}
 		for i := range match.Captures {
 			cap := &match.Captures[i]
 			captureMap[cap.Name] = cap
 		}
 
-		declCap, isSymbol := captureMap["symbol.decl"]
-		fieldCap, isField := captureMap["field.decl"]
-
-		if !isSymbol && !isField {
+		// Find the @definition.* capture — skip @reference.* and others
+		var defCap *gotreesitter.QueryCapture
+		var kind string
+		for capName, cap := range captureMap {
+			if strings.HasPrefix(capName, "definition.") {
+				defCap = cap
+				kind = strings.TrimPrefix(capName, "definition.")
+				break
+			}
+		}
+		if defCap == nil {
 			continue
 		}
 
-		var level int
-		var declNode *gotreesitter.Node
-		var nameCapKey string
-
-		if isSymbol {
-			level = 1
-			declNode = declCap.Node
-			nameCapKey = "symbol.name"
-		} else {
-			level = 2
-			declNode = fieldCap.Node
-			nameCapKey = "field.name"
-		}
-
-		if level > maxDepth {
-			continue
-		}
-
-		// Avoid duplicates (same start byte processed already)
-		if seenBytes[declNode.StartByte()] {
-			continue
-		}
-		seenBytes[declNode.StartByte()] = true
-
-		nameCap, ok := captureMap[nameCapKey]
+		nameCap, ok := captureMap["name"]
 		if !ok {
-			continue // var_declaration / const_declaration with no name capture
+			continue
 		}
+
+		if seenBytes[defCap.Node.StartByte()] {
+			continue
+		}
+		seenBytes[defCap.Node.StartByte()] = true
 
 		name := string(source[nameCap.Node.StartByte():nameCap.Node.EndByte()])
-		nodeType := declNode.Type(lang)
-		kind := nodeTypeToKind(nodeType, isField)
+
+		// Normalize upstream kind names to organon conventions
+		kind = normalizeKind(kind)
 
 		parent := ""
 		if kind == kindMethod {
-			parent = extractReceiverType(declNode, lang, source)
+			parent = extractReceiverType(defCap.Node, lang, source)
 		}
 
-		docStart := findDocComment(source, int(declNode.StartByte()))
+		docStart := findDocComment(source, int(defCap.Node.StartByte()))
 
 		sym := Symbol{
 			Name:      name,
 			Kind:      kind,
 			Parent:    parent,
-			StartByte: uint(declNode.StartByte()),
-			EndByte:   uint(declNode.EndByte()),
-			StartLine: int(declNode.StartPoint().Row) + 1,
-			EndLine:   int(declNode.EndPoint().Row) + 1,
-			Level:     level,
+			StartByte: uint(defCap.Node.StartByte()),
+			EndByte:   uint(defCap.Node.EndByte()),
+			StartLine: int(defCap.Node.StartPoint().Row) + 1,
+			EndLine:   int(defCap.Node.EndPoint().Row) + 1,
+			Level:     1,
 			DocStart:  docStart,
 		}
 		symbols = append(symbols, sym)
@@ -145,6 +193,38 @@ func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr str
 	})
 
 	return symbols, nil
+}
+
+// normalizeKind maps upstream tags.scm definition kinds to organon conventions.
+func normalizeKind(kind string) string {
+	switch kind {
+	case "function":
+		return kindFunction
+	case "method":
+		return kindMethod
+	case "class":
+		return kindClass
+	case "interface":
+		return kindInterface
+	case "type":
+		return kindType
+	case "impl":
+		return kindImpl
+	case "module":
+		return kindModule
+	case "constant":
+		return kindConstant
+	case "variable":
+		return kindVariable
+	case "macro":
+		return kindMacro
+	case "constructor":
+		return kindConstructor
+	case "field":
+		return kindField
+	default:
+		return "symbol"
+	}
 }
 
 func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int) []Symbol {
@@ -205,31 +285,152 @@ func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int
 	return symbols
 }
 
-// nodeTypeToKind maps a tree-sitter node type to our kind string.
-func nodeTypeToKind(nodeType string, isField bool) string {
-	if isField {
-		return "field"
+// extractFields extracts depth-2 field symbols from level-1 parent symbols.
+// Uses a heuristic body-walker: finds nodes with a "name" field inside the
+// body or field-list of each parent's root-level container node.
+// Handles both direct-root definitions (Python, Java) and nested definitions
+// like Go's type_spec inside type_declaration.
+func extractFields(parsedTree *gotreesitter.Tree, parents []Symbol) []Symbol {
+	lang := parsedTree.Language()
+	root := parsedTree.RootNode()
+	bt := gotreesitter.Bind(parsedTree)
+
+	// Build lookup from parent start byte → parent symbol name.
+	// Also build a set of L1 start bytes so we can skip adding fields that were
+	// already captured as L1 symbols (e.g. TSX class methods appear as both
+	// @definition.method at L1 and as named children of the class body).
+	parentByByte := make(map[uint]string, len(parents))
+	l1StartBytes := make(map[uint]bool, len(parents))
+	for i := range parents {
+		parentByByte[parents[i].StartByte] = parents[i].Name
+		l1StartBytes[parents[i].StartByte] = true
 	}
-	switch nodeType {
-	case "function_declaration", "function_definition", "function_item":
-		return "function"
-	case "method_declaration", "method_definition":
-		return kindMethod
-	case "type_declaration", "type_alias_declaration":
-		return "type"
-	case "class_declaration", "class_definition":
-		return "class"
-	case "interface_declaration", "interface_declaration_statement", "trait_item":
-		return "interface"
-	case "struct_item":
-		return "struct"
-	case "enum_item":
-		return "enum"
-	case "impl_item":
-		return "impl"
-	default:
-		return "symbol"
+
+	var fields []Symbol
+
+	for i := 0; i < root.NamedChildCount(); i++ {
+		child := root.NamedChild(i)
+		childStart := uint(child.StartByte())
+		childEnd := uint(child.EndByte())
+
+		// Exact start byte match (definition IS the root child)
+		parentName, found := parentByByte[childStart]
+		if !found {
+			// Containment match: definition is nested inside root child
+			// (e.g. Go's type_spec nested inside type_declaration)
+			for _, p := range parents {
+				if p.StartByte > childStart && p.StartByte < childEnd {
+					parentName = p.Name
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			continue
+		}
+
+		// Find the member container (body or field-list) within the root child
+		container := findMemberContainer(child, lang)
+		if container == nil {
+			continue
+		}
+
+		for j := 0; j < container.NamedChildCount(); j++ {
+			field := container.NamedChild(j)
+			fieldStart := uint(field.StartByte())
+			// Skip symbols already captured as L1 (e.g. TSX class methods)
+			if l1StartBytes[fieldStart] {
+				continue
+			}
+			fieldName := field.ChildByFieldName("name", lang)
+			if fieldName == nil {
+				continue
+			}
+			fields = append(fields, Symbol{
+				Name:      bt.NodeText(fieldName),
+				Kind:      kindField,
+				Parent:    parentName,
+				Level:     2,
+				StartByte: fieldStart,
+				EndByte:   uint(field.EndByte()),
+				StartLine: int(field.StartPoint().Row) + 1,
+				EndLine:   int(field.EndPoint().Row) + 1,
+				DocStart:  -1,
+			})
+		}
 	}
+
+	return fields
+}
+
+// inferMethodParents sets Parent on method symbols that lack one by finding the
+// class or interface that contains them (by byte range). This handles languages
+// without Go-style receiver syntax (Java, TypeScript, C++ member functions).
+func inferMethodParents(symbols []Symbol) {
+	for i := range symbols {
+		if symbols[i].Kind != kindMethod || symbols[i].Parent != "" {
+			continue
+		}
+		ms, me := symbols[i].StartByte, symbols[i].EndByte
+		for _, container := range symbols {
+			if (container.Kind == kindClass || container.Kind == kindInterface) &&
+				ms > container.StartByte && me <= container.EndByte {
+				symbols[i].Parent = container.Name
+				break
+			}
+		}
+	}
+}
+
+// findMemberContainer locates the body or field-list node within a definition node.
+// Searches up to 4 levels deep to handle nested structures (e.g. Go's
+// type_declaration → type_spec → struct_type → field_declaration_list).
+// Returns the container node whose named children have "name" fields, or nil.
+func findMemberContainer(node *gotreesitter.Node, lang *gotreesitter.Language) *gotreesitter.Node {
+	return findMemberContainerDepth(node, lang, 0)
+}
+
+// maxMemberContainerDepth is the maximum AST levels searched for a body/field-list.
+// Go's deepest path is 3 levels: type_declaration → type_spec → struct_type → field_declaration_list.
+// 4 provides one level of headroom for template-heavy or unusual grammars.
+const maxMemberContainerDepth = 4
+
+func findMemberContainerDepth(node *gotreesitter.Node, lang *gotreesitter.Language, depth int) *gotreesitter.Node {
+	if depth > maxMemberContainerDepth {
+		slog.Debug("findMemberContainer: depth limit exceeded, fields may be missing",
+			"nodeType", node.Type(lang), "depth", depth)
+		return nil
+	}
+	// Standard body field (Python class_definition, Go function_declaration, Java class_declaration)
+	if body := node.ChildByFieldName("body", lang); body != nil {
+		return body
+	}
+	// No body field — search named children for a container whose children have "name" fields.
+	// This handles Go struct_type → field_declaration_list (no "body" field name).
+	for i := 0; i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if hasNamedMembers(child, lang) {
+			return child
+		}
+		if result := findMemberContainerDepth(child, lang, depth+1); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
+// hasNamedMembers reports whether node's named children each have a "name" field.
+func hasNamedMembers(node *gotreesitter.Node, lang *gotreesitter.Language) bool {
+	if node.NamedChildCount() == 0 {
+		return false
+	}
+	for i := 0; i < node.NamedChildCount(); i++ {
+		if node.NamedChild(i).ChildByFieldName("name", lang) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // extractReceiverType extracts the receiver type name from a method_declaration node.
@@ -328,23 +529,33 @@ func SymbolTree(symbols []Symbol) []tree.Node {
 // formatSymbolLabel produces a human-readable label for tree display.
 func formatSymbolLabel(s Symbol) string {
 	switch s.Kind {
-	case "function":
+	case kindFunction:
 		return fmt.Sprintf("func %s()", s.Name)
 	case kindMethod:
 		if s.Parent != "" {
 			return fmt.Sprintf("func (%s) %s()", s.Parent, s.Name)
 		}
 		return fmt.Sprintf("func %s()", s.Name)
-	case "type", "struct", "enum":
+	case kindType, "struct", "enum":
 		return fmt.Sprintf("type %s", s.Name)
-	case "class":
+	case kindClass:
 		return fmt.Sprintf("class %s", s.Name)
-	case "interface":
+	case kindInterface:
 		return fmt.Sprintf("interface %s", s.Name)
-	case "impl":
+	case kindImpl:
 		return fmt.Sprintf("impl %s", s.Name)
-	case "field":
+	case kindField:
 		return s.Name
+	case kindModule:
+		return fmt.Sprintf("module %s", s.Name)
+	case kindMacro:
+		return fmt.Sprintf("macro %s", s.Name)
+	case kindConstructor:
+		return fmt.Sprintf("constructor %s()", s.Name)
+	case kindConstant:
+		return fmt.Sprintf("const %s", s.Name)
+	case kindVariable:
+		return fmt.Sprintf("var %s", s.Name)
 	default:
 		return s.Name
 	}

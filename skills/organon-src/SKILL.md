@@ -7,7 +7,7 @@ description: Use src to read and edit source files with symbol-aware navigation.
 
 Use `src` to read code and markdown files without loading the entire file. Scan the symbol tree, then read or mutate specific symbols by ID.
 
-Supported languages: Go, Rust, TypeScript, Python, Markdown (.md, .markdown, .mdx).
+Supported languages: Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and many others via auto-inference. Markdown (.md, .markdown, .mdx) uses heading-based sections.
 
 ## Two-Step Pattern
 
