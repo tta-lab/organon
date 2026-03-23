@@ -1,14 +1,16 @@
-;; Top-level function definitions
-(module
-    (function_definition
-        name: (identifier) @symbol.name) @symbol.decl)
+;; Vendored from tree-sitter-python tags.scm
 
-;; Class definitions
-(class_definition
-    name: (identifier) @symbol.name) @symbol.decl
+(module (expression_statement (assignment left: (identifier) @name) @definition.constant))
 
-;; Class methods (depth 2)
 (class_definition
-    body: (block
-        (function_definition
-            name: (identifier) @field.name) @field.decl))
+  name: (identifier) @name) @definition.class
+
+(function_definition
+  name: (identifier) @name) @definition.function
+
+(call
+  function: [
+      (identifier) @name
+      (attribute
+        attribute: (identifier) @name)
+  ]) @reference.call

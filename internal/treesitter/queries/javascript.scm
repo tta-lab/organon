@@ -1,8 +1,4 @@
-;; Vendored from tree-sitter-javascript + tree-sitter-typescript tags.scm
-;; (doc/predicate blocks stripped, combined for standalone use)
-;; Covers both TypeScript (.ts) and TSX (.tsx)
-
-;; JavaScript base patterns
+;; Vendored from tree-sitter-javascript tags.scm (doc/predicate blocks stripped)
 
 (method_definition
   name: (property_identifier) @name) @definition.method
@@ -58,35 +54,3 @@
 
 (new_expression
   constructor: (_) @name) @reference.class
-
-;; TypeScript-specific patterns
-
-(function_signature
-  name: (identifier) @name) @definition.function
-
-(method_signature
-  name: (property_identifier) @name) @definition.method
-
-(abstract_method_signature
-  name: (property_identifier) @name) @definition.method
-
-(abstract_class_declaration
-  name: (type_identifier) @name) @definition.class
-
-(module
-  name: (identifier) @name) @definition.module
-
-(interface_declaration
-  name: (type_identifier) @name) @definition.interface
-
-(type_alias_declaration
-  name: (type_identifier) @name) @definition.type
-
-(enum_declaration
-  name: (identifier) @name) @definition.type
-
-(type_annotation
-  (type_identifier) @name) @reference.type
-
-(new_expression
-  constructor: (identifier) @name) @reference.class

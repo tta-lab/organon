@@ -1,21 +1,18 @@
-;; Top-level function declarations
+;; Vendored from tree-sitter-go tags.scm (doc/predicate blocks stripped)
+
 (function_declaration
-    name: (identifier) @symbol.name) @symbol.decl
+  name: (identifier) @name) @definition.function
 
-;; Method declarations
 (method_declaration
-    receiver: (parameter_list) @symbol.receiver
-    name: (field_identifier) @symbol.name) @symbol.decl
+  name: (field_identifier) @name) @definition.method
 
-;; Type declarations (struct, interface, alias)
-(type_declaration
-    (type_spec
-        name: (type_identifier) @symbol.name)) @symbol.decl
+(call_expression
+  function: [
+    (identifier) @name
+    (parenthesized_expression (identifier) @name)
+    (selector_expression field: (field_identifier) @name)
+    (parenthesized_expression (selector_expression field: (field_identifier) @name))
+  ]) @reference.call
 
-;; Struct fields (depth 2)
-(field_declaration
-    name: (field_identifier) @field.name) @field.decl
-
-;; Package-level vars and consts
-(var_declaration) @symbol.decl
-(const_declaration) @symbol.decl
+(type_spec
+  name: (type_identifier) @name) @definition.type
