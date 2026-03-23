@@ -19,8 +19,8 @@ web "latest release of cobra cli" -n 5
 
 ```bash
 web <query>                   # search (10 results by default)
-web <query> -n 5              # limit to 5 results
-web <query> --max 20          # up to 20 results (hard max)
+web <query> -n 5              # -n / --max: same flag, limit results (default: 10, max: 20)
+web <query> --max 20          # long form of -n
 ```
 
 ## Backends
