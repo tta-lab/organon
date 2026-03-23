@@ -21,7 +21,7 @@ type SearchResult struct {
 }
 
 // Search performs a web search using the best available backend.
-// Backend selection: BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
+// Backend selection: TAVILY_API_KEY → Tavily, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
 func Search(ctx context.Context, query string, maxResults int) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
@@ -39,9 +39,18 @@ func Search(ctx context.Context, query string, maxResults int) (string, error) {
 }
 
 // resolveSearcher returns the best available search backend.
-// Returns an error if BRAVE_API_KEY is set but empty — this prevents silently
-// falling back to DuckDuckGo when a user has misconfigured their Brave key.
+// Priority: TAVILY_API_KEY → BRAVE_API_KEY → DuckDuckGo Lite.
+// Returns an error if a key env var is set but empty — this prevents silently
+// falling back when a user has misconfigured their key.
 func resolveSearcher() (WebSearcher, error) {
+	tavilyKey, tavilySet := os.LookupEnv("TAVILY_API_KEY")
+	if tavilySet && tavilyKey == "" {
+		return nil, fmt.Errorf("TAVILY_API_KEY is set but empty; provide a valid key or unset it to fall back to other backends")
+	}
+	if tavilyKey != "" {
+		return NewTavilySearcher(tavilyKey), nil
+	}
+
 	key, set := os.LookupEnv("BRAVE_API_KEY")
 	if set && key == "" {
 		return nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it to use DuckDuckGo")
