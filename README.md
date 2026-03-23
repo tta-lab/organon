@@ -41,7 +41,7 @@ EOF
 src delete main.go -s c3                # delete a symbol
 ```
 
-Supports any language with a tree-sitter grammar: Go, TypeScript, Rust, Python, TOML, YAML, JSON, Markdown, and many more. Language is detected from file extension.
+Supports symbol-aware extraction for Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and many more via auto-inference. Language is detected from file extension. Markdown uses heading-based sections.
 
 ### `url` — Web pages
 

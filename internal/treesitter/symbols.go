@@ -16,7 +16,21 @@ import (
 //go:embed queries/*.scm
 var queryFS embed.FS
 
-const kindMethod = "method"
+// Symbol kind constants — must match normalizeKind output.
+const (
+	kindMethod      = "method"
+	kindFunction    = "function"
+	kindClass       = "class"
+	kindInterface   = "interface"
+	kindType        = "type"
+	kindImpl        = "impl"
+	kindModule      = "module"
+	kindConstant    = "constant"
+	kindVariable    = "variable"
+	kindMacro       = "macro"
+	kindConstructor = "constructor"
+	kindField       = "field"
+)
 
 // Symbol represents an extracted code symbol.
 type Symbol struct {
@@ -76,14 +90,14 @@ func ExtractSymbols(filename string, source []byte, maxDepth int) ([]Symbol, err
 
 	// Use query-based extraction if we have a query
 	if queryStr != "" {
-		symbols, err := extractWithQuery(parsedTree, source, queryStr, maxDepth)
+		symbols, err := extractWithQuery(parsedTree, source, queryStr)
 		if err != nil {
 			// Query compile failed — fall through to heuristic
 			return extractHeuristic(parsedTree, source, maxDepth), nil
 		}
 		// Add depth-2 fields via heuristic body-walker
 		if maxDepth >= 2 {
-			fields := extractFields(parsedTree, source, symbols)
+			fields := extractFields(parsedTree, symbols)
 			symbols = append(symbols, fields...)
 			sort.Slice(symbols, func(i, j int) bool {
 				return symbols[i].StartByte < symbols[j].StartByte
@@ -96,7 +110,7 @@ func ExtractSymbols(filename string, source []byte, maxDepth int) ([]Symbol, err
 	return extractHeuristic(parsedTree, source, maxDepth), nil
 }
 
-func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr string, maxDepth int) ([]Symbol, error) {
+func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr string) ([]Symbol, error) {
 	lang := parsedTree.Language()
 	query, err := gotreesitter.NewQuery(queryStr, lang)
 	if err != nil {
@@ -176,27 +190,27 @@ func extractWithQuery(parsedTree *gotreesitter.Tree, source []byte, queryStr str
 func normalizeKind(kind string) string {
 	switch kind {
 	case "function":
-		return "function"
+		return kindFunction
 	case "method":
 		return kindMethod
 	case "class":
-		return "class"
+		return kindClass
 	case "interface":
-		return "interface"
+		return kindInterface
 	case "type":
-		return "type"
+		return kindType
 	case "impl":
-		return "impl"
+		return kindImpl
 	case "module":
-		return "module"
+		return kindModule
 	case "constant":
-		return "constant"
+		return kindConstant
 	case "variable":
-		return "variable"
+		return kindVariable
 	case "macro":
-		return "macro"
+		return kindMacro
 	case "constructor":
-		return "constructor"
+		return kindConstructor
 	default:
 		return "symbol"
 	}
@@ -265,7 +279,7 @@ func extractHeuristic(parsedTree *gotreesitter.Tree, source []byte, maxDepth int
 // body or field-list of each parent's root-level container node.
 // Handles both direct-root definitions (Python, Java) and nested definitions
 // like Go's type_spec inside type_declaration.
-func extractFields(parsedTree *gotreesitter.Tree, source []byte, parents []Symbol) []Symbol {
+func extractFields(parsedTree *gotreesitter.Tree, parents []Symbol) []Symbol {
 	lang := parsedTree.Language()
 	root := parsedTree.RootNode()
 	bt := gotreesitter.Bind(parsedTree)
@@ -468,32 +482,32 @@ func SymbolTree(symbols []Symbol) []tree.Node {
 // formatSymbolLabel produces a human-readable label for tree display.
 func formatSymbolLabel(s Symbol) string {
 	switch s.Kind {
-	case "function":
+	case kindFunction:
 		return fmt.Sprintf("func %s()", s.Name)
 	case kindMethod:
 		if s.Parent != "" {
 			return fmt.Sprintf("func (%s) %s()", s.Parent, s.Name)
 		}
 		return fmt.Sprintf("func %s()", s.Name)
-	case "type", "struct", "enum":
+	case kindType, "struct", "enum":
 		return fmt.Sprintf("type %s", s.Name)
-	case "class":
+	case kindClass:
 		return fmt.Sprintf("class %s", s.Name)
-	case "interface":
+	case kindInterface:
 		return fmt.Sprintf("interface %s", s.Name)
-	case "impl":
+	case kindImpl:
 		return fmt.Sprintf("impl %s", s.Name)
-	case "field":
+	case kindField:
 		return s.Name
-	case "module":
+	case kindModule:
 		return fmt.Sprintf("module %s", s.Name)
-	case "macro":
+	case kindMacro:
 		return fmt.Sprintf("macro %s", s.Name)
-	case "constructor":
+	case kindConstructor:
 		return fmt.Sprintf("constructor %s()", s.Name)
-	case "constant":
+	case kindConstant:
 		return fmt.Sprintf("const %s", s.Name)
-	case "variable":
+	case kindVariable:
 		return fmt.Sprintf("var %s", s.Name)
 	default:
 		return s.Name
