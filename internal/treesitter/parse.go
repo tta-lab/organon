@@ -31,8 +31,15 @@ func ParseFile(filename string, source []byte) (tree *gotreesitter.Tree, langNam
 	}()
 
 	parser := gotreesitter.NewParser(lang)
-	ts := entry.TokenSourceFactory(source, lang)
-	tree, err = parser.ParseWithTokenSource(source, ts)
+	// When a grammar has no registered token source factory (e.g. TypeScript, TSX),
+	// fall back to the DFA lexer via Parse(). This handles the majority of syntax
+	// without the external scanner (template literals etc. may parse as errors).
+	if entry.TokenSourceFactory != nil {
+		ts := entry.TokenSourceFactory(source, lang)
+		tree, err = parser.ParseWithTokenSource(source, ts)
+	} else {
+		tree, err = parser.Parse(source)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", filename, err)
 	}

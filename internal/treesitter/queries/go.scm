@@ -1,4 +1,6 @@
 ;; Vendored from tree-sitter-go tags.scm (doc/predicate blocks stripped)
+;; Note: type_declaration used instead of type_spec so StartByte points to
+;; the `type` keyword — required for correct comment-write and symbol range.
 
 (function_declaration
   name: (identifier) @name) @definition.function
@@ -14,5 +16,5 @@
     (parenthesized_expression (selector_expression field: (field_identifier) @name))
   ]) @reference.call
 
-(type_spec
-  name: (type_identifier) @name) @definition.type
+(type_declaration
+  (type_spec name: (type_identifier) @name)) @definition.type
