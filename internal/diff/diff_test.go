@@ -9,6 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// knownTools lists tools the detection loop recognises, in priority order.
+var knownTools = []string{"delta", "diff-so-fancy", "colordiff", "diff"}
+
 func TestShow_IdenticalContent_NoOutput(t *testing.T) {
 	content := []byte("func main() {}\n")
 	var buf bytes.Buffer
@@ -41,7 +44,11 @@ func TestDetectTool_FindsSomething(t *testing.T) {
 	assert.NotEmpty(t, toolName, "should detect at least plain diff")
 	assert.NotEmpty(t, toolPath, "should have a path for the detected tool")
 
-	// Verify the tool actually exists
-	_, err := exec.LookPath(toolPath)
+	// toolName must be one of the recognised tools.
+	assert.Contains(t, knownTools, toolName, "detected tool should be in the known list")
+
+	// toolPath must point to an executable file.
+	info, err := exec.LookPath(toolName)
 	require.NoError(t, err)
+	assert.Equal(t, toolPath, info, "toolPath should match LookPath result for toolName")
 }
