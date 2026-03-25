@@ -49,7 +49,7 @@ func Show(w io.Writer, old, new []byte, filename string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	oldFile := filepath.Join(dir, "before"+ext)
 	newFile := filepath.Join(dir, "after"+ext)
