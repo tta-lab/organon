@@ -78,7 +78,12 @@ func runDelta(w io.Writer, oldFile, newFile string) error {
 	cmd := exec.Command(toolPath, "--paging=never", oldFile, newFile)
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	err := cmd.Run()
+	// delta (like diff) returns exit 1 when files differ
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return nil
+	}
+	return err
 }
 
 // runDiffSoFancy runs: diff -u before after | diff-so-fancy

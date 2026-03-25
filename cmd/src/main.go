@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/diff"
 	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/srcop"
 	"github.com/tta-lab/organon/internal/tree"
@@ -149,10 +150,7 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filename, result, 0o644); err != nil {
-			return err
-		}
-		return printMarkdownTree(filename, result)
+		return writeAndShow(filename, source, result, depth)
 	}
 
 	result, err := srcop.Replace(filename, source, symbolID, newContent, depth)
@@ -160,11 +158,7 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := os.WriteFile(filename, result, 0o644); err != nil {
-		return err
-	}
-
-	return printTree(filename, result, depth)
+	return writeAndShow(filename, source, result, depth)
 }
 
 func runInsert(cmd *cobra.Command, args []string) error {
@@ -197,10 +191,7 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filename, result, 0o644); err != nil {
-			return err
-		}
-		return printMarkdownTree(filename, result)
+		return writeAndShow(filename, source, result, depth)
 	}
 
 	var result []byte
@@ -213,11 +204,7 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := os.WriteFile(filename, result, 0o644); err != nil {
-		return err
-	}
-
-	return printTree(filename, result, depth)
+	return writeAndShow(filename, source, result, depth)
 }
 
 func runDelete(cmd *cobra.Command, args []string) error {
@@ -235,10 +222,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filename, result, 0o644); err != nil {
-			return err
-		}
-		return printMarkdownTree(filename, result)
+		return writeAndShow(filename, source, result, depth)
 	}
 
 	result, err := srcop.Delete(filename, source, symbolID, depth)
@@ -246,11 +230,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := os.WriteFile(filename, result, 0o644); err != nil {
-		return err
-	}
-
-	return printTree(filename, result, depth)
+	return writeAndShow(filename, source, result, depth)
 }
 
 func runComment(cmd *cobra.Command, args []string) error {
@@ -287,10 +267,21 @@ func runComment(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	return writeAndShow(filename, source, result, depth)
+}
+
+// writeAndShow writes the result to disk, prints a colored diff of old→new,
+// then prints the updated symbol tree.
+func writeAndShow(filename string, source, result []byte, depth int) error {
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
 	}
-
+	if err := diff.Show(os.Stdout, source, result, filename); err != nil {
+		return err
+	}
+	if isMarkdown(filename) {
+		return printMarkdownTree(filename, result)
+	}
 	return printTree(filename, result, depth)
 }
 
