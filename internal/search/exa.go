@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -129,14 +130,7 @@ func firstHighlight(r exaResult) string {
 		if r.Author != "" {
 			parts = append(parts, "by "+r.Author)
 		}
-		result := ""
-		for i, p := range parts {
-			if i > 0 {
-				result += " "
-			}
-			result += p
-		}
-		return result
+		return strings.Join(parts, " ")
 	}
 	slog.Warn("exa_search result has no highlights or metadata", "url", r.URL)
 	return ""

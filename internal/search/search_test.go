@@ -137,12 +137,8 @@ func TestResolveSearcher_ExaPriorityOverBrave(t *testing.T) {
 }
 
 func TestResolveSearcher_WithBraveKey(t *testing.T) {
-	t.Setenv("EXA_API_KEY", "")
+	unsetEnv(t, "EXA_API_KEY")
 	t.Setenv("BRAVE_API_KEY", "my-key-123")
-	// Unset EXA_API_KEY completely so it doesn't interfere
-	// t.Setenv sets it to empty; resolveSearcher errors on empty EXA key.
-	// Use os.Unsetenv to truly clear it.
-	os.Unsetenv("EXA_API_KEY") //nolint:errcheck
 	searcher, err := resolveSearcher()
 	require.NoError(t, err)
 	_, ok := searcher.(*BraveSearcher)
@@ -150,12 +146,27 @@ func TestResolveSearcher_WithBraveKey(t *testing.T) {
 }
 
 func TestResolveSearcher_NoKey(t *testing.T) {
-	t.Setenv("BRAVE_API_KEY", "")
+	unsetEnv(t, "EXA_API_KEY")
+	unsetEnv(t, "BRAVE_API_KEY")
 	searcher, err := resolveSearcher()
-	if err == nil {
-		// DDG fallback
-		assert.NotNil(t, searcher)
-	}
+	require.NoError(t, err)
+	_, ok := searcher.(*DDGSearcher)
+	assert.True(t, ok, "expected DDGSearcher when no API keys are set")
+}
+
+// unsetEnv removes an env var for the duration of the test, restoring the
+// original value (or absence) via t.Cleanup.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	orig, wasSet := os.LookupEnv(key)
+	os.Unsetenv(key) //nolint:errcheck
+	t.Cleanup(func() {
+		if wasSet {
+			os.Setenv(key, orig) //nolint:errcheck
+		} else {
+			os.Unsetenv(key) //nolint:errcheck
+		}
+	})
 }
 
 func TestCleanDuckDuckGoURL_Redirect(t *testing.T) {
