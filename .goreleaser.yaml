@@ -18,18 +18,6 @@ builds:
       - amd64
       - arm64
 
-  - id: url
-    binary: url
-    main: ./cmd/url
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-
   - id: web
     binary: web
     main: ./cmd/web
@@ -51,7 +39,6 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     builds:
       - src
-      - url
       - web
 
 checksum:
@@ -77,11 +64,9 @@ brews:
     license: "Apache-2.0"
     install: |
       bin.install "src"
-      bin.install "url"
       bin.install "web"
     test: |
       system "#{bin}/src", "--help"
-      system "#{bin}/url", "--help"
       system "#{bin}/web", "--help"
     repository:
       owner: tta-lab
