@@ -56,11 +56,11 @@ func NewDDGSearcher() *DDGSearcher {
 	}
 }
 
-func (s *DDGSearcher) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+func (s *DDGSearcher) Search(ctx context.Context, query string) ([]SearchResult, error) {
 	if err := maybeDelaySearch(ctx); err != nil {
 		return nil, fmt.Errorf("search cancelled: %w", err)
 	}
-	return searchDuckDuckGo(ctx, s.client, query, maxResults)
+	return searchDuckDuckGo(ctx, s.client, query, 10)
 }
 
 func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {

@@ -32,9 +32,9 @@ func NewBraveSearcher(apiKey string) *BraveSearcher {
 	}
 }
 
-func (s *BraveSearcher) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
-	u := fmt.Sprintf("%s/web/search?q=%s&count=%d",
-		s.baseURL, url.QueryEscape(query), maxResults)
+func (s *BraveSearcher) Search(ctx context.Context, query string) ([]SearchResult, error) {
+	u := fmt.Sprintf("%s/web/search?q=%s&count=10",
+		s.baseURL, url.QueryEscape(query))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

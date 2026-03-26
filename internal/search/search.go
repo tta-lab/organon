@@ -9,7 +9,7 @@ import (
 
 // WebSearcher performs web searches and returns structured results.
 type WebSearcher interface {
-	Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error)
+	Search(ctx context.Context, query string) ([]SearchResult, error)
 }
 
 // SearchResult represents a single search result.
@@ -21,8 +21,8 @@ type SearchResult struct {
 }
 
 // Search performs a web search using the best available backend.
-// Backend selection: BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
-func Search(ctx context.Context, query string, maxResults int) (string, error) {
+// Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
+func Search(ctx context.Context, query string) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
@@ -31,7 +31,7 @@ func Search(ctx context.Context, query string, maxResults int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	results, err := searcher.Search(ctx, query, normalizeMaxResults(maxResults))
+	results, err := searcher.Search(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("search failed: %w", err)
 	}
@@ -39,28 +39,27 @@ func Search(ctx context.Context, query string, maxResults int) (string, error) {
 }
 
 // resolveSearcher returns the best available search backend.
-// Returns an error if BRAVE_API_KEY is set but empty — this prevents silently
-// falling back to DuckDuckGo when a user has misconfigured their Brave key.
+// Priority: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, fallback → DDG.
+// Returns an error if a key is set but empty — this prevents silently
+// falling back when a user has misconfigured their API key.
 func resolveSearcher() (WebSearcher, error) {
-	key, set := os.LookupEnv("BRAVE_API_KEY")
-	if set && key == "" {
+	exaKey, exaSet := os.LookupEnv("EXA_API_KEY")
+	if exaSet && exaKey == "" {
+		return nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave/DuckDuckGo")
+	}
+	if exaKey != "" {
+		return NewExaSearcher(exaKey), nil
+	}
+
+	braveKey, braveSet := os.LookupEnv("BRAVE_API_KEY")
+	if braveSet && braveKey == "" {
 		return nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it to use DuckDuckGo")
 	}
-	if key != "" {
-		return NewBraveSearcher(key), nil
+	if braveKey != "" {
+		return NewBraveSearcher(braveKey), nil
 	}
-	return NewDDGSearcher(), nil
-}
 
-// normalizeMaxResults clamps maxResults to [1, 20].
-func normalizeMaxResults(n int) int {
-	if n <= 0 {
-		return 10
-	}
-	if n > 20 {
-		return 20
-	}
-	return n
+	return NewDDGSearcher(), nil
 }
 
 func formatSearchResults(results []SearchResult) string {

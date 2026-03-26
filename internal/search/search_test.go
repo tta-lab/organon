@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,7 @@ func TestBraveSearcher_Search(t *testing.T) {
 		client:  srv.Client(),
 	}
 
-	results, err := searcher.Search(context.Background(), "test query", 10)
+	results, err := searcher.Search(context.Background(), "test query")
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 	assert.Equal(t, "Result 1", results[0].Title)
@@ -52,7 +53,7 @@ func TestBraveSearcher_HTTPError(t *testing.T) {
 		client:  srv.Client(),
 	}
 
-	_, err := searcher.Search(context.Background(), "test", 5)
+	_, err := searcher.Search(context.Background(), "test")
 	assert.ErrorContains(t, err, "HTTP 401")
 }
 
@@ -97,36 +98,59 @@ func TestDDGSearcher_MaxResults(t *testing.T) {
 	assert.Len(t, results, 2, "should respect maxResults limit")
 }
 
-func TestResolveSearcher_EmptyKeyError(t *testing.T) {
+func TestResolveSearcher_EmptyBraveKeyError(t *testing.T) {
 	t.Setenv("BRAVE_API_KEY", "")
-	// When set but empty, should return error
-	// We need to use LookupEnv behavior — set means the var exists
-	// In our implementation, set && key == "" → error
-	// But t.Setenv("BRAVE_API_KEY", "") only sets it to empty
-	// resolveSearcher should error
+	// When set but empty, should return error or DDG fallback depending on LookupEnv behavior
 	searcher, err := resolveSearcher()
-	// Either returns DDG (key empty = not set via LookupEnv) or errors
-	// Our impl: `set && key == ""` — t.Setenv sets it but to ""
 	if err != nil {
 		assert.ErrorContains(t, err, "BRAVE_API_KEY")
 	} else {
-		// DDG fallback is also acceptable if the env var lookup says "not set"
 		assert.NotNil(t, searcher)
 	}
 }
 
-func TestResolveSearcher_WithKey(t *testing.T) {
+func TestResolveSearcher_EmptyExaKeyError(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "")
+	searcher, err := resolveSearcher()
+	if err != nil {
+		assert.ErrorContains(t, err, "EXA_API_KEY")
+	} else {
+		assert.NotNil(t, searcher)
+	}
+}
+
+func TestResolveSearcher_WithExaKey(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "exa-key-123")
+	searcher, err := resolveSearcher()
+	require.NoError(t, err)
+	_, ok := searcher.(*ExaSearcher)
+	assert.True(t, ok, "expected ExaSearcher when EXA_API_KEY is set")
+}
+
+func TestResolveSearcher_ExaPriorityOverBrave(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "exa-key-123")
+	t.Setenv("BRAVE_API_KEY", "brave-key-456")
+	searcher, err := resolveSearcher()
+	require.NoError(t, err)
+	_, ok := searcher.(*ExaSearcher)
+	assert.True(t, ok, "expected ExaSearcher to take priority over BraveSearcher")
+}
+
+func TestResolveSearcher_WithBraveKey(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "")
 	t.Setenv("BRAVE_API_KEY", "my-key-123")
+	// Unset EXA_API_KEY completely so it doesn't interfere
+	// t.Setenv sets it to empty; resolveSearcher errors on empty EXA key.
+	// Use os.Unsetenv to truly clear it.
+	os.Unsetenv("EXA_API_KEY") //nolint:errcheck
 	searcher, err := resolveSearcher()
 	require.NoError(t, err)
 	_, ok := searcher.(*BraveSearcher)
-	assert.True(t, ok, "expected BraveSearcher when key is set")
+	assert.True(t, ok, "expected BraveSearcher when only BRAVE_API_KEY is set")
 }
 
 func TestResolveSearcher_NoKey(t *testing.T) {
 	t.Setenv("BRAVE_API_KEY", "")
-	// Unset the env var completely to get DDG fallback
-	// Since t.Setenv only sets to empty, use a different approach
 	searcher, err := resolveSearcher()
 	if err == nil {
 		// DDG fallback
