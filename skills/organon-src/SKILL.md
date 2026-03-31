@@ -1,6 +1,6 @@
 ---
 name: organon-src
-description: Use src to read and edit source files with symbol-aware navigation. Run `src <file>` for a tree, then `-s <id>` to read a symbol. Subcommands replace, insert, delete, comment modify symbols in-place.
+description: Use src to read and edit source files with symbol-aware navigation. Run `src <file>` for a tree, then `-s <id>` to read a symbol. Subcommands replace, insert, delete, comment modify symbols in-place. Use `src edit` for raw text replacement on any file type.
 ---
 
 # src — Symbol-Aware Source File Reading and Editing
@@ -98,3 +98,28 @@ src delete README.md -s 3K
 ```
 
 `--tree` and `--depth` flags are no-ops for markdown. `comment` subcommand is not supported.
+
+## edit — raw text replacement (any file type)
+
+Use `src edit` when symbol-based editing is overkill: config files, unsupported languages, or when you already know the exact text to replace.
+
+```bash
+cat <<'EDIT' | src edit <file>
+===BEFORE===
+old text here
+===AFTER===
+new text here
+EDIT
+```
+
+**When to use `edit` vs `replace -s`:**
+- `replace -s <id>` — use for code symbols in supported languages (Go, Python, etc.). Precise, no text matching needed.
+- `edit` — use for config files, unsupported file types, or when you want to replace a specific text fragment rather than a whole symbol.
+
+**Matching strategy (4 passes, in order):**
+1. Exact byte match
+2. Trailing whitespace trimmed
+3. Full whitespace trimmed (catches indentation drift)
+4. Unicode folding (curly quotes → straight, em dashes → hyphen, etc.)
+
+Single edit per invocation. Use multiple `src edit` calls for multiple replacements.
