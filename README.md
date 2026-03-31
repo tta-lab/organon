@@ -39,9 +39,17 @@ src insert main.go --after bK <<'EOF'   # insert after a symbol (stdin)
 ...
 EOF
 src delete main.go -s c3                # delete a symbol
+cat <<'EDIT' | src edit config.yaml     # text replace (===BEFORE===/===AFTER===)
+===BEFORE===
+old text
+===AFTER===
+new text
+EDIT
 ```
 
 Supports symbol-aware extraction for Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and many more via auto-inference. Language is detected from file extension. Markdown uses heading-based sections.
+
+`src edit` is a text-based escape hatch for files where symbol editing is overkill (config files, unsupported languages, quick edits). It uses exact match with whitespace normalization fallbacks and works on any text file regardless of language support.
 
 ### `url` — Web pages
 

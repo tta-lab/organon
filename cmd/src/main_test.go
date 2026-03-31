@@ -133,3 +133,135 @@ func TestMarkdownDispatch_CommentUnsupported(t *testing.T) {
 	assert.Contains(t, err.Error(), "not supported for markdown files")
 	assert.Contains(t, err.Error(), "replace -s <id>")
 }
+
+// pipeStdin replaces os.Stdin with a pipe that contains content, runs fn, then restores.
+func pipeStdin(t *testing.T, content []byte, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = w.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	old := os.Stdin
+	os.Stdin = r
+	defer func() {
+		os.Stdin = old
+		r.Close()
+	}()
+	fn()
+}
+
+// newEditCmd builds a cobra root command with the edit subcommand registered,
+// following the pattern required for getDepth (PersistentFlags on root).
+func newEditCmd() *cobra.Command {
+	root := &cobra.Command{Use: "src"}
+	root.PersistentFlags().Int("depth", 2, "")
+	edit := &cobra.Command{
+		Use:  "edit <file>",
+		Args: cobra.ExactArgs(1),
+		RunE: runEdit,
+	}
+	root.AddCommand(edit)
+	return root
+}
+
+func TestEdit_AppliesReplacement(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "example.go")
+	orig := []byte("package example\n\ntype Config struct {\n\tHost string\n\tPort int\n}\n")
+	require.NoError(t, os.WriteFile(src, orig, 0o644))
+
+	stdin := []byte("===BEFORE===\nHost string\n===AFTER===\nHost string // server hostname\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", src})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr)
+
+	result, err := os.ReadFile(src)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "Host string // server hostname")
+	assert.Contains(t, string(result), "Port int") // surrounding code intact
+}
+
+func TestEdit_InvalidDelimiters(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	orig := []byte("package example\n\nfunc Foo() {}\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	stdin := []byte("no delimiters here\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "missing ===BEFORE===")
+}
+
+func TestEdit_NoMatch(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	orig := []byte("package example\n\nfunc Foo() {}\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	stdin := []byte("===BEFORE===\nthis text does not exist in the file at all\n===AFTER===\nreplacement\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "not found")
+}
+
+func TestEdit_WorksOnMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "notes.md")
+	orig := []byte("# Notes\n\n## Overview\n\nThis is an example document.\n\n## Details\n\nSome details here.\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	stdin := []byte("===BEFORE===\nThis is an example document.\n===AFTER===\nThis is a sample document.\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "This is a sample document.")
+	assert.NotContains(t, string(result), "This is an example document.")
+}
+
+func TestEdit_WorksOnPython(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.py")
+	orig := []byte("class Config:\n    def __init__(self, host):\n        self.host = host\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	stdin := []byte("===BEFORE===\n        self.host = host\n===AFTER===\n        self.host = host.strip()\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "self.host = host.strip()")
+}

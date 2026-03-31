@@ -16,9 +16,17 @@ echo "..." | src insert <file> --before <id> # insert before symbol
 src delete <file> -s <id>                    # delete symbol
 src comment <file> -s <id> --read            # read doc comment
 echo "// doc" | src comment <file> -s <id>  # write doc comment
+cat <<'EDIT' | src edit <file>               # text replace (===BEFORE===/===AFTER===)
+===BEFORE===
+old text
+===AFTER===
+new text
+EDIT
 ```
 
 Markdown files (.md, .markdown, .mdx) use heading-based sections (not tree-sitter). `comment` not supported for markdown.
+
+`src edit` works on any text file regardless of language support — escape hatch for config files, unsupported languages, or targeted text replacement without symbol IDs.
 
 ## web
 
