@@ -195,7 +195,7 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 
 		// For normalized passes, map back to original byte range using pre-computed
 		// normSource/normOld to avoid re-normalizing inside mapNormToOrig.
-		s, e, mapErr := mapNormToOrig(source, old, normSource, normOld)
+		s, e, mapErr := mapNormToOrig(source, normSource, normOld)
 		if mapErr != nil {
 			return 0, 0, "", fmt.Errorf("internal: %s pass matched but remapping failed: %w", p.name, mapErr)
 		}
@@ -260,7 +260,7 @@ func foldUnicode(s string) string {
 // by the caller) to avoid double-normalization. It slides a window through normSource lines
 // looking for a contiguous run matching normOld lines, then maps the matched line indices
 // back to byte offsets in the original (un-normalized) source via lineOffset.
-func mapNormToOrig(source, old, normSource, normOld []byte) (start, end int, err error) {
+func mapNormToOrig(source, normSource, normOld []byte) (start, end int, err error) {
 	sourceLines := strings.Split(string(source), "\n")
 	normSourceLines := strings.Split(string(normSource), "\n")
 
@@ -272,7 +272,10 @@ func mapNormToOrig(source, old, normSource, normOld []byte) (start, end int, err
 
 	nOld := len(normOldLines)
 	if nOld == 0 {
-		return 0, 0, fmt.Errorf("internal: line-level remapping failed (old_lines=0, source_lines=%d)", len(sourceLines))
+		return 0, 0, fmt.Errorf(
+			"internal: line-level remapping failed (old_lines=0, source_lines=%d)",
+			len(sourceLines),
+		)
 	}
 
 	// Slide a window through normalized source lines to find the matching run.
@@ -289,7 +292,10 @@ outer:
 	}
 
 	if matchLine < 0 {
-		return 0, 0, fmt.Errorf("internal: line-level remapping failed (old_lines=%d, source_lines=%d)", nOld, len(sourceLines))
+		return 0, 0, fmt.Errorf(
+			"internal: line-level remapping failed (old_lines=%d, source_lines=%d)",
+			nOld, len(sourceLines),
+		)
 	}
 
 	// Compute byte offsets in original source for the matched line range.
