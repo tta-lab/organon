@@ -92,16 +92,18 @@ func TestFindMatch_TrimTrailingSpaces(t *testing.T) {
 	start, end, pass, err := findMatch(source, old, "test.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "trim-trailing", pass)
-	_ = start
-	_ = end
+	// Byte range must point into original source (with trailing spaces), not normalized.
+	assert.Equal(t, "foo bar   \n", string(source[start:end]))
 }
 
 func TestFindMatch_TrimTrailingTabs(t *testing.T) {
 	source := []byte("hello\t\nfoo bar\t\nbaz\n")
 	old := []byte("foo bar\n")
-	_, _, pass, err := findMatch(source, old, "test.txt")
+	start, end, pass, err := findMatch(source, old, "test.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "trim-trailing", pass)
+	// Byte range must point into original source (with trailing tab).
+	assert.Equal(t, "foo bar\t\n", string(source[start:end]))
 }
 
 // ---------- findMatch — trim-both pass ----------
@@ -237,4 +239,46 @@ func TestClosestRegion_PartialOverlap(t *testing.T) {
 	assert.Contains(t, region, "line two")
 	// Should include line numbers.
 	assert.Contains(t, region, ":")
+}
+
+func TestClosestRegion_EmptySource(t *testing.T) {
+	region := closestRegion([]byte{}, []byte("some text\n"))
+	assert.Contains(t, region, "empty")
+}
+
+func TestClosestRegion_SourceShorterThanOld(t *testing.T) {
+	source := []byte("one line\n")
+	old := []byte("line a\nline b\nline c\n")
+	region := closestRegion(source, old)
+	assert.Contains(t, region, "no region to show")
+}
+
+// ---------- CRLF + normalized pass ----------
+
+func TestEdit_CRLF_TrimTrailingPass(t *testing.T) {
+	// CRLF source where match requires trim-trailing (trailing spaces on lines).
+	source := []byte("line one  \r\nline two  \r\nline three\r\n")
+	// old uses no trailing spaces — needs trim-trailing pass to match
+	input := "===BEFORE===\nline two\n===AFTER===\nline TWO\n"
+	result, err := Edit("file.txt", source, []byte(input))
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "line TWO")
+	// Non-edited lines must retain CRLF endings.
+	assert.Contains(t, string(result), "line one  \r\n")
+	assert.Contains(t, string(result), "line three\r\n")
+	// The replacement line must also get CRLF.
+	assert.Contains(t, string(result), "line TWO\r\n")
+}
+
+// ---------- Empty AFTER (deletion) ----------
+
+func TestEdit_EmptyAfter_DeletesText(t *testing.T) {
+	source := []byte("line one\nline two\nline three\n")
+	// Empty AFTER section — should delete the matched text.
+	input := "===BEFORE===\nline two\n===AFTER===\n"
+	result, err := Edit("file.txt", source, []byte(input))
+	require.NoError(t, err)
+	assert.NotContains(t, string(result), "line two")
+	assert.Contains(t, string(result), "line one")
+	assert.Contains(t, string(result), "line three")
 }

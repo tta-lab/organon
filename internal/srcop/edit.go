@@ -193,14 +193,11 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 			return first, first + len(normOld), p.name, nil
 		}
 
-		// For normalized passes, map back to original byte range.
-		s, e, mapErr := mapNormToOrig(source, old, p.normalize)
+		// For normalized passes, map back to original byte range using pre-computed
+		// normSource/normOld to avoid re-normalizing inside mapNormToOrig.
+		s, e, mapErr := mapNormToOrig(source, old, normSource, normOld)
 		if mapErr != nil {
-			// Fallback: use normalized positions. For non-CRLF files, normalized positions
-			// are already correct. For CRLF files, Edit will correct them via crlfOffset.
-			// mapNormToOrig can fail if the normalization function changes content in ways
-			// that break line-by-line matching even though bytes.Index found a match.
-			return first, first + len(normOld), p.name, nil
+			return 0, 0, "", fmt.Errorf("internal: %s pass matched but remapping failed: %w", p.name, mapErr)
 		}
 		return s, e, p.name, nil
 	}
@@ -259,53 +256,48 @@ func foldUnicode(s string) string {
 }
 
 // mapNormToOrig finds the byte range in original source corresponding to a match found
-// in normalized source. It normalizes both source and old line-by-line, then slides a
-// window through the normalized source lines looking for a contiguous run that matches
-// the normalized old lines. Once found, the matched line indices are mapped back to byte
-// offsets in the original (un-normalized) source via lineOffset.
-func mapNormToOrig(source, old []byte, normalize func([]byte) []byte) (start, end int, err error) {
+// in normalized source. It accepts pre-computed normSource and normOld (already normalized
+// by the caller) to avoid double-normalization. It slides a window through normSource lines
+// looking for a contiguous run matching normOld lines, then maps the matched line indices
+// back to byte offsets in the original (un-normalized) source via lineOffset.
+func mapNormToOrig(source, old, normSource, normOld []byte) (start, end int, err error) {
 	sourceLines := strings.Split(string(source), "\n")
-	oldLines := strings.Split(string(old), "\n")
-	normOldLines := strings.Split(string(normalize(old)), "\n")
+	normSourceLines := strings.Split(string(normSource), "\n")
 
-	// Remove trailing empty element from splitting (trailing newline).
+	normOldLines := strings.Split(string(normOld), "\n")
+	// Remove trailing empty element from splitting a trailing newline.
 	if len(normOldLines) > 0 && normOldLines[len(normOldLines)-1] == "" {
 		normOldLines = normOldLines[:len(normOldLines)-1]
-	}
-	if len(oldLines) > 0 && oldLines[len(oldLines)-1] == "" {
-		oldLines = oldLines[:len(oldLines)-1]
 	}
 
 	nOld := len(normOldLines)
 	if nOld == 0 {
-		return 0, 0, fmt.Errorf("empty old after normalization")
+		return 0, 0, fmt.Errorf("internal: line-level remapping failed (old_lines=0, source_lines=%d)", len(sourceLines))
 	}
 
-	normSourceLines := strings.Split(string(normalize(source)), "\n")
-
-	// Find the matching window in normalized source.
+	// Slide a window through normalized source lines to find the matching run.
 	matchLine := -1
+outer:
 	for i := 0; i <= len(normSourceLines)-nOld; i++ {
-		match := true
 		for j := 0; j < nOld; j++ {
 			if normSourceLines[i+j] != normOldLines[j] {
-				match = false
-				break
+				continue outer
 			}
 		}
-		if match {
-			matchLine = i
-			break
-		}
+		matchLine = i
+		break
 	}
 
 	if matchLine < 0 {
-		return 0, 0, fmt.Errorf("no line match found")
+		return 0, 0, fmt.Errorf("internal: line-level remapping failed (old_lines=%d, source_lines=%d)", nOld, len(sourceLines))
 	}
 
-	// Compute byte offsets in original source for the matched lines.
+	// Compute byte offsets in original source for the matched line range.
+	// Use nOld (matched normalized line count) for the end offset — this is the
+	// number of lines we matched, and normOldLines and oldLines have the same count
+	// after trimBlankBorderLines strips trailing blanks in parseEditInput.
 	lineStart := lineOffset(sourceLines, matchLine)
-	lineEnd := lineOffset(sourceLines, matchLine+len(oldLines))
+	lineEnd := lineOffset(sourceLines, matchLine+nOld)
 
 	return lineStart, lineEnd, nil
 }
@@ -362,11 +354,19 @@ func isBinary(data []byte) bool {
 // scoring each window by how many of its lines appear in the old set. The highest-scoring
 // window is returned with 1-based line numbers and content so agents can self-correct.
 func closestRegion(source, old []byte) string {
+	if len(source) == 0 {
+		return "(source file is empty)"
+	}
+
 	sourceLines := strings.Split(string(source), "\n")
 	oldLines := strings.Split(strings.TrimRight(string(old), "\n"), "\n")
 	nOld := len(oldLines)
 	if nOld == 0 {
 		return "(empty search text)"
+	}
+
+	if len(sourceLines) < nOld {
+		return fmt.Sprintf("(source has %d lines, search text has %d — no region to show)", len(sourceLines), nOld)
 	}
 
 	// Build normalized set of old lines for comparison.
@@ -378,14 +378,9 @@ func closestRegion(source, old []byte) string {
 	bestScore := -1
 	bestStart := 0
 
-	windowSize := nOld
-	if windowSize < 1 {
-		windowSize = 1
-	}
-
-	for i := 0; i <= len(sourceLines)-windowSize; i++ {
+	for i := 0; i <= len(sourceLines)-nOld; i++ {
 		score := 0
-		for j := 0; j < windowSize; j++ {
+		for j := 0; j < nOld; j++ {
 			if oldSet[strings.TrimSpace(sourceLines[i+j])] {
 				score++
 			}
@@ -396,7 +391,7 @@ func closestRegion(source, old []byte) string {
 		}
 	}
 
-	bestEnd := bestStart + windowSize
+	bestEnd := bestStart + nOld
 	if bestEnd > len(sourceLines) {
 		bestEnd = len(sourceLines)
 	}
