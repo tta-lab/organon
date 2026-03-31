@@ -73,7 +73,14 @@ func main() {
 	commentCmd.Flags().Bool("read", false, "Read existing doc comment instead of writing")
 	_ = commentCmd.MarkFlagRequired("symbol")
 
-	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd)
+	editCmd := &cobra.Command{
+		Use:   "edit <file>",
+		Short: "Replace text using exact match (stdin: ===BEFORE===/===AFTER===)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runEdit,
+	}
+
+	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -317,4 +324,26 @@ func printTree(filename string, source []byte, depth int) error {
 	}
 	fmt.Print(tree.Render(treesitter.SymbolTree(symbols)))
 	return nil
+}
+
+func runEdit(cmd *cobra.Command, args []string) error {
+	filename := args[0]
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	stdinContent, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+
+	depth := getDepth(cmd)
+
+	result, err := srcop.Edit(filename, source, stdinContent)
+	if err != nil {
+		return err
+	}
+
+	return writeAndShow(filename, source, result, depth)
 }
