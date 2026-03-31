@@ -68,17 +68,19 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 	return result, nil
 }
 
-// crlfOffset converts a byte offset in CRLF-normalized (LF-only) content back to
-// the corresponding offset in the original CRLF content by counting \r bytes before pos.
+// crlfOffset converts a byte offset in normalized (LF-only) source to the corresponding
+// offset in the original CRLF source. It walks the original counting LF-equivalent positions:
+// each \r\n pair is treated as one line terminator (like \n in normalized form).
+// The returned offset accounts for the additional \r bytes.
 func crlfOffset(original []byte, pos int) int {
-	// Walk through original counting LF-only positions.
-	// Each \r\n in original corresponds to one \n in normalized.
 	offset := 0
 	lf := 0
 	for i := 0; i < len(original) && lf < pos; i++ {
 		if original[i] == '\r' && i+1 < len(original) && original[i+1] == '\n' {
 			offset++
-			i++ // skip \n in the pair — it will be counted in the next iteration
+			// i++ moves from \r position to \n position; the loop's automatic i++
+			// then moves past \n entirely. The \r\n pair counts as one line terminator.
+			i++
 			lf++
 		} else {
 			lf++
@@ -146,8 +148,18 @@ func trimBlankBorderLines(lines []string) []string {
 	return lines[start:end]
 }
 
-// findMatch runs a 4-pass search for old in source.
-// Returns the byte range [start, end) of the match.
+// findMatch runs a 4-pass search for old in source:
+//  1. exact: exact byte match
+//  2. trim-trailing: match after trimming trailing whitespace from each line
+//  3. trim-both: match after trimming all leading/trailing whitespace per line
+//  4. unicode-fold: match after folding unicode punctuation to ASCII equivalents
+//
+// If a pass finds exactly one match, it returns immediately (mapping byte positions
+// back to the original source if normalization was applied). If a pass finds multiple
+// matches, it errors with line numbers — it does NOT fall through to the next pass.
+// If all passes find zero matches, it returns an error with closestRegion output.
+//
+// Returns byte offsets [start, end) of the match in the original source.
 func findMatch(source, old []byte, filename string) (start, end int, pass string, err error) {
 	passes := []struct {
 		name      string
@@ -184,7 +196,10 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 		// For normalized passes, map back to original byte range.
 		s, e, mapErr := mapNormToOrig(source, old, p.normalize)
 		if mapErr != nil {
-			// Fallback: use normalized positions (good enough for non-CRLF files).
+			// Fallback: use normalized positions. For non-CRLF files, normalized positions
+			// are already correct. For CRLF files, Edit will correct them via crlfOffset.
+			// mapNormToOrig can fail if the normalization function changes content in ways
+			// that break line-by-line matching even though bytes.Index found a match.
 			return first, first + len(normOld), p.name, nil
 		}
 		return s, e, p.name, nil
@@ -243,8 +258,11 @@ func foldUnicode(s string) string {
 	}, s)
 }
 
-// mapNormToOrig finds the byte range in original source corresponding to the
-// normalized match, using line-by-line correspondence.
+// mapNormToOrig finds the byte range in original source corresponding to a match found
+// in normalized source. It normalizes both source and old line-by-line, then slides a
+// window through the normalized source lines looking for a contiguous run that matches
+// the normalized old lines. Once found, the matched line indices are mapped back to byte
+// offsets in the original (un-normalized) source via lineOffset.
 func mapNormToOrig(source, old []byte, normalize func([]byte) []byte) (start, end int, err error) {
 	sourceLines := strings.Split(string(source), "\n")
 	oldLines := strings.Split(string(old), "\n")
@@ -339,8 +357,10 @@ func isBinary(data []byte) bool {
 	return bytes.IndexByte(check, 0) >= 0
 }
 
-// closestRegion finds the window of lines in source most similar to old,
-// using a simple line-overlap heuristic.
+// closestRegion finds the window of source lines most similar to old for error reporting.
+// It builds a set of trimmed old lines, then slides a window of the same size through source,
+// scoring each window by how many of its lines appear in the old set. The highest-scoring
+// window is returned with 1-based line numbers and content so agents can self-correct.
 func closestRegion(source, old []byte) string {
 	sourceLines := strings.Split(string(source), "\n")
 	oldLines := strings.Split(strings.TrimRight(string(old), "\n"), "\n")
