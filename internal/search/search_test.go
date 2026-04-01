@@ -98,7 +98,89 @@ func TestDDGSearcher_MaxResults(t *testing.T) {
 	assert.Len(t, results, 2, "should respect maxResults limit")
 }
 
+func TestTavilySearcher_Search(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/search", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var reqBody tavilySearchRequest
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		require.NoError(t, err)
+		assert.Equal(t, "test-api-key", reqBody.APIKey)
+		assert.Equal(t, "test query", reqBody.Query)
+
+		resp := tavilySearchResponse{
+			Results: []tavilyResult{
+				{Title: "Result 1", URL: "https://example.com/1", Content: "First result content"},
+				{Title: "Result 2", URL: "https://example.com/2", Content: "Second result content"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	searcher := &TavilySearcher{
+		apiKey:  "test-api-key",
+		baseURL: srv.URL,
+		client:  srv.Client(),
+	}
+
+	results, err := searcher.Search(context.Background(), "test query")
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+	assert.Equal(t, "Result 1", results[0].Title)
+	assert.Equal(t, "https://example.com/1", results[0].Link)
+	assert.Equal(t, "First result content", results[0].Snippet)
+	assert.Equal(t, 1, results[0].Position)
+}
+
+func TestTavilySearcher_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	searcher := &TavilySearcher{
+		apiKey:  "bad-key",
+		baseURL: srv.URL,
+		client:  srv.Client(),
+	}
+
+	_, err := searcher.Search(context.Background(), "test")
+	assert.ErrorContains(t, err, "HTTP 401")
+}
+
+func TestResolveSearcher_WithTavilyKey(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "tvly-key-123")
+	searcher, err := resolveSearcher()
+	require.NoError(t, err)
+	_, ok := searcher.(*TavilySearcher)
+	assert.True(t, ok, "expected TavilySearcher when TAVILY_API_KEY is set")
+}
+
+func TestResolveSearcher_TavilyPriorityOverExa(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "tvly-key-123")
+	t.Setenv("EXA_API_KEY", "exa-key-456")
+	searcher, err := resolveSearcher()
+	require.NoError(t, err)
+	_, ok := searcher.(*TavilySearcher)
+	assert.True(t, ok, "expected TavilySearcher to take priority over ExaSearcher")
+}
+
+func TestResolveSearcher_EmptyTavilyKeyError(t *testing.T) {
+	t.Setenv("TAVILY_API_KEY", "")
+	searcher, err := resolveSearcher()
+	if err != nil {
+		assert.ErrorContains(t, err, "TAVILY_API_KEY")
+	} else {
+		assert.NotNil(t, searcher)
+	}
+}
+
 func TestResolveSearcher_EmptyBraveKeyError(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
+	unsetEnv(t, "EXA_API_KEY")
 	t.Setenv("BRAVE_API_KEY", "")
 	// When set but empty, should return error or DDG fallback depending on LookupEnv behavior
 	searcher, err := resolveSearcher()
@@ -110,6 +192,7 @@ func TestResolveSearcher_EmptyBraveKeyError(t *testing.T) {
 }
 
 func TestResolveSearcher_EmptyExaKeyError(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
 	t.Setenv("EXA_API_KEY", "")
 	searcher, err := resolveSearcher()
 	if err != nil {
@@ -120,6 +203,7 @@ func TestResolveSearcher_EmptyExaKeyError(t *testing.T) {
 }
 
 func TestResolveSearcher_WithExaKey(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
 	t.Setenv("EXA_API_KEY", "exa-key-123")
 	searcher, err := resolveSearcher()
 	require.NoError(t, err)
@@ -128,6 +212,7 @@ func TestResolveSearcher_WithExaKey(t *testing.T) {
 }
 
 func TestResolveSearcher_ExaPriorityOverBrave(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
 	t.Setenv("EXA_API_KEY", "exa-key-123")
 	t.Setenv("BRAVE_API_KEY", "brave-key-456")
 	searcher, err := resolveSearcher()
@@ -137,6 +222,7 @@ func TestResolveSearcher_ExaPriorityOverBrave(t *testing.T) {
 }
 
 func TestResolveSearcher_WithBraveKey(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
 	unsetEnv(t, "EXA_API_KEY")
 	t.Setenv("BRAVE_API_KEY", "my-key-123")
 	searcher, err := resolveSearcher()
@@ -146,6 +232,7 @@ func TestResolveSearcher_WithBraveKey(t *testing.T) {
 }
 
 func TestResolveSearcher_NoKey(t *testing.T) {
+	unsetEnv(t, "TAVILY_API_KEY")
 	unsetEnv(t, "EXA_API_KEY")
 	unsetEnv(t, "BRAVE_API_KEY")
 	searcher, err := resolveSearcher()
