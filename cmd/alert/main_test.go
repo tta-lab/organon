@@ -242,3 +242,13 @@ func TestAlert_Status400(t *testing.T) {
 		assert.Contains(t, err.Error(), "400")
 	})
 }
+
+func TestAlert_ConnectionFailure(t *testing.T) {
+	withEnv(t, "http://localhost:1/nowhere", func() {
+		cmd := newRootCmd()
+		cmd.SetArgs([]string{"--from", "agent", "hello"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "request failed")
+	})
+}

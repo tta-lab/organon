@@ -47,7 +47,10 @@ func runAlert(cmd *cobra.Command, args []string) error {
 	}
 
 	sender, err := cmd.Flags().GetString("from")
-	if err != nil || sender == "" {
+	if err != nil {
+		return fmt.Errorf("--from: %w", err)
+	}
+	if sender == "" {
 		return fmt.Errorf("--from flag is required")
 	}
 
@@ -91,7 +94,10 @@ func runAlert(cmd *cobra.Command, args []string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("server returned status %d (could not read body: %w)", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
