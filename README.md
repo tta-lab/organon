@@ -69,6 +69,17 @@ Search the web and return results.
 web "tree-sitter Go bindings"
 ```
 
+### `alert` — Agent alerts
+
+Send an alert message to the bridge service (e.g. Telegram via bridge). Requires `ALERT_ENDPOINT` env var.
+
+```bash
+alert --from flick "the db is gone"
+cat <<'EOF' | alert --from flick
+detailed message
+EOF
+```
+
 ## Why
 
 AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.
@@ -87,8 +98,8 @@ brew install tta-lab/ttal/organon
 
 ```bash
 go install github.com/tta-lab/organon/cmd/src@latest
-go install github.com/tta-lab/organon/cmd/url@latest
 go install github.com/tta-lab/organon/cmd/web@latest
+go install github.com/tta-lab/organon/cmd/alert@latest
 ```
 
 ### From release
@@ -102,7 +113,8 @@ temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
 │   ├── url    ← web page reading
-│   └── web    ← web search
+│   ├── web    ← web search
+│   └── alert  ← agent-to-bridge alerts
 ├── standard tools (cat, ls, grep)
 └── user code
 
