@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Organon is a Go monorepo producing two CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching). Pre-installed in temenos sandbox for logos agents.
+Organon is a Go monorepo producing three CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), and `alert` (agent-to-bridge messaging for alerts via Telegram).
 
 ## Essential Commands
 
@@ -19,6 +19,7 @@ make ci           # fmt, vet, lint, test, build
 ### Binaries
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
+- `cmd/alert/` — agent-to-bridge messaging: POSTs alerts to a configurable endpoint via env var
 
 ### Shared Packages
 - `internal/id/` — base62 ID generation and collision resolution
