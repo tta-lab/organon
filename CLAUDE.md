@@ -32,6 +32,7 @@ make ci           # fmt, vet, lint, test, build
 - `internal/fetch/` — url fetch backends (defuddle, browser-gateway, cache)
 - `internal/markdown/` — heading parsing via goldmark
 - `internal/search/` — web search backends (Exa, Brave, DuckDuckGo)
+- `internal/docs/` — Context7 documentation client
 
 ## Testing
 

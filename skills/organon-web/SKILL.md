@@ -72,3 +72,35 @@ web fetch <url> --tree-threshold 8000    # customize auto-tree threshold (defaul
 
 - **`BROWSER_GATEWAY_URL` set** — fetches via browser gateway (JavaScript-rendered pages, no cache)
 - **`BROWSER_GATEWAY_URL` unset** — uses `defuddle` CLI with daily disk cache at `~/.cache/organon/scrapes/`
+
+## Docs — Context7 Library Documentation
+
+Resolve library names to Context7 IDs and fetch documentation via a two-step workflow.
+
+### Resolve
+
+```bash
+web docs resolve react        # list libraries matching "react"
+```
+
+Returns a numbered list of candidates with ID, trust score, snippet count, and available versions. Pick an ID and pass it to `fetch`.
+
+### Fetch
+
+```bash
+web docs fetch /reactjs/react.dev hooks
+web docs fetch reactjs/react.dev "how to handle errors & retries"
+web docs fetch /reactjs/react.dev/18.2.0 --tokens 400
+```
+
+- `<library-id>` may be passed with or without the leading `/`
+- `[topic]` is freeform natural language
+- `--tokens N` limits response length (0 = backend default)
+- Pin a specific version by using the version-suffixed ID from `resolve`
+
+### Docs Backends
+
+- **`CONTEXT7_API_KEY` set** — higher rate limits
+- **`CONTEXT7_API_KEY` unset** — anonymous access (rate limited)
+
+> **Note:** Setting `CONTEXT7_API_KEY=""` returns an error. Leave it unset for anonymous access.
