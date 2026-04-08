@@ -165,6 +165,26 @@ func newEditCmd() *cobra.Command {
 	return root
 }
 
+func TestEdit_ErrorDoesNotPrintUsage(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	orig := []byte("package example\n\nfunc Foo() {}\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	// Deliberately mismatched indentation — will fail to match.
+	stdin := []byte("===BEFORE===\n    Host string\n===AFTER===\n    Host string // comment\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.NotContains(t, runErr.Error(), "Usage:", "runtime errors should not print usage block")
+	assert.NotContains(t, runErr.Error(), "Flags:", "runtime errors should not print flag help")
+}
+
 func TestEdit_AppliesReplacement(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "example.go")
