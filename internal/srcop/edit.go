@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/tta-lab/organon/internal/indent"
 )
 
 const (
@@ -14,10 +16,20 @@ const (
 	binaryCheckSize = 8192       // 8KB
 )
 
+// EditResult holds the result of an edit operation including match metadata.
+type EditResult struct {
+	Content    []byte       // the new file bytes
+	Pass       string       // "exact"|"trim-trailing"|"trim-both"|"unicode-fold"
+	IndentFrom indent.Style // zero value if reindent not attempted
+	IndentTo   indent.Style
+	Reindented bool
+	Warnings   []string // file-level + reindent line-level warnings
+}
+
 // Edit applies a text replacement to source using a BEFORE/AFTER block from input.
 // input must contain ===BEFORE=== and ===AFTER=== delimiters.
 // It does NOT call writeAndShow — that is the caller's responsibility.
-func Edit(filename string, source []byte, input []byte) ([]byte, error) {
+func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	if isBinary(source) {
 		return nil, fmt.Errorf("binary file detected; src edit only works on text files")
 	}
@@ -42,7 +54,7 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 		normalizedOld = bytes.ReplaceAll(oldText, []byte("\r\n"), []byte("\n"))
 	}
 
-	start, end, _, err := findMatch(normalized, normalizedOld, filename)
+	start, end, pass, err := findMatch(normalized, normalizedOld, filename)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +66,41 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 		origEnd = crlfOffset(source, end)
 	}
 
-	// Prepare replacement text — match source line endings.
+	// Apply reindent for trim-both pass when target style is known.
+	// This runs BEFORE CRLF adjustment so that indent.Reindent operates on LF content.
+	// Note: reindent is intentionally scoped to trim-both only — exact, trim-trailing,
+	// and unicode-fold passes don't involve indent normalization. If an agent's BEFORE
+	// happens to match exact but their AFTER uses a different style, the mismatch will
+	// be inserted silently. This narrow trigger is the v1 mitigation; there is no
+	// --no-reindent opt-out. If alignment padding is destroyed, revert via git.
+	var warnings []string
+	var indentFrom, indentTo indent.Style
+	var reindented bool
 	replacement := newText
+
+	if pass == "trim-both" {
+		target := indent.Detect(filename, source)
+		if target.Kind != indent.Unknown {
+			reindentedBytes, from, ok, reindentWarnings := indent.Reindent(newText, target)
+			warnings = append(warnings, reindentWarnings...)
+			if ok {
+				if from != target {
+					// Actual change made.
+					replacement = reindentedBytes
+					reindented = true
+					indentFrom = from
+					indentTo = target
+				}
+				// else from == target: no change needed.
+			} else {
+				warnings = append(warnings, "could not detect AFTER indent style; inserted as-is")
+			}
+		}
+	}
+
+	// Prepare replacement text — match source line endings.
 	if hasCRLF {
-		replacement = bytes.ReplaceAll(newText, []byte("\n"), []byte("\r\n"))
-		// Avoid double \r\n if newText already had \r\n.
+		replacement = bytes.ReplaceAll(replacement, []byte("\n"), []byte("\r\n"))
 		replacement = bytes.ReplaceAll(replacement, []byte("\r\r\n"), []byte("\r\n"))
 	}
 
@@ -66,7 +108,14 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 	result = append(result, source[:origStart]...)
 	result = append(result, replacement...)
 	result = append(result, source[origEnd:]...)
-	return result, nil
+	return &EditResult{
+		Content:    result,
+		Pass:       pass,
+		IndentFrom: indentFrom,
+		IndentTo:   indentTo,
+		Reindented: reindented,
+		Warnings:   warnings,
+	}, nil
 }
 
 // crlfOffset converts a byte offset in normalized (LF-only) source to the corresponding
