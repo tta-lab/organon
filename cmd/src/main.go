@@ -28,6 +28,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runTreeOrRead,
 	}
+	root.SilenceUsage = true
 
 	// Persistent flag — inherited by all subcommands
 	root.PersistentFlags().Int("depth", 2, "Symbol tree depth (default 2)")
@@ -42,6 +43,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runReplace,
 	}
+	replaceCmd.SilenceUsage = true
 	replaceCmd.Flags().StringP("symbol", "s", "", "Symbol ID to replace")
 	_ = replaceCmd.MarkFlagRequired("symbol")
 
@@ -51,6 +53,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runInsert,
 	}
+	insertCmd.SilenceUsage = true
 	insertCmd.Flags().String("after", "", "Insert after symbol ID")
 	insertCmd.Flags().String("before", "", "Insert before symbol ID")
 
@@ -60,6 +63,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDelete,
 	}
+	deleteCmd.SilenceUsage = true
 	deleteCmd.Flags().StringP("symbol", "s", "", "Symbol ID to delete")
 	_ = deleteCmd.MarkFlagRequired("symbol")
 
@@ -69,6 +73,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runComment,
 	}
+	commentCmd.SilenceUsage = true
 	commentCmd.Flags().StringP("symbol", "s", "", "Symbol ID")
 	commentCmd.Flags().Bool("read", false, "Read existing doc comment instead of writing")
 	_ = commentCmd.MarkFlagRequired("symbol")
@@ -79,6 +84,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runEdit,
 	}
+	editCmd.SilenceUsage = true
 
 	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd)
 

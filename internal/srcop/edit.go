@@ -2,6 +2,7 @@ package srcop
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -183,9 +184,14 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 		// Check for duplicates.
 		last := bytes.LastIndex(normSource, normOld)
 		if first != last {
-			lines := matchLines(normSource, normOld)
-			return 0, 0, "", fmt.Errorf("found %d matches at lines %s — add surrounding context to disambiguate",
-				len(lines), formatLineNumbers(lines))
+			sites := matchSites(normSource, source, normOld)
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "found %d matches:\n", len(sites))
+			for _, site := range sites {
+				fmt.Fprintf(&sb, "  line %d: %s\n", site.lineNum, site.snippet)
+			}
+			sb.WriteString("\nadd surrounding context to disambiguate")
+			return 0, 0, "", errors.New(sb.String())
 		}
 
 		// For exact pass, positions are already correct.
@@ -317,33 +323,41 @@ func lineOffset(lines []string, lineIdx int) int {
 	return offset
 }
 
-// matchLines returns the line numbers (1-based) of all matches of old in source.
-func matchLines(source, old []byte) []int {
-	var result []int
+// matchSite describes one occurrence of old in source.
+type matchSite struct {
+	lineNum int    // 1-based line number
+	snippet string // first line of the match, trimmed to 60 chars
+}
+
+// matchSites returns all match sites for old in source.
+// source is the normalized source (where bytes.Index was run) used for line number
+// computation. origSource is the original file bytes used for snippet extraction.
+func matchSites(normSource, origSource, old []byte) []matchSite {
+	var sites []matchSite
 	pos := 0
 	for {
-		idx := bytes.Index(source[pos:], old)
+		idx := bytes.Index(normSource[pos:], old)
 		if idx < 0 {
 			break
 		}
 		abs := pos + idx
-		lineNum := bytes.Count(source[:abs], []byte("\n")) + 1
-		result = append(result, lineNum)
+		lineNum := bytes.Count(normSource[:abs], []byte("\n")) + 1
+		// Extract snippet from original source (as the user wrote it).
+		origLines := strings.Split(string(origSource), "\n")
+		snippet := ""
+		if lineNum <= len(origLines) {
+			snippet = origLines[lineNum-1]
+			if len(snippet) > 60 {
+				snippet = snippet[:60] + "…"
+			}
+		}
+		sites = append(sites, matchSite{lineNum: lineNum, snippet: snippet})
 		pos = abs + len(old)
-		if pos >= len(source) {
+		if pos >= len(normSource) {
 			break
 		}
 	}
-	return result
-}
-
-// formatLineNumbers formats a slice of line numbers as a comma-separated string.
-func formatLineNumbers(lines []int) string {
-	parts := make([]string, len(lines))
-	for i, l := range lines {
-		parts[i] = fmt.Sprintf("%d", l)
-	}
-	return strings.Join(parts, ", ")
+	return sites
 }
 
 // isBinary checks the first 8KB for null bytes.
@@ -381,8 +395,8 @@ func closestRegion(source, old []byte) string {
 		oldSet[strings.TrimSpace(l)] = true
 	}
 
-	bestScore := -1
-	bestStart := 0
+	bestScore := 0
+	bestStart := -1
 
 	for i := 0; i <= len(sourceLines)-nOld; i++ {
 		score := 0
@@ -395,6 +409,10 @@ func closestRegion(source, old []byte) string {
 			bestScore = score
 			bestStart = i
 		}
+	}
+
+	if bestStart < 0 {
+		return "(no similar region found — BEFORE shares no lines with file)"
 	}
 
 	bestEnd := bestStart + nOld

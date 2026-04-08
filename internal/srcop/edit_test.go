@@ -71,6 +71,9 @@ func TestFindMatch_ExactMultiple(t *testing.T) {
 	_, _, _, err := findMatch(source, old, "test.txt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 matches")
+	assert.Contains(t, err.Error(), "line 1:")
+	assert.Contains(t, err.Error(), "line 2:")
+	assert.Contains(t, err.Error(), "foo bar")
 }
 
 func TestFindMatch_ExactMultipleNoFallThrough(t *testing.T) {
@@ -152,8 +155,15 @@ func TestFindMatch_NoMatch(t *testing.T) {
 	_, _, _, err := findMatch(source, old, "test.txt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
-	// Error should include content from the closest region.
-	assert.Contains(t, err.Error(), "hello world")
+	// No similar region exists — BEFORE shares no lines with source.
+	assert.Contains(t, err.Error(), "no similar region")
+}
+
+func TestClosestRegion_NoOverlap_ReturnsNoMatchMessage(t *testing.T) {
+	source := []byte("foo bar baz qux\nanother line here\n")
+	old := []byte("completely unrelated text\nthat does not appear in source\n")
+	region := closestRegion(source, old)
+	assert.Contains(t, region, "no similar region", "should report no overlap when BEFORE shares no lines with source")
 }
 
 // ---------- findMatch — cascade with duplicates boundary ----------
@@ -281,4 +291,16 @@ func TestEdit_EmptyAfter_DeletesText(t *testing.T) {
 	assert.NotContains(t, string(result), "line two")
 	assert.Contains(t, string(result), "line one")
 	assert.Contains(t, string(result), "line three")
+}
+
+// TestEdit_UnicodeFold exercises the unicode-fold pass as an end-to-end Edit().
+// Source uses curly quotes; BEFORE uses straight quotes.
+// The unicode-fold pass matches them, and AFTER is inserted verbatim (straight quotes).
+func TestEdit_UnicodeFold(t *testing.T) {
+	source := []byte("He said \u201chello\u201d to her.\n")
+	input := "===BEFORE===\nHe said \"hello\" to her.\n===AFTER===\nHe said \"hi\" to her.\n"
+	result, err := Edit("file.txt", source, []byte(input))
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "He said \"hi\" to her.", "AFTER text must be applied via unicode-fold match")
+	assert.NotContains(t, string(result), "\u201c", "matched source curly quotes replaced by AFTER")
 }

@@ -2,15 +2,12 @@ package diff
 
 import (
 	"bytes"
-	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// knownTools lists tools the detection loop recognises, in priority order.
-var knownTools = []string{"delta", "diff-so-fancy", "colordiff", "diff"}
 
 func TestShow_IdenticalContent_NoOutput(t *testing.T) {
 	content := []byte("func main() {}\n")
@@ -20,35 +17,61 @@ func TestShow_IdenticalContent_NoOutput(t *testing.T) {
 	assert.Empty(t, buf.String(), "identical content should produce no output")
 }
 
-func TestShow_DifferentContent_ProducesOutput(t *testing.T) {
+func TestShow_DifferentContent_ProducesUnifiedDiff(t *testing.T) {
 	old := []byte("func main() {\n\t// old\n}\n")
 	new := []byte("func main() {\n\t// new\n}\n")
 	var buf bytes.Buffer
 	err := Show(&buf, old, new, "test.go")
 	require.NoError(t, err)
 	output := buf.String()
-	assert.NotEmpty(t, output, "diff should produce output for different content")
+	assert.Contains(t, output, "--- a/test.go", "unified diff header should reference original file")
+	assert.Contains(t, output, "+++ b/test.go", "unified diff header should reference new file")
+	assert.Contains(t, output, "@@", "unified diff should contain hunk markers")
+	lines := strings.Split(output, "\n")
+	hasMinus := false
+	hasPlus := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			hasMinus = true
+		}
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			hasPlus = true
+		}
+	}
+	assert.True(t, hasMinus, "diff should contain at least one - line")
+	assert.True(t, hasPlus, "diff should contain at least one + line")
 }
 
-func TestShow_DifferentExtension_ProducesOutput(t *testing.T) {
-	old := []byte("def main():\n    pass\n")
-	new := []byte("def main():\n    print('hello')\n")
+func TestShow_NoANSIEscapes(t *testing.T) {
+	old := []byte("line one\nline two\n")
+	new := []byte("line one\nline TWO\n")
 	var buf bytes.Buffer
-	err := Show(&buf, old, new, "example.py")
+	err := Show(&buf, old, new, "test.go")
 	require.NoError(t, err)
-	assert.NotEmpty(t, buf.String(), "diff should work for .py files too")
+	output := buf.String()
+	assert.NotContains(t, output, "\x1b[", "output should contain no ANSI escape sequences")
+	assert.NotContains(t, output, "\033[", "output should contain no ANSI escape sequences")
 }
 
-func TestDetectTool_FindsSomething(t *testing.T) {
-	detectTool()
-	assert.NotEmpty(t, toolName, "should detect at least plain diff")
-	assert.NotEmpty(t, toolPath, "should have a path for the detected tool")
-
-	// toolName must be one of the recognised tools.
-	assert.Contains(t, knownTools, toolName, "detected tool should be in the known list")
-
-	// toolPath must point to an executable file.
-	info, err := exec.LookPath(toolName)
+func TestShow_NoTempfilePath(t *testing.T) {
+	old := []byte("line one\nline two\n")
+	new := []byte("line ONE\nline two\n")
+	var buf bytes.Buffer
+	err := Show(&buf, old, new, "test.go")
 	require.NoError(t, err)
-	assert.Equal(t, toolPath, info, "toolPath should match LookPath result for toolName")
+	output := buf.String()
+	assert.NotContains(t, output, "/tmp/", "diff header should not contain tempfile paths")
+	assert.NotContains(t, output, "src-diff", "diff header should not contain internal tempfile names")
+}
+
+func TestShow_MarkdownProducesDiff(t *testing.T) {
+	old := []byte("# Overview\n\nSome text.\n")
+	new := []byte("# Overview\n\nDifferent text.\n")
+	var buf bytes.Buffer
+	err := Show(&buf, old, new, "notes.md")
+	require.NoError(t, err)
+	output := buf.String()
+	assert.Contains(t, output, "--- a/notes.md", "markdown should produce unified diff header")
+	assert.Contains(t, output, "+++ b/notes.md", "markdown should produce unified diff header")
+	assert.NotEmpty(t, output, "markdown should produce diff output, not empty string")
 }

@@ -1,5 +1,5 @@
-// Package diff renders colored diffs between old and new file content
-// using the best available external tool.
+// Package diff renders unified diffs between old and new file content
+// using an in-process unified-diff renderer.
 //
 // Plane: shared
 package diff
