@@ -313,6 +313,18 @@ func TestEdit_ReturnsPass_TrimBoth(t *testing.T) {
 	assert.Equal(t, "trim-both", result.Pass)
 }
 
+func TestEdit_ReturnsPass_TrimTrailing(t *testing.T) {
+	// Source matches BEFORE exactly except BEFORE has extra trailing spaces on a line.
+	// The trim-trailing pass strips trailing whitespace and matches.
+	source := []byte("func foo() {\n\treturn 1\n}\n")
+	// Note trailing spaces after "return 1  "
+	input := "===BEFORE===\nfunc foo() {\n\treturn 1  \n}\n===AFTER===\nfunc foo() {\n\treturn 99\n}\n"
+	result, err := Edit("example.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-trailing", result.Pass)
+	assert.Contains(t, string(result.Content), "return 99")
+}
+
 // ---------- EditResult — reindent wiring ----------
 
 func TestEdit_TrimBothPass_ReindentsAfterToTabs(t *testing.T) {
@@ -354,6 +366,26 @@ func TestEdit_UnknownTarget_EmitsWarning(t *testing.T) {
 	// The "could not detect AFTER indent style" warning only fires when
 	// pass is trim-both AND target is unknown — here pass is exact, so no warning.
 	assert.Empty(t, result.Warnings)
+}
+
+func TestEdit_TrimBoth_UnindentedAfter_GetsIndentFromMatchedBefore(t *testing.T) {
+	// Bug fix: un-indented BEFORE on tab-indented Go file. AFTER (also un-indented)
+	// must be written WITH the matched BEFORE's indent depth, not as-is.
+	// Source: tab-indented Go file. BEFORE has no indent (needs trim-both to match).
+	source := []byte("package main\n\nfunc A() {\n\tx := 1\n\ty := 2\n\treturn\n}\n")
+	// BEFORE lines have no leading whitespace → need trim-both to match.
+	input := "===BEFORE===\nx := 1\ny := 2\n===AFTER===\nx := 7\ny := 7\n"
+	result, err := Edit("main.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-both", result.Pass)
+	assert.True(t, result.Reindented)
+	assert.Equal(t, indent.Tab, result.IndentTo.Kind)
+	// AFTER lines must have leading tabs in the result, matching the matched BEFORE depth.
+	assert.Contains(t, string(result.Content), "\tx := 7")
+	assert.Contains(t, string(result.Content), "\ty := 7")
+	// The bare un-indented lines must NOT appear (no match for "newline + no tab").
+	assert.NotContains(t, string(result.Content), "\nx := 7")
+	assert.NotContains(t, string(result.Content), "\ny := 7")
 }
 
 // TestEdit_UnicodeFold exercises the unicode-fold pass as an end-to-end Edit().

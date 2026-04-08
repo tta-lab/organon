@@ -66,16 +66,10 @@ func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	case "trim-both":
 		target := indent.Detect(filename, source)
 		if target.Kind != indent.Unknown {
-			reindentedBytes, from, ok, reindentWarnings := indent.Reindent(newText, target)
+			var reindentWarnings []string
+			replacement, reindented, indentFrom, indentTo, reindentWarnings =
+				applyReindent(newText, normalized[origStart:origEnd], target)
 			warnings = append(warnings, reindentWarnings...)
-			if ok && from != target {
-				replacement = reindentedBytes
-				reindented = true
-				indentFrom = from
-				indentTo = target
-			} else if !ok {
-				warnings = append(warnings, "could not detect AFTER indent style; inserted as-is")
-			}
 		}
 	case "exact":
 		// Reindent is not applied for exact pass; warn if AFTER style mismatches target.
@@ -494,4 +488,98 @@ func kindLabel(k indent.Kind) string {
 	default:
 		return "unknown"
 	}
+}
+
+// indentDepthFromLines computes the indent level from the leading whitespace of
+// the first non-blank line in matchedLines (which is the normalized matched region).
+// Returns 0 if no non-blank line is found.
+func indentDepthFromLines(matchedLines []byte, target indent.Style) int {
+	for _, line := range strings.Split(string(matchedLines), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		return indentLevel([]byte(line), target)
+	}
+	return 0
+}
+
+// applyReindent handles the trim-both reindent logic: first tries indent.Reindent,
+// and if AFTER has no indent (from.Kind==Unknown) but target is known, infers
+// indent depth from the matched region and applies it.
+// Returns (replacement, reindented, indentFrom, indentTo, warnings).
+func applyReindent(newText []byte, matchedRegion []byte, target indent.Style) (
+	replacement []byte, reindented bool, indentFrom, indentTo indent.Style, warnings []string,
+) {
+	reindentBytes, from, ok, reindentWarnings := indent.Reindent(newText, target)
+	warnings = append(warnings, reindentWarnings...)
+	replacement = reindentBytes
+	indentFrom = from
+	indentTo = target
+
+	if ok && from.Kind != indent.Unknown && from != target {
+		// Normal reindent: AFTER had indent and it was transformed.
+		reindented = true
+		return
+	}
+	if !ok {
+		warnings = append(warnings, "could not detect AFTER indent style; inserted as-is")
+		return
+	}
+	// from.Kind == Unknown: AFTER has no indent. Infer depth from matched region.
+	if depth := indentDepthFromLines(matchedRegion, target); depth > 0 {
+		replacement = applyIndentDepth(string(newText), depth, target)
+		reindented = true
+		indentFrom = indent.Style{Kind: indent.Unknown}
+	}
+	return
+}
+
+// indentLevel returns the indent level of a line given the target style.
+// A line with no leading whitespace returns 0.
+func indentLevel(line []byte, target indent.Style) int {
+	tabs := 0
+	spaces := 0
+	for _, b := range line {
+		switch b {
+		case '\t':
+			tabs++
+		case ' ':
+			spaces++
+		default:
+			goto done
+		}
+	}
+done:
+	if tabs > 0 {
+		return tabs
+	}
+	if spaces > 0 && target.Kind == indent.Space && target.Width > 0 {
+		return spaces / target.Width
+	}
+	return 0
+}
+
+// applyIndentDepth prepends target-style indentation to each non-empty line in text,
+// using the computed indent level (number of levels, not raw width).
+func applyIndentDepth(text string, level int, target indent.Style) []byte {
+	prefix := indentPrefix(level, target)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// indentPrefix returns a string of level indentation units in the target style.
+func indentPrefix(level int, target indent.Style) string {
+	if target.Kind == indent.Tab {
+		return strings.Repeat("\t", level)
+	}
+	width := target.Width
+	if width <= 0 {
+		width = 2
+	}
+	return strings.Repeat(" ", level*width)
 }
