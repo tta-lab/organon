@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tta-lab/organon/internal/indent"
 )
 
 // ---------- parseEditInput ----------
@@ -185,8 +187,8 @@ func TestEdit_ValidReplacement(t *testing.T) {
 	input := "===BEFORE===\nfunc Foo() {}\n===AFTER===\nfunc Foo() { return 42 }\n"
 	result, err := Edit("example.go", source, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result), "func Foo() { return 42 }")
-	assert.Contains(t, string(result), "func Bar() {}")
+	assert.Contains(t, string(result.Content), "func Foo() { return 42 }")
+	assert.Contains(t, string(result.Content), "func Bar() {}")
 }
 
 func TestEdit_PlainText(t *testing.T) {
@@ -194,8 +196,8 @@ func TestEdit_PlainText(t *testing.T) {
 	input := "===BEFORE===\nHello World\n===AFTER===\nHello Go\n"
 	result, err := Edit("notes.txt", source, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result), "Hello Go")
-	assert.NotContains(t, string(result), "Hello World")
+	assert.Contains(t, string(result.Content), "Hello Go")
+	assert.NotContains(t, string(result.Content), "Hello World")
 }
 
 func TestEdit_BinaryFile(t *testing.T) {
@@ -223,11 +225,10 @@ func TestEdit_CRLFPreserved(t *testing.T) {
 	input := "===BEFORE===\nline two\n===AFTER===\nline TWO\n"
 	result, err := Edit("file.txt", source, []byte(input))
 	require.NoError(t, err)
-	// Result must still have CRLF line endings.
-	assert.True(t, strings.Contains(string(result), "\r\n"), "result should preserve CRLF")
-	assert.Contains(t, string(result), "line TWO")
-	assert.Contains(t, string(result), "line one\r\n")
-	assert.Contains(t, string(result), "line three\r\n")
+	assert.True(t, strings.Contains(string(result.Content), "\r\n"), "result should preserve CRLF")
+	assert.Contains(t, string(result.Content), "line TWO")
+	assert.Contains(t, string(result.Content), "line one\r\n")
+	assert.Contains(t, string(result.Content), "line three\r\n")
 }
 
 // ---------- isBinary ----------
@@ -272,12 +273,12 @@ func TestEdit_CRLF_TrimTrailingPass(t *testing.T) {
 	input := "===BEFORE===\nline two\n===AFTER===\nline TWO\n"
 	result, err := Edit("file.txt", source, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result), "line TWO")
+	assert.Contains(t, string(result.Content), "line TWO")
 	// Non-edited lines must retain CRLF endings.
-	assert.Contains(t, string(result), "line one  \r\n")
-	assert.Contains(t, string(result), "line three\r\n")
+	assert.Contains(t, string(result.Content), "line one  \r\n")
+	assert.Contains(t, string(result.Content), "line three\r\n")
 	// The replacement line must also get CRLF.
-	assert.Contains(t, string(result), "line TWO\r\n")
+	assert.Contains(t, string(result.Content), "line TWO\r\n")
 }
 
 // ---------- Empty AFTER (deletion) ----------
@@ -288,9 +289,103 @@ func TestEdit_EmptyAfter_DeletesText(t *testing.T) {
 	input := "===BEFORE===\nline two\n===AFTER===\n"
 	result, err := Edit("file.txt", source, []byte(input))
 	require.NoError(t, err)
-	assert.NotContains(t, string(result), "line two")
-	assert.Contains(t, string(result), "line one")
-	assert.Contains(t, string(result), "line three")
+	assert.NotContains(t, string(result.Content), "line two")
+	assert.Contains(t, string(result.Content), "line one")
+	assert.Contains(t, string(result.Content), "line three")
+}
+
+// ---------- EditResult — pass disclosure ----------
+
+func TestEdit_ReturnsPass_Exact(t *testing.T) {
+	source := []byte("package example\n\nfunc Foo() {}\n")
+	input := "===BEFORE===\nfunc Foo() {}\n===AFTER===\nfunc Foo() { return 1 }\n"
+	result, err := Edit("example.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "exact", result.Pass)
+}
+
+func TestEdit_ReturnsPass_TrimBoth(t *testing.T) {
+	// Source has 4-space indent; BEFORE uses tab indent — needs trim-both.
+	source := []byte("    func foo() {\n        return 42\n    }\n")
+	input := "===BEFORE===\n\tfunc foo() {\n\t\treturn 42\n\t}\n===AFTER===\n\tfunc foo() {\n\t\treturn 99\n\t}\n"
+	result, err := Edit("example.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-both", result.Pass)
+}
+
+func TestEdit_ReturnsPass_TrimTrailing(t *testing.T) {
+	// Source matches BEFORE exactly except BEFORE has extra trailing spaces on a line.
+	// The trim-trailing pass strips trailing whitespace and matches.
+	source := []byte("func foo() {\n\treturn 1\n}\n")
+	// Note trailing spaces after "return 1  "
+	input := "===BEFORE===\nfunc foo() {\n\treturn 1  \n}\n===AFTER===\nfunc foo() {\n\treturn 99\n}\n"
+	result, err := Edit("example.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-trailing", result.Pass)
+	assert.Contains(t, string(result.Content), "return 99")
+}
+
+// ---------- EditResult — reindent wiring ----------
+
+func TestEdit_TrimBothPass_ReindentsAfterToTabs(t *testing.T) {
+	// Go source (tab-indented), BEFORE uses 4-space indent → trim-both match.
+	// AFTER uses 4-space indent → should be reindented to tabs.
+	source := []byte("package main\n\nfunc foo() {\n\treturn 1\n}\n")
+	// BEFORE has 4-space indent, needs trim-both to match source.
+	input := "===BEFORE===\n    func foo() {\n        return 1\n    }\n" +
+		"===AFTER===\n    func foo() {\n        return 99\n    }\n"
+	result, err := Edit("main.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-both", result.Pass)
+	assert.True(t, result.Reindented)
+	assert.Equal(t, indent.Tab, result.IndentTo.Kind)
+	// The replacement should contain tabs, not 4 spaces.
+	assert.Contains(t, string(result.Content), "\treturn 99")
+	assert.NotContains(t, string(result.Content), "    return 99")
+}
+
+func TestEdit_ExactPass_DoesNotReindent(t *testing.T) {
+	// Exact match — no reindent should happen.
+	source := []byte("package main\n\nfunc foo() {\n\treturn 1\n}\n")
+	input := "===BEFORE===\nfunc foo() {\n\treturn 1\n}\n===AFTER===\nfunc foo() {\n\treturn 99\n}\n"
+	result, err := Edit("main.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "exact", result.Pass)
+	assert.False(t, result.Reindented)
+}
+
+func TestEdit_UnknownTarget_EmitsWarning(t *testing.T) {
+	// File with unknown style (txt) → reindent skipped, warning emitted.
+	source := []byte("some text\nmore text\n")
+	input := "===BEFORE===\nsome text\n===AFTER===\nnew text\n"
+	result, err := Edit("notes.txt", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "exact", result.Pass)
+	assert.False(t, result.Reindented)
+	// Unknown target means no reindent was possible, but no error either.
+	// The "could not detect AFTER indent style" warning only fires when
+	// pass is trim-both AND target is unknown — here pass is exact, so no warning.
+	assert.Empty(t, result.Warnings)
+}
+
+func TestEdit_TrimBoth_UnindentedAfter_GetsIndentFromMatchedBefore(t *testing.T) {
+	// Bug fix: un-indented BEFORE on tab-indented Go file. AFTER (also un-indented)
+	// must be written WITH the matched BEFORE's indent depth, not as-is.
+	// Source: tab-indented Go file. BEFORE has no indent (needs trim-both to match).
+	source := []byte("package main\n\nfunc A() {\n\tx := 1\n\ty := 2\n\treturn\n}\n")
+	// BEFORE lines have no leading whitespace → need trim-both to match.
+	input := "===BEFORE===\nx := 1\ny := 2\n===AFTER===\nx := 7\ny := 7\n"
+	result, err := Edit("main.go", source, []byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "trim-both", result.Pass)
+	assert.True(t, result.Reindented)
+	assert.Equal(t, indent.Tab, result.IndentTo.Kind)
+	// AFTER lines must have leading tabs in the result, matching the matched BEFORE depth.
+	assert.Contains(t, string(result.Content), "\tx := 7")
+	assert.Contains(t, string(result.Content), "\ty := 7")
+	// The bare un-indented lines must NOT appear (no match for "newline + no tab").
+	assert.NotContains(t, string(result.Content), "\nx := 7")
+	assert.NotContains(t, string(result.Content), "\ny := 7")
 }
 
 // TestEdit_UnicodeFold exercises the unicode-fold pass as an end-to-end Edit().
@@ -301,6 +396,7 @@ func TestEdit_UnicodeFold(t *testing.T) {
 	input := "===BEFORE===\nHe said \"hello\" to her.\n===AFTER===\nHe said \"hi\" to her.\n"
 	result, err := Edit("file.txt", source, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result), "He said \"hi\" to her.", "AFTER text must be applied via unicode-fold match")
-	assert.NotContains(t, string(result), "\u201c", "matched source curly quotes replaced by AFTER")
+	assert.Contains(t, string(result.Content), "He said \"hi\" to her.",
+		"AFTER text must be applied via unicode-fold match")
+	assert.NotContains(t, string(result.Content), "\u201c", "matched source curly quotes replaced by AFTER")
 }

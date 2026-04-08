@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/diff"
+	"github.com/tta-lab/organon/internal/indent"
 	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/srcop"
 	"github.com/tta-lab/organon/internal/tree"
@@ -85,6 +86,8 @@ func main() {
 		RunE:  runEdit,
 	}
 	editCmd.SilenceUsage = true
+	editCmd.Flags().StringP("section", "s", "",
+		"Scope edit to a symbol/section ID (use `src <file> --tree` to find IDs)")
 
 	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd)
 
@@ -102,6 +105,30 @@ func getDepth(cmd *cobra.Command) int {
 		panic("BUG: --depth flag not registered")
 	}
 	return depth
+}
+
+func printDisclosure(w io.Writer, r *srcop.EditResult) {
+	if r.Pass != "exact" {
+		fmt.Fprintf(w, "matched via: %s pass\n", r.Pass)
+	}
+	if r.Reindented {
+		fmt.Fprintf(w, "AFTER re-indented: %s → %s\n",
+			styleLabel(r.IndentFrom), styleLabel(r.IndentTo))
+	}
+	for _, msg := range r.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", msg)
+	}
+}
+
+func styleLabel(s indent.Style) string {
+	switch s.Kind {
+	case indent.Tab:
+		return "tab"
+	case indent.Space:
+		return fmt.Sprintf("%d-space", s.Width)
+	default:
+		return "unknown"
+	}
 }
 
 func runTreeOrRead(cmd *cobra.Command, args []string) error {
@@ -284,7 +311,7 @@ func runComment(cmd *cobra.Command, args []string) error {
 }
 
 // writeAndShow writes the result to disk, prints a colored diff of old→new,
-// then prints the updated symbol tree.
+// then prints the updated symbol tree if the file type is supported by tree-sitter.
 func writeAndShow(filename string, source, result []byte, depth int) error {
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
@@ -294,6 +321,11 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 	}
 	if isMarkdown(filename) {
 		return printMarkdownTree(filename, result)
+	}
+	// Skip tree display for file types tree-sitter doesn't support.
+	// The file was already written successfully — tree display is optional.
+	if _, err := treesitter.LangNameFromExt(filename); err != nil {
+		return nil
 	}
 	return printTree(filename, result, depth)
 }
@@ -344,6 +376,11 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read stdin: %w", err)
 	}
 
+	sectionID, _ := cmd.Flags().GetString("section")
+	if sectionID != "" {
+		return runEditScoped(cmd, filename, source, stdinContent, sectionID)
+	}
+
 	depth := getDepth(cmd)
 
 	result, err := srcop.Edit(filename, source, stdinContent)
@@ -351,5 +388,89 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return writeAndShow(filename, source, result, depth)
+	printDisclosure(os.Stderr, result)
+	return writeAndShow(filename, source, result.Content, depth)
+}
+
+// runEditScoped edits a specific symbol or section identified by sectionID.
+// Known limitation: when the scoped slice is small (e.g. a 5-line function in a JS/TS file),
+// indent.Detect inside srcop.Edit will run Layer 2 against the slice and likely hit Layer 3
+// fallback (not enough lines for 80% majority). Reindent will no-op with a warning in that case.
+// This is acceptable for v1 — scoped editing on opinionated-language files (Go, Py, Rust) works
+// perfectly because Layer 1 hits on the extension. A follow-up can pre-compute target style
+// on the full file before slicing and thread it through the Edit API. NOT in scope for this task.
+func runEditScoped(cmd *cobra.Command, filename string, source, input []byte, sectionID string) error {
+	depth := getDepth(cmd)
+
+	start, end, err := resolveSectionBounds(filename, source, sectionID, depth)
+	if err != nil {
+		return err
+	}
+
+	// Extend to line boundaries — srcop.Edit's line-splitting assumes the slice
+	// starts at a line boundary and ends after a newline. Tree-sitter byte offsets
+	// for nested symbols may land mid-line.
+	start = lineStartAt(source, start)
+	end = lineEndAfter(source, end)
+
+	slice := source[start:end]
+	result, err := srcop.Edit(filename, slice, input)
+	if err != nil {
+		return err
+	}
+
+	final := make([]byte, 0, len(source)-(end-start)+len(result.Content))
+	final = append(final, source[:start]...)
+	final = append(final, result.Content...)
+	final = append(final, source[end:]...)
+
+	printDisclosure(os.Stderr, result)
+	return writeAndShow(filename, source, final, depth)
+}
+
+func resolveSectionBounds(filename string, source []byte, sectionID string, depth int) (int, int, error) {
+	if isMarkdown(filename) {
+		return markdown.SectionBounds(source, sectionID)
+	}
+	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
+	if err != nil {
+		return 0, 0, err
+	}
+	nodes := treesitter.SymbolTree(symbols)
+	for i, n := range nodes {
+		if n.ID == sectionID {
+			return int(symbols[i].StartByte), int(symbols[i].EndByte), nil
+		}
+	}
+	// When tree is empty, error message should still suggest --tree.
+	return 0, 0, fmt.Errorf("symbol %q not found; run --tree to see current IDs", sectionID)
+}
+
+// lineStartAt returns the byte offset of the start of the line containing pos.
+func lineStartAt(source []byte, pos int) int {
+	if pos > len(source) {
+		pos = len(source)
+	}
+	for pos > 0 && source[pos-1] != '\n' {
+		pos--
+	}
+	return pos
+}
+
+// lineEndAfter returns the byte offset of the newline that ends the line
+// containing pos-1. If pos lands on a newline, returns pos+1. If no newline
+// is found, returns len(source).
+func lineEndAfter(source []byte, pos int) int {
+	if pos > len(source) {
+		return len(source)
+	}
+	// If pos lands on a newline, the "line containing pos-1" ends here.
+	if pos < len(source) && source[pos] == '\n' {
+		return pos + 1
+	}
+	// Scan forward from pos to find the newline ending this line.
+	for pos < len(source) && source[pos] != '\n' {
+		pos++
+	}
+	return pos
 }

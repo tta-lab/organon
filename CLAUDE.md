@@ -24,6 +24,7 @@ make ci           # fmt, vet, lint, test, build
 ### Shared Packages
 - `internal/id/` — base62 ID generation and collision resolution
 - `internal/tree/` — generic box-drawing tree renderer
+- `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
 
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files

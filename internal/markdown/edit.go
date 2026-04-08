@@ -115,6 +115,17 @@ func DeleteSection(source []byte, sectionID string) ([]byte, error) {
 	return result, nil
 }
 
+// SectionBounds returns the [start, end) byte range of a markdown section by its ID.
+// Exported wrapper over the internal sectionBounds helper for use by cmd/src.
+func SectionBounds(source []byte, sectionID string) (start, end int, err error) {
+	headings, err := parseHeadings(source)
+	if err != nil {
+		return 0, 0, err
+	}
+	assignIDs(headings)
+	return sectionBounds(source, headings, sectionID)
+}
+
 // sectionBounds returns the [start, end) byte range of a section identified by sectionID.
 // start is the byte offset of the heading line; end is the byte offset where the next
 // same-or-higher-level heading begins (or len(source) for the last section).

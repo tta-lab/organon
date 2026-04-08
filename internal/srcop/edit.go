@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/tta-lab/organon/internal/indent"
 )
 
 const (
@@ -14,10 +16,20 @@ const (
 	binaryCheckSize = 8192       // 8KB
 )
 
+// EditResult holds the result of an edit operation including match metadata.
+type EditResult struct {
+	Content    []byte       // the new file bytes
+	Pass       string       // "exact"|"trim-trailing"|"trim-both"|"unicode-fold"
+	IndentFrom indent.Style // zero value if reindent not attempted
+	IndentTo   indent.Style
+	Reindented bool
+	Warnings   []string // file-level + reindent line-level warnings
+}
+
 // Edit applies a text replacement to source using a BEFORE/AFTER block from input.
 // input must contain ===BEFORE=== and ===AFTER=== delimiters.
 // It does NOT call writeAndShow — that is the caller's responsibility.
-func Edit(filename string, source []byte, input []byte) ([]byte, error) {
+func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	if isBinary(source) {
 		return nil, fmt.Errorf("binary file detected; src edit only works on text files")
 	}
@@ -31,34 +43,47 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 	}
 
 	// Detect and normalize CRLF for matching.
-	hasCRLF := bytes.Contains(source, []byte("\r\n"))
-	normalized := source
-	if hasCRLF {
-		normalized = bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n"))
-	}
+	normalized, normalizedOld, hasCRLF := normalizeForMatch(source, oldText)
 
-	normalizedOld := oldText
-	if hasCRLF {
-		normalizedOld = bytes.ReplaceAll(oldText, []byte("\r\n"), []byte("\n"))
-	}
-
-	start, end, _, err := findMatch(normalized, normalizedOld, filename)
+	start, end, pass, err := findMatch(normalized, normalizedOld, filename)
 	if err != nil {
 		return nil, err
 	}
 
 	// If source had CRLF, map matched positions back to original byte offsets.
-	origStart, origEnd := start, end
-	if hasCRLF {
-		origStart = crlfOffset(source, start)
-		origEnd = crlfOffset(source, end)
+	origStart, origEnd := crlfAdjust(source, start, end)
+
+	// Apply reindent for trim-both pass when target style is known.
+	// This runs BEFORE CRLF adjustment so that indent.Reindent operates on LF content.
+	// Note: reindent is intentionally scoped to trim-both only — exact, trim-trailing,
+	// and unicode-fold passes don't involve indent normalization.
+	var warnings []string
+	var indentFrom, indentTo indent.Style
+	var reindented bool
+	replacement := newText
+
+	switch pass {
+	case "trim-both":
+		target := indent.Detect(filename, source)
+		if target.Kind != indent.Unknown {
+			var reindentWarnings []string
+			replacement, reindented, indentFrom, indentTo, reindentWarnings =
+				applyReindent(newText, normalized[origStart:origEnd], target)
+			warnings = append(warnings, reindentWarnings...)
+		}
+	case "exact":
+		// Reindent is not applied for exact pass; warn if AFTER style mismatches target.
+		if target := indent.Detect(filename, source); target.Kind != indent.Unknown {
+			if after := indent.DetectByContent(newText); after.Kind != indent.Unknown && after.Kind != target.Kind {
+				warnings = append(warnings, fmt.Sprintf("AFTER uses %s indent but file uses %s; mismatch will be inserted verbatim",
+					kindLabel(after.Kind), kindLabel(target.Kind)))
+			}
+		}
 	}
 
 	// Prepare replacement text — match source line endings.
-	replacement := newText
 	if hasCRLF {
-		replacement = bytes.ReplaceAll(newText, []byte("\n"), []byte("\r\n"))
-		// Avoid double \r\n if newText already had \r\n.
+		replacement = bytes.ReplaceAll(replacement, []byte("\n"), []byte("\r\n"))
 		replacement = bytes.ReplaceAll(replacement, []byte("\r\r\n"), []byte("\r\n"))
 	}
 
@@ -66,13 +91,39 @@ func Edit(filename string, source []byte, input []byte) ([]byte, error) {
 	result = append(result, source[:origStart]...)
 	result = append(result, replacement...)
 	result = append(result, source[origEnd:]...)
-	return result, nil
+	return &EditResult{
+		Content:    result,
+		Pass:       pass,
+		IndentFrom: indentFrom,
+		IndentTo:   indentTo,
+		Reindented: reindented,
+		Warnings:   warnings,
+	}, nil
+}
+
+// normalizeForMatch normalizes source and oldText to LF line endings for matching,
+// returning the normalized forms and whether the source had CRLF.
+func normalizeForMatch(source, oldText []byte) (normalized, normalizedOld []byte, hasCRLF bool) {
+	hasCRLF = bytes.Contains(source, []byte("\r\n"))
+	if hasCRLF {
+		return bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n")),
+			bytes.ReplaceAll(oldText, []byte("\r\n"), []byte("\n")),
+			true
+	}
+	return source, oldText, false
+}
+
+// crlfAdjust maps byte offsets from LF-normalized source back to the original
+// (potentially CRLF) source if needed.
+func crlfAdjust(source []byte, start, end int) (origStart, origEnd int) {
+	if !bytes.Contains(source, []byte("\r\n")) {
+		return start, end
+	}
+	return crlfOffset(source, start), crlfOffset(source, end)
 }
 
 // crlfOffset converts a byte offset in normalized (LF-only) source to the corresponding
-// offset in the original CRLF source. It walks the original counting LF-equivalent positions:
-// each \r\n pair is treated as one line terminator (like \n in normalized form).
-// The returned offset accounts for the additional \r bytes.
+// offset in the original CRLF source.
 func crlfOffset(original []byte, pos int) int {
 	offset := 0
 	lf := 0
@@ -425,4 +476,110 @@ func closestRegion(source, old []byte) string {
 		fmt.Fprintf(&sb, "%4d: %s\n", i+1, sourceLines[i])
 	}
 	return sb.String()
+}
+
+// kindLabel returns a human-readable label for a Kind value.
+func kindLabel(k indent.Kind) string {
+	switch k {
+	case indent.Tab:
+		return "tab"
+	case indent.Space:
+		return "space"
+	default:
+		return "unknown"
+	}
+}
+
+// indentDepthFromLines computes the indent level from the leading whitespace of
+// the first non-blank line in matchedLines (which is the normalized matched region).
+// Returns 0 if no non-blank line is found.
+func indentDepthFromLines(matchedLines []byte, target indent.Style) int {
+	for _, line := range strings.Split(string(matchedLines), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		return indentLevel([]byte(line), target)
+	}
+	return 0
+}
+
+// applyReindent handles the trim-both reindent logic: first tries indent.Reindent,
+// and if AFTER has no indent (from.Kind==Unknown) but target is known, infers
+// indent depth from the matched region and applies it.
+// Returns (replacement, reindented, indentFrom, indentTo, warnings).
+func applyReindent(newText []byte, matchedRegion []byte, target indent.Style) (
+	replacement []byte, reindented bool, indentFrom, indentTo indent.Style, warnings []string,
+) {
+	reindentBytes, from, ok, reindentWarnings := indent.Reindent(newText, target)
+	warnings = append(warnings, reindentWarnings...)
+	replacement = reindentBytes
+	indentFrom = from
+	indentTo = target
+
+	if ok && from.Kind != indent.Unknown && from != target {
+		// Normal reindent: AFTER had indent and it was transformed.
+		reindented = true
+		return
+	}
+	if !ok {
+		warnings = append(warnings, "could not detect AFTER indent style; inserted as-is")
+		return
+	}
+	// from.Kind == Unknown: AFTER has no indent. Infer depth from matched region.
+	if depth := indentDepthFromLines(matchedRegion, target); depth > 0 {
+		replacement = applyIndentDepth(string(newText), depth, target)
+		reindented = true
+		indentFrom = indent.Style{Kind: indent.Unknown}
+	}
+	return
+}
+
+// indentLevel returns the indent level of a line given the target style.
+// A line with no leading whitespace returns 0.
+func indentLevel(line []byte, target indent.Style) int {
+	tabs := 0
+	spaces := 0
+	for _, b := range line {
+		switch b {
+		case '\t':
+			tabs++
+		case ' ':
+			spaces++
+		default:
+			goto done
+		}
+	}
+done:
+	if tabs > 0 {
+		return tabs
+	}
+	if spaces > 0 && target.Kind == indent.Space && target.Width > 0 {
+		return spaces / target.Width
+	}
+	return 0
+}
+
+// applyIndentDepth prepends target-style indentation to each non-empty line in text,
+// using the computed indent level (number of levels, not raw width).
+func applyIndentDepth(text string, level int, target indent.Style) []byte {
+	prefix := indentPrefix(level, target)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// indentPrefix returns a string of level indentation units in the target style.
+func indentPrefix(level int, target indent.Style) string {
+	if target.Kind == indent.Tab {
+		return strings.Repeat("\t", level)
+	}
+	width := target.Width
+	if width <= 0 {
+		width = 2
+	}
+	return strings.Repeat(" ", level*width)
 }
