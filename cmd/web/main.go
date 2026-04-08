@@ -162,7 +162,10 @@ func runDocsFetch(cmd *cobra.Command, args []string) error {
 	if len(args) == 2 {
 		topic = args[1]
 	}
-	tokens, _ := cmd.Flags().GetInt("tokens")
+	tokens, err := cmd.Flags().GetInt("tokens")
+	if err != nil {
+		return fmt.Errorf("invalid --tokens value: %w", err)
+	}
 
 	client, err := newDocsClient()
 	if err != nil {

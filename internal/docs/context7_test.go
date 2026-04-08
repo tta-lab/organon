@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -145,8 +146,9 @@ func TestClient_Resolve_MalformedJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !contains(err.Error(), "decode") && !contains(err.Error(), "invalid") {
-		t.Errorf("expected error to mention decode/invalid, got: %s", err.Error())
+	errStr := err.Error()
+	if !strings.Contains(errStr, "decode") && !strings.Contains(errStr, "invalid") {
+		t.Errorf("expected error to mention decode/invalid, got: %s", errStr)
 	}
 }
 
@@ -163,13 +165,13 @@ func TestClient_Resolve_HTTP404(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "resolve") {
+	if !strings.Contains(errStr, "resolve") {
 		t.Errorf("expected error to mention 'resolve', got: %s", errStr)
 	}
-	if !contains(errStr, "HTTP 404") {
+	if !strings.Contains(errStr, "HTTP 404") {
 		t.Errorf("expected error to mention 'HTTP 404', got: %s", errStr)
 	}
-	if contains(errStr, "web docs resolve") {
+	if strings.Contains(errStr, "web docs resolve") {
 		t.Errorf("resolve 404 should NOT have 'web docs resolve' hint, got: %s", errStr)
 	}
 }
@@ -187,10 +189,10 @@ func TestClient_Resolve_HTTP429(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "rate limited") {
+	if !strings.Contains(errStr, "rate limited") {
 		t.Errorf("expected error to mention 'rate limited', got: %s", errStr)
 	}
-	if !contains(errStr, "CONTEXT7_API_KEY") {
+	if !strings.Contains(errStr, "CONTEXT7_API_KEY") {
 		t.Errorf("expected error to mention 'CONTEXT7_API_KEY', got: %s", errStr)
 	}
 }
@@ -208,10 +210,10 @@ func TestClient_Resolve_HTTP401(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "invalid CONTEXT7_API_KEY") {
+	if !strings.Contains(errStr, "invalid CONTEXT7_API_KEY") {
 		t.Errorf("expected error to mention 'invalid CONTEXT7_API_KEY', got: %s", errStr)
 	}
-	if !contains(errStr, "ctx7sk") {
+	if !strings.Contains(errStr, "ctx7sk") {
 		t.Errorf("expected error to mention 'ctx7sk', got: %s", errStr)
 	}
 }
@@ -229,10 +231,10 @@ func TestClient_Resolve_HTTP500(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "HTTP 500") {
+	if !strings.Contains(errStr, "HTTP 500") {
 		t.Errorf("expected error to mention 'HTTP 500', got: %s", errStr)
 	}
-	if !contains(errStr, "internal error snippet") {
+	if !strings.Contains(errStr, "internal error snippet") {
 		t.Errorf("expected error to contain body snippet, got: %s", errStr)
 	}
 }
@@ -347,10 +349,10 @@ func TestClient_Docs_HTTP202(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "still indexing") {
+	if !strings.Contains(errStr, "still indexing") {
 		t.Errorf("expected error to mention 'still indexing', got: %s", errStr)
 	}
-	if !contains(errStr, "HTTP 202") {
+	if !strings.Contains(errStr, "HTTP 202") {
 		t.Errorf("expected error to mention 'HTTP 202', got: %s", errStr)
 	}
 }
@@ -368,13 +370,13 @@ func TestClient_Docs_HTTP404(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	errStr := err.Error()
-	if !contains(errStr, "docs") {
+	if !strings.Contains(errStr, "docs") {
 		t.Errorf("expected error to mention 'docs', got: %s", errStr)
 	}
-	if !contains(errStr, "HTTP 404") {
+	if !strings.Contains(errStr, "HTTP 404") {
 		t.Errorf("expected error to mention 'HTTP 404', got: %s", errStr)
 	}
-	if !contains(errStr, "web docs resolve") {
+	if !strings.Contains(errStr, "web docs resolve") {
 		t.Errorf("expected error to mention 'web docs resolve' hint, got: %s", errStr)
 	}
 }
@@ -391,7 +393,7 @@ func TestClient_Docs_HTTP429(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !contains(err.Error(), "rate limited") {
+	if !strings.Contains(err.Error(), "rate limited") {
 		t.Errorf("expected error to mention 'rate limited', got: %s", err.Error())
 	}
 }
@@ -411,17 +413,4 @@ func TestClient_Docs_EmptyBody(t *testing.T) {
 	if out != "" {
 		t.Errorf("expected empty string, got %q", out)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
