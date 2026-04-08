@@ -48,8 +48,8 @@ func NewClientWithBaseURL(apiKey, baseURL string) *Client {
 
 // Resolve searches Context7 for libraries matching the query.
 func (c *Client) Resolve(ctx context.Context, query string) ([]Library, error) {
-	url := c.baseURL + "/api/v1/search?query=" + url.QueryEscape(query)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	searchURL := c.baseURL + "/api/v1/search?query=" + url.QueryEscape(query)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("context7 resolve: build request: %w", err)
 	}

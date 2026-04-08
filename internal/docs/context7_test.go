@@ -3,6 +3,7 @@ package docs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,12 +15,27 @@ func TestClient_Resolve_OK(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		resp := map[string]any{
 			"results": []map[string]any{
-				{"id": "/reactjs/react.dev", "title": "React", "description": "Library", "trustScore": 10.0, "totalSnippets": 2779, "versions": []string{"18.2.0", "17.0.2"}},
-				{"id": "/facebook/react", "title": "React Native", "description": "Mobile", "trustScore": 9.0, "totalSnippets": 1000, "versions": []string{}},
+				{
+					"id":            "/reactjs/react.dev",
+					"title":         "React",
+					"description":   "Library",
+					"trustScore":    10.0,
+					"totalSnippets": 2779,
+					"versions":      []string{"18.2.0", "17.0.2"},
+				},
+				{
+					"id":            "/facebook/react",
+					"title":         "React Native",
+					"description":   "Mobile",
+					"trustScore":    9.0,
+					"totalSnippets": 1000,
+					"versions":      []string{},
+				},
 			},
-		})
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -69,7 +85,7 @@ func TestClient_Resolve_NoAuthHeaderWhenUnset(t *testing.T) {
 			t.Errorf("expected no Authorization header, got %s", auth)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 	}))
 	defer server.Close()
 
@@ -85,7 +101,7 @@ func TestClient_Resolve_TrimsKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 	}))
 	defer server.Close()
 
@@ -103,7 +119,7 @@ func TestClient_Resolve_TrimsKey(t *testing.T) {
 func TestClient_Resolve_EmptyResults(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 	}))
 	defer server.Close()
 
@@ -120,7 +136,7 @@ func TestClient_Resolve_EmptyResults(t *testing.T) {
 func TestClient_Resolve_MalformedJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("not-json{"))
+		_, _ = w.Write([]byte("not-json{"))
 	}))
 	defer server.Close()
 
@@ -137,7 +153,7 @@ func TestClient_Resolve_MalformedJSON(t *testing.T) {
 func TestClient_Resolve_HTTP404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer server.Close()
 
@@ -161,7 +177,7 @@ func TestClient_Resolve_HTTP404(t *testing.T) {
 func TestClient_Resolve_HTTP429(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte("rate limited"))
+		_, _ = w.Write([]byte("rate limited"))
 	}))
 	defer server.Close()
 
@@ -182,7 +198,7 @@ func TestClient_Resolve_HTTP429(t *testing.T) {
 func TestClient_Resolve_HTTP401(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("invalid key"))
+		_, _ = w.Write([]byte("invalid key"))
 	}))
 	defer server.Close()
 
@@ -203,7 +219,7 @@ func TestClient_Resolve_HTTP401(t *testing.T) {
 func TestClient_Resolve_HTTP500(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error snippet"))
+		_, _ = w.Write([]byte("internal error snippet"))
 	}))
 	defer server.Close()
 
@@ -225,7 +241,7 @@ func TestClient_Docs_OK(t *testing.T) {
 	var capturedReq http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
-		w.Write([]byte("React hooks documentation content"))
+		_, _ = io.WriteString(w, "React hooks documentation content")
 	}))
 	defer server.Close()
 
@@ -254,7 +270,7 @@ func TestClient_Docs_StripsLeadingSlash(t *testing.T) {
 	var capturedReq http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
-		w.Write([]byte("docs"))
+		_, _ = io.WriteString(w, "docs")
 	}))
 	defer server.Close()
 
@@ -273,7 +289,7 @@ func TestClient_Docs_OmitsEmptyParams(t *testing.T) {
 	var capturedReq http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
-		w.Write([]byte("docs"))
+		_, _ = io.WriteString(w, "docs")
 	}))
 	defer server.Close()
 
@@ -299,7 +315,7 @@ func TestClient_Docs_TopicEscaped(t *testing.T) {
 	var capturedReq http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedReq = *r
-		w.Write([]byte("docs"))
+		_, _ = io.WriteString(w, "docs")
 	}))
 	defer server.Close()
 
@@ -321,7 +337,7 @@ func TestClient_Docs_TopicEscaped(t *testing.T) {
 func TestClient_Docs_HTTP202(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte("still indexing"))
+		_, _ = w.Write([]byte("still indexing"))
 	}))
 	defer server.Close()
 
@@ -342,7 +358,7 @@ func TestClient_Docs_HTTP202(t *testing.T) {
 func TestClient_Docs_HTTP404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer server.Close()
 
@@ -366,7 +382,7 @@ func TestClient_Docs_HTTP404(t *testing.T) {
 func TestClient_Docs_HTTP429(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte("rate limited"))
+		_, _ = w.Write([]byte("rate limited"))
 	}))
 	defer server.Close()
 
@@ -383,7 +399,7 @@ func TestClient_Docs_HTTP429(t *testing.T) {
 func TestClient_Docs_EmptyBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(""))
+		_, _ = w.Write([]byte(""))
 	}))
 	defer server.Close()
 

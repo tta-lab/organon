@@ -103,7 +103,7 @@ func TestNewDocsClient_EmptyKeySet(t *testing.T) {
 }
 
 func TestNewDocsClient_KeyUnset(t *testing.T) {
-	os.Unsetenv("CONTEXT7_API_KEY")
+	_ = os.Unsetenv("CONTEXT7_API_KEY")
 	_, err := newDocsClient()
 	if err != nil {
 		t.Errorf("expected no error for unset CONTEXT7_API_KEY, got: %v", err)
