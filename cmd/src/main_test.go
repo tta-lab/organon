@@ -288,6 +288,83 @@ func TestEdit_WorksOnPython(t *testing.T) {
 	assert.Contains(t, string(result), "self.host = host.strip()")
 }
 
+// ---------- unsupported file types — exit 0 after successful edit ----------
+
+func testUnsupportedFileExitZero(t *testing.T, filename, orig, stdin, want string) {
+	t.Helper()
+	dir := t.TempDir()
+	f := filepath.Join(dir, filename)
+	require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(stdin), func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr, "edit on %s should exit 0", filename)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), want)
+}
+
+func TestEdit_UnsupportedFile_Env(t *testing.T) {
+	testUnsupportedFileExitZero(t, ".env",
+		"FOO=bar\nBAZ=qux\n",
+		"===BEFORE===\nFOO=bar\n===AFTER===\nFOO=baz\n",
+		"FOO=baz\nBAZ=qux\n")
+}
+
+func TestEdit_UnsupportedFile_Jsonc(t *testing.T) {
+	testUnsupportedFileExitZero(t, "x.jsonc",
+		`{ "v": "1" }`+"\n",
+		"===BEFORE===\n{ \"v\": \"1\" }\n===AFTER===\n{ \"v\": \"2\" }\n",
+		`{ "v": "2" }`)
+}
+
+func TestEdit_UnsupportedFile_Extensionless(t *testing.T) {
+	testUnsupportedFileExitZero(t, "noext",
+		"line\n",
+		"===BEFORE===\nline\n===AFTER===\nLINE\n",
+		"LINE\n")
+}
+
+func TestEdit_UnsupportedFile_Editorconfig(t *testing.T) {
+	testUnsupportedFileExitZero(t, ".editorconfig",
+		"[*]\nindent_style = space\n",
+		"===BEFORE===\nindent_style = space\n===AFTER===\nindent_style = tab\n",
+		"indent_style = tab\n")
+}
+
+func TestEdit_UnsupportedFile_Text(t *testing.T) {
+	testUnsupportedFileExitZero(t, "notes.txt",
+		"hello world\n",
+		"===BEFORE===\nhello world\n===AFTER===\nhello world!\n",
+		"hello world!\n")
+}
+
+func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, ".env")
+	orig := "FOO=bar\nBAZ=qux\n"
+	require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte("===BEFORE===\nFOO=bar\n===AFTER===\nFOO=baz\n"), func() {
+		root.SetArgs([]string{"edit", "-s", "anyid", f})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "unsupported file type")
+
+	// File must be unchanged — no half-applied edits.
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Equal(t, orig, string(result))
+}
+
 // ---------- edit --section ----------
 
 func extractSymbolID(t *testing.T, filename string, source []byte, depth int, labelText string) string {

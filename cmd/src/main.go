@@ -311,7 +311,7 @@ func runComment(cmd *cobra.Command, args []string) error {
 }
 
 // writeAndShow writes the result to disk, prints a colored diff of old→new,
-// then prints the updated symbol tree.
+// then prints the updated symbol tree if the file type is supported by tree-sitter.
 func writeAndShow(filename string, source, result []byte, depth int) error {
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
@@ -321,6 +321,11 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 	}
 	if isMarkdown(filename) {
 		return printMarkdownTree(filename, result)
+	}
+	// Skip tree display for file types tree-sitter doesn't support.
+	// The file was already written successfully — tree display is optional.
+	if _, err := treesitter.LangNameFromExt(filename); err != nil {
+		return nil
 	}
 	return printTree(filename, result, depth)
 }
