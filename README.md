@@ -69,6 +69,16 @@ Search the web and return results.
 web "tree-sitter Go bindings"
 ```
 
+### `web docs` — Library documentation
+
+Resolve library names to Context7 IDs and fetch documentation.
+
+```bash
+web docs resolve react       # list matching libraries with IDs
+web docs fetch /reactjs/react.dev hooks  # fetch docs for a library
+CONTEXT7_API_KEY=... web docs resolve react  # with API key (higher rate limits)
+```
+
 ### `alert` — Agent alerts
 
 Send an alert message to the bridge service (e.g. Telegram via bridge). Requires `ALERT_ENDPOINT` env var.
