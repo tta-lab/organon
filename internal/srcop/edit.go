@@ -43,16 +43,7 @@ func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	}
 
 	// Detect and normalize CRLF for matching.
-	hasCRLF := bytes.Contains(source, []byte("\r\n"))
-	normalized := source
-	if hasCRLF {
-		normalized = bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n"))
-	}
-
-	normalizedOld := oldText
-	if hasCRLF {
-		normalizedOld = bytes.ReplaceAll(oldText, []byte("\r\n"), []byte("\n"))
-	}
+	normalized, normalizedOld, hasCRLF := normalizeForMatch(source, oldText)
 
 	start, end, pass, err := findMatch(normalized, normalizedOld, filename)
 	if err != nil {
@@ -60,40 +51,38 @@ func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	}
 
 	// If source had CRLF, map matched positions back to original byte offsets.
-	origStart, origEnd := start, end
-	if hasCRLF {
-		origStart = crlfOffset(source, start)
-		origEnd = crlfOffset(source, end)
-	}
+	origStart, origEnd := crlfAdjust(source, start, end)
 
 	// Apply reindent for trim-both pass when target style is known.
 	// This runs BEFORE CRLF adjustment so that indent.Reindent operates on LF content.
 	// Note: reindent is intentionally scoped to trim-both only — exact, trim-trailing,
-	// and unicode-fold passes don't involve indent normalization. If an agent's BEFORE
-	// happens to match exact but their AFTER uses a different style, the mismatch will
-	// be inserted silently. This narrow trigger is the v1 mitigation; there is no
-	// --no-reindent opt-out. If alignment padding is destroyed, revert via git.
+	// and unicode-fold passes don't involve indent normalization.
 	var warnings []string
 	var indentFrom, indentTo indent.Style
 	var reindented bool
 	replacement := newText
 
-	if pass == "trim-both" {
+	switch pass {
+	case "trim-both":
 		target := indent.Detect(filename, source)
 		if target.Kind != indent.Unknown {
 			reindentedBytes, from, ok, reindentWarnings := indent.Reindent(newText, target)
 			warnings = append(warnings, reindentWarnings...)
-			if ok {
-				if from != target {
-					// Actual change made.
-					replacement = reindentedBytes
-					reindented = true
-					indentFrom = from
-					indentTo = target
-				}
-				// else from == target: no change needed.
-			} else {
+			if ok && from != target {
+				replacement = reindentedBytes
+				reindented = true
+				indentFrom = from
+				indentTo = target
+			} else if !ok {
 				warnings = append(warnings, "could not detect AFTER indent style; inserted as-is")
+			}
+		}
+	case "exact":
+		// Reindent is not applied for exact pass; warn if AFTER style mismatches target.
+		if target := indent.Detect(filename, source); target.Kind != indent.Unknown {
+			if after := indent.DetectByContent(newText); after.Kind != indent.Unknown && after.Kind != target.Kind {
+				warnings = append(warnings, fmt.Sprintf("AFTER uses %s indent but file uses %s; mismatch will be inserted verbatim",
+					kindLabel(after.Kind), kindLabel(target.Kind)))
 			}
 		}
 	}
@@ -118,10 +107,29 @@ func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 	}, nil
 }
 
+// normalizeForMatch normalizes source and oldText to LF line endings for matching,
+// returning the normalized forms and whether the source had CRLF.
+func normalizeForMatch(source, oldText []byte) (normalized, normalizedOld []byte, hasCRLF bool) {
+	hasCRLF = bytes.Contains(source, []byte("\r\n"))
+	if hasCRLF {
+		return bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n")),
+			bytes.ReplaceAll(oldText, []byte("\r\n"), []byte("\n")),
+			true
+	}
+	return source, oldText, false
+}
+
+// crlfAdjust maps byte offsets from LF-normalized source back to the original
+// (potentially CRLF) source if needed.
+func crlfAdjust(source []byte, start, end int) (origStart, origEnd int) {
+	if !bytes.Contains(source, []byte("\r\n")) {
+		return start, end
+	}
+	return crlfOffset(source, start), crlfOffset(source, end)
+}
+
 // crlfOffset converts a byte offset in normalized (LF-only) source to the corresponding
-// offset in the original CRLF source. It walks the original counting LF-equivalent positions:
-// each \r\n pair is treated as one line terminator (like \n in normalized form).
-// The returned offset accounts for the additional \r bytes.
+// offset in the original CRLF source.
 func crlfOffset(original []byte, pos int) int {
 	offset := 0
 	lf := 0
@@ -474,4 +482,16 @@ func closestRegion(source, old []byte) string {
 		fmt.Fprintf(&sb, "%4d: %s\n", i+1, sourceLines[i])
 	}
 	return sb.String()
+}
+
+// kindLabel returns a human-readable label for a Kind value.
+func kindLabel(k indent.Kind) string {
+	switch k {
+	case indent.Tab:
+		return "tab"
+	case indent.Space:
+		return "space"
+	default:
+		return "unknown"
+	}
 }

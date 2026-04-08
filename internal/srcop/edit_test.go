@@ -364,6 +364,7 @@ func TestEdit_UnicodeFold(t *testing.T) {
 	input := "===BEFORE===\nHe said \"hello\" to her.\n===AFTER===\nHe said \"hi\" to her.\n"
 	result, err := Edit("file.txt", source, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result.Content), "He said \"hi\" to her.", "AFTER text must be applied via unicode-fold match")
+	assert.Contains(t, string(result.Content), "He said \"hi\" to her.",
+		"AFTER text must be applied via unicode-fold match")
 	assert.NotContains(t, string(result.Content), "\u201c", "matched source curly quotes replaced by AFTER")
 }

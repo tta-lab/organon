@@ -430,3 +430,85 @@ func TestEditCmd_ScopedEmptyTree(t *testing.T) {
 	assert.Contains(t, runErr.Error(), "not found")
 	assert.Contains(t, runErr.Error(), "--tree")
 }
+
+// ---------- line boundary helpers ----------
+
+func TestLineStartAt(t *testing.T) {
+	src := []byte("line1\nline2\nline3")
+
+	tests := []struct {
+		pos      int
+		expected int
+		desc     string
+	}{
+		{0, 0, "at start of first line"},
+		{1, 0, "mid first line"},
+		{5, 0, "at newline (end of line1)"},
+		{6, 6, "start of second line"},
+		{10, 6, "mid second line"},
+		{11, 6, "at second newline"},
+		{12, 12, "start of third line"},
+		{17, 12, "end of third line (no trailing newline)"},
+		{18, 12, "past end of source"},
+		{100, 12, "far past end"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := lineStartAt(src, tc.pos)
+			assert.Equal(t, tc.expected, got, "pos=%d", tc.pos)
+		})
+	}
+}
+
+func TestLineEndAfter(t *testing.T) {
+	// "line1\nline2\nline3": newlines at 5, 11; len=17
+	src := []byte("line1\nline2\nline3")
+
+	tests := []struct {
+		pos      int
+		expected int
+		desc     string
+	}{
+		{0, 5, "at start of line1: scans to newline at 5, returns 5"},
+		{1, 5, "mid line1: scans to newline at 5"},
+		{5, 6, "at first newline: returns 6 (pos+1)"},
+		{6, 11, "at start of line2: scans to newline at 11"},
+		{10, 11, "mid line2: scans to newline at 11"},
+		{11, 12, "at second newline: returns 12 (pos+1)"},
+		{12, 17, "at start of line3 (no trailing newline): returns len"},
+		{17, 17, "at end of source"},
+		{18, 17, "past end of source"},
+		{100, 17, "far past end"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := lineEndAfter(src, tc.pos)
+			assert.Equal(t, tc.expected, got, "pos=%d", tc.pos)
+		})
+	}
+}
+
+func TestLineBoundaryExtension_Integration(t *testing.T) {
+	// testdata/example.go: "// Config holds server configuration.\ntype Config struct {\n\tHost string\n..."
+	// Host symbol tree-sitter range is [61:70): 'H' through 'g' of "Host string".
+	// Leading tab is at byte 60, newline after field at byte 71.
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	src, err := os.ReadFile(filepath.Join("..", "..", "testdata", "src", "example.go"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(f, src, 0o644))
+
+	hostID := extractSymbolID(t, f, src, 2, "Host")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte("===BEFORE===\n\tHost string\n===AFTER===\n\tHost string // server hostname\n"), func() {
+		root.SetArgs([]string{"edit", "-s", hostID, f})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr, "line boundary extension should succeed")
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "Host string // server hostname")
+}

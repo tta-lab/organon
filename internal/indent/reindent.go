@@ -1,7 +1,6 @@
 package indent
 
 import (
-	"bytes"
 	"strings"
 )
 
@@ -38,10 +37,7 @@ func Reindent(text []byte, target Style) (result []byte, from Style, ok bool, wa
 // Returns a warning string if the line's prefix could not be cleanly transformed.
 func reindentLine(line string, from, target Style) (string, string) {
 	// Find leading whitespace prefix.
-	prefixLen := 0
-	for prefixLen < len(line) && (line[prefixLen] == '\t' || line[prefixLen] == ' ') {
-		prefixLen++
-	}
+	prefixLen := leadingPrefixLen(line)
 	prefix := line[:prefixLen]
 	rest := line[prefixLen:]
 
@@ -93,15 +89,11 @@ func reindentLine(line string, from, target Style) (string, string) {
 	return newPrefix + rest, ""
 }
 
-// LineHasMixedPrefix returns true if the line's leading whitespace contains both
-// tabs and spaces.
-func LineHasMixedPrefix(line string) bool {
+// leadingPrefixLen returns the byte length of the leading whitespace prefix of line.
+func leadingPrefixLen(line string) int {
 	prefixLen := 0
 	for prefixLen < len(line) && (line[prefixLen] == '\t' || line[prefixLen] == ' ') {
 		prefixLen++
 	}
-	prefix := line[:prefixLen]
-	return bytes.ContainsAny([]byte(prefix), "\t ") &&
-		strings.Contains(prefix, "\t") &&
-		strings.Contains(prefix, " ")
+	return prefixLen
 }

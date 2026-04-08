@@ -452,13 +452,19 @@ func lineStartAt(source []byte, pos int) int {
 	return pos
 }
 
-// lineEndAfter returns the byte offset just past the newline that ends the line
-// containing pos-1. If no newline, returns len(source).
+// lineEndAfter returns the byte offset of the newline that ends the line
+// containing pos-1. If pos lands on a newline, returns pos+1. If no newline
+// is found, returns len(source).
 func lineEndAfter(source []byte, pos int) int {
 	if pos > len(source) {
-		pos = len(source)
+		return len(source)
 	}
-	for pos < len(source) && source[pos-1] != '\n' {
+	// If pos lands on a newline, the "line containing pos-1" ends here.
+	if pos < len(source) && source[pos] == '\n' {
+		return pos + 1
+	}
+	// Scan forward from pos to find the newline ending this line.
+	for pos < len(source) && source[pos] != '\n' {
 		pos++
 	}
 	return pos

@@ -14,6 +14,11 @@ const (
 	Space
 )
 
+// Style describes an indentation style.
+// Invariants: if Kind is Tab, Width is ignored (tabs are undefined-width).
+// If Kind is Space, Width must be 2, 4, or 8. These constraints are enforced
+// by the Reindent function but not by the constructor; invalid combinations
+// (e.g. Tab+Width=4) are silently accepted to allow legacy files to load.
 type Style struct {
 	Kind   Kind
 	Width  int
