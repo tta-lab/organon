@@ -111,9 +111,12 @@ func TestSearchClampsCount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req graphqlRequest
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &req)
+		if err := json.Unmarshal(body, &req); err != nil {
+			return
+		}
 		receivedQuery = req.Variables.Query
 		w.Header().Set("Content-Type", "application/json")
+		//nolint:errcheck
 		w.Write([]byte(`{"data":{"search":{"results":{"matchCount":0,"resultCount":0,"results":[]}}}}`))
 	}))
 	defer srv.Close()
@@ -143,6 +146,7 @@ func TestSearchClampsTimeout(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		//nolint:errcheck
 		w.Write([]byte(`{"data":{"search":{"results":{"matchCount":0,"resultCount":0,"results":[]}}}}`))
 	}))
 	defer srv.Close()

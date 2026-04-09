@@ -20,7 +20,8 @@ var endpoint = "https://sourcegraph.com/.api/graphql"
 type graphqlRequest struct {
 	Query     string `json:"query"`
 	Variables struct {
-		Query string `json:"query"`
+		Query      string `json:"query"`
+		MaxResults int    `json:"maxResults"`
 	} `json:"variables"`
 }
 
@@ -68,9 +69,16 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 	}
 
 	reqBody := graphqlRequest{
-		Query: "query Search($query: String!) { search(query: $query, version: V2, patternType: keyword ) { results { matchCount, limitHit, resultCount, approximateResultCount, missing { name }, timedout { name }, indexUnavailable, results { __typename, ... on FileMatch { repository { name }, file { path, url, content }, lineMatches { preview, lineNumber, offsetAndLengths } } } } } }",
+		Query: "query Search($query: String!, $maxResults: Int) { " +
+			"search(query: $query, version: V2, patternType: keyword, maxResults: $maxResults) { " +
+			"results { matchCount, limitHit, resultCount, approximateResultCount, " +
+			"missing { name }, timedout { name }, indexUnavailable, " +
+			"results { __typename, ... on FileMatch { " +
+			"repository { name }, file { path, url, content }, " +
+			"lineMatches { preview, lineNumber, offsetAndLengths } } } } } }",
 	}
 	reqBody.Variables.Query = query
+	reqBody.Variables.MaxResults = count
 
 	graphqlQueryBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -117,6 +125,7 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 	return formatSourcegraphResults(result, contextWindow)
 }
 
+//nolint:gocyclo
 func formatSourcegraphResults(result map[string]any, contextWindow int) (string, error) {
 	var buffer strings.Builder
 
