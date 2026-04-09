@@ -104,3 +104,30 @@ web docs fetch /reactjs/react.dev/18.2.0 --tokens 400
 - **`CONTEXT7_API_KEY` unset** — anonymous access (rate limited)
 
 > **Note:** Setting `CONTEXT7_API_KEY=""` returns an error. Leave it unset for anonymous access.
+
+## web sgraph
+
+Search code across public repositories using Sourcegraph's public GraphQL API.
+
+```bash
+web sgraph "repo:^github\.com/golang/go$ fmt.Println"
+web sgraph "lang:go context.WithTimeout" --count 20
+web sgraph "file:Dockerfile alpine" --context 15 --timeout 60
+web sgraph "lang:typescript useState type:symbol"
+```
+
+### Flags
+
+- `-c, --count N` — max results to return (10–20, default 10); API may return fewer
+- `-C, --context N` — lines of context around each match (default 10)
+- `-t, --timeout N` — request timeout in seconds (max 120, default 0 = no timeout)
+
+### Query Syntax
+
+Sourcegraph query syntax: `repo:`, `file:`, `lang:`, `type:symbol`, regex patterns, and boolean operators (`AND`/`OR`/`NOT`). Examples:
+
+- `repo:^github\.com/golang/go$ fmt.Println` — find `fmt.Println` in the Go standard library
+- `lang:typescript useState type:symbol` — TypeScript `useState` function definitions
+- `file:Dockerfile (alpine OR ubuntu)` — Dockerfiles mentioning either base image
+
+Only searches public repositories. No authentication required; rate limits may apply.
