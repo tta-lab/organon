@@ -33,6 +33,7 @@ make ci           # fmt, vet, lint, test, build
 - `internal/markdown/` — heading parsing via goldmark
 - `internal/search/` — web search backends (Exa, Brave, DuckDuckGo)
 - `internal/docs/` — Context7 documentation client
+- `internal/sgraph/` — Sourcegraph public GraphQL code search
 
 ## Testing
 

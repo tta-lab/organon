@@ -12,6 +12,7 @@ import (
 	"github.com/tta-lab/organon/internal/fetch"
 	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/search"
+	"github.com/tta-lab/organon/internal/sgraph"
 )
 
 func main() {
@@ -22,6 +23,7 @@ func main() {
 
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newFetchCmd())
+	root.AddCommand(newSgraphCmd())
 
 	docsCmd := &cobra.Command{Use: "docs", Short: "Library documentation via Context7"}
 	docsCmd.AddCommand(newDocsResolveCmd())
@@ -184,4 +186,40 @@ func normalizeLibraryID(id string) string {
 		return id
 	}
 	return "/" + id
+}
+
+func newSgraphCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sgraph <query>",
+		Short: "Search code across public repositories via Sourcegraph",
+		Long: `Queries Sourcegraph's public GraphQL API to search code across public
+repositories. Uses Sourcegraph query syntax: repo:, file:, lang:, type:symbol,
+regex patterns, and boolean operators (AND/OR/NOT).
+
+Examples:
+  web sgraph "repo:^github\.com/golang/go$ fmt.Println"
+  web sgraph "lang:go context.WithTimeout" --count 20
+  web sgraph "file:Dockerfile alpine" --context 15 --timeout 60
+  web sgraph "lang:typescript useState type:symbol"
+
+Only searches public repositories. Unauthenticated; rate limits may apply.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runSgraph,
+	}
+	cmd.Flags().IntP("count", "c", 10, "Max results to return (1-20)")
+	cmd.Flags().IntP("context", "C", 10, "Lines of context around each match")
+	cmd.Flags().IntP("timeout", "t", 0, "Request timeout in seconds (max 120, 0 = no timeout)")
+	return cmd
+}
+
+func runSgraph(cmd *cobra.Command, args []string) error {
+	count, _ := cmd.Flags().GetInt("count")
+	contextWindow, _ := cmd.Flags().GetInt("context")
+	timeout, _ := cmd.Flags().GetInt("timeout")
+	out, err := sgraph.Search(context.Background(), args[0], count, contextWindow, timeout)
+	if err != nil {
+		return err
+	}
+	fmt.Print(out)
+	return nil
 }
