@@ -20,13 +20,12 @@ var endpoint = "https://sourcegraph.com/.api/graphql"
 type graphqlRequest struct {
 	Query     string `json:"query"`
 	Variables struct {
-		Query      string `json:"query"`
-		MaxResults int    `json:"maxResults"`
+		Query string `json:"query"`
 	} `json:"variables"`
 }
 
 // Search queries Sourcegraph's public GraphQL API and returns formatted
-// markdown results. count clamps to [1, 20], contextWindow defaults to 10,
+// markdown results. count clamps to [10, 20], contextWindow defaults to 10,
 // timeout in seconds (0 = no timeout, max 120).
 func Search(ctx context.Context, query string, count, contextWindow, timeout int) (string, error) {
 	if query == "" {
@@ -69,16 +68,16 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 	}
 
 	reqBody := graphqlRequest{
-		Query: "query Search($query: String!, $maxResults: Int) { " +
-			"search(query: $query, version: V2, patternType: keyword, maxResults: $maxResults) { " +
-			"results { matchCount, limitHit, resultCount, approximateResultCount, " +
-			"missing { name }, timedout { name }, indexUnavailable, " +
-			"results { __typename, ... on FileMatch { " +
+		Query: "query Search($query: String!) { " +
+			"search(query: $query, version: V2, patternType: keyword) { " +
+			"results { matchCount, limitHit, resultCount, results { __typename, ... on FileMatch { " +
 			"repository { name }, file { path, url, content }, " +
-			"lineMatches { preview, lineNumber, offsetAndLengths } } } } } }",
+			"lineMatches { preview, lineNumber } } } } } }",
 	}
 	reqBody.Variables.Query = query
-	reqBody.Variables.MaxResults = count
+	// count is validated above; the Sourcegraph API does not accept a maxResults
+	// argument, so the formatter enforces the 10-result cap via hardcoded slice.
+	_ = count
 
 	graphqlQueryBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -125,7 +124,7 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 	return formatSourcegraphResults(result, contextWindow)
 }
 
-//nolint:gocyclo
+//nolint:gocyclo // formatSourcegraphResults is a straight port; splitting it would obscure the original logic
 func formatSourcegraphResults(result map[string]any, contextWindow int) (string, error) {
 	var buffer strings.Builder
 

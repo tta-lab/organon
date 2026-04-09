@@ -105,7 +105,6 @@ func TestFormatNoResults(t *testing.T) {
 
 func TestSearchClampsCount(t *testing.T) {
 	defer resetHTTP()
-	resetHTTP()
 
 	var receivedQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -213,9 +213,18 @@ Only searches public repositories. Unauthenticated; rate limits may apply.`,
 }
 
 func runSgraph(cmd *cobra.Command, args []string) error {
-	count, _ := cmd.Flags().GetInt("count")
-	contextWindow, _ := cmd.Flags().GetInt("context")
-	timeout, _ := cmd.Flags().GetInt("timeout")
+	count, err := cmd.Flags().GetInt("count")
+	if err != nil {
+		return fmt.Errorf("invalid --count value: %w", err)
+	}
+	contextWindow, err := cmd.Flags().GetInt("context")
+	if err != nil {
+		return fmt.Errorf("invalid --context value: %w", err)
+	}
+	timeout, err := cmd.Flags().GetInt("timeout")
+	if err != nil {
+		return fmt.Errorf("invalid --timeout value: %w", err)
+	}
 	out, err := sgraph.Search(context.Background(), args[0], count, contextWindow, timeout)
 	if err != nil {
 		return err
