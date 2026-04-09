@@ -75,9 +75,8 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 			"lineMatches { preview, lineNumber } } } } } }",
 	}
 	reqBody.Variables.Query = query
-	// count is validated above; the Sourcegraph API does not accept a maxResults
-	// argument, so the formatter enforces the 10-result cap via hardcoded slice.
-	_ = count
+	// count is validated above and passed to formatSourcegraphResults to cap
+	// displayed results; the Sourcegraph API itself does not accept a maxResults arg.
 
 	graphqlQueryBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -121,11 +120,11 @@ func Search(ctx context.Context, query string, count, contextWindow, timeout int
 		return "", fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return formatSourcegraphResults(result, contextWindow)
+	return formatSourcegraphResults(result, contextWindow, count)
 }
 
 //nolint:gocyclo // formatSourcegraphResults is a straight port; splitting it would obscure the original logic
-func formatSourcegraphResults(result map[string]any, contextWindow int) (string, error) {
+func formatSourcegraphResults(result map[string]any, contextWindow, maxResults int) (string, error) {
 	var buffer strings.Builder
 
 	if errors, ok := result["errors"].([]any); ok && len(errors) > 0 {
@@ -174,9 +173,9 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		return buffer.String(), nil
 	}
 
-	maxResults := 10
-	if len(results) > maxResults {
-		results = results[:maxResults]
+	cap := max(1, maxResults)
+	if len(results) > cap {
+		results = results[:cap]
 	}
 
 	for i, res := range results {

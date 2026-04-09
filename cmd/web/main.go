@@ -206,7 +206,7 @@ Only searches public repositories. Unauthenticated; rate limits may apply.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runSgraph,
 	}
-	cmd.Flags().IntP("count", "c", 10, "Max results to return (1-20)")
+	cmd.Flags().IntP("count", "c", 10, "Max results to return (10-20, default 10)")
 	cmd.Flags().IntP("context", "C", 10, "Lines of context around each match")
 	cmd.Flags().IntP("timeout", "t", 0, "Request timeout in seconds (max 120, 0 = no timeout)")
 	return cmd

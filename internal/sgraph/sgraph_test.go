@@ -49,7 +49,7 @@ func TestFormatSourcegraphResults_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := formatSourcegraphResults(result, 2)
+	out, err := formatSourcegraphResults(result, 2, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestFormatGraphQLError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := formatSourcegraphResults(result, 10)
+	out, err := formatSourcegraphResults(result, 10, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestFormatNoResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := formatSourcegraphResults(result, 10)
+	out, err := formatSourcegraphResults(result, 10, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,9 +123,8 @@ func TestSearchClampsCount(t *testing.T) {
 	httpClient = srv.Client()
 	endpoint = srv.URL
 
-	// count=25 should be clamped to 20 before the request is sent;
-	// the server receives the original query string (count is validated
-	// client-side, not reflected in the GraphQL query text).
+	// count=25 is clamped to 20; the GraphQL query doesn't carry count,
+	// so the server receives the original query text.
 	out, err := Search(context.Background(), "test query", 25, 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -133,7 +132,6 @@ func TestSearchClampsCount(t *testing.T) {
 	if !strings.Contains(out, "No results found") {
 		t.Fatalf("unexpected output: %s", out)
 	}
-	// Verify the query was passed through (clamping is in the count variable, not the query)
 	if receivedQuery != "test query" {
 		t.Fatalf("expected query 'test query', got: %s", receivedQuery)
 	}
@@ -141,7 +139,6 @@ func TestSearchClampsCount(t *testing.T) {
 
 func TestSearchClampsTimeout(t *testing.T) {
 	defer resetHTTP()
-	resetHTTP()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -165,7 +162,6 @@ func TestSearchClampsTimeout(t *testing.T) {
 
 func TestSearchEmptyQuery(t *testing.T) {
 	defer resetHTTP()
-	resetHTTP()
 	_, err := Search(context.Background(), "", 10, 10, 0)
 	if err == nil {
 		t.Fatal("expected error for empty query")
@@ -177,7 +173,6 @@ func TestSearchEmptyQuery(t *testing.T) {
 
 func TestSearchHTTPError(t *testing.T) {
 	defer resetHTTP()
-	resetHTTP()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
@@ -201,8 +196,7 @@ func TestSearchLive(t *testing.T) {
 		t.Skip("skipping live network test")
 	}
 	defer resetHTTP()
-	resetHTTP()
-	out, err := Search(context.Background(), "repo:^github\\.com/golang/go$ package main", 3, 5, 30)
+	out, err := Search(context.Background(), `repo:^github\.com/golang/go$ package main`, 3, 5, 30)
 	if err != nil {
 		t.Fatalf("live search failed: %v", err)
 	}

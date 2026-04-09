@@ -118,7 +118,7 @@ web sgraph "lang:typescript useState type:symbol"
 
 ### Flags
 
-- `-c, --count N` — max results to return (1–20, default 10)
+- `-c, --count N` — max results to return (10–20, default 10); API may return fewer
 - `-C, --context N` — lines of context around each match (default 10)
 - `-t, --timeout N` — request timeout in seconds (max 120, default 0 = no timeout)
 
