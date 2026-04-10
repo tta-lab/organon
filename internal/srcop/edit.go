@@ -42,6 +42,32 @@ func Edit(filename string, source []byte, input []byte) (*EditResult, error) {
 		return nil, err
 	}
 
+	return editCore(filename, source, oldText, newText)
+}
+
+// EditDirect applies a text replacement to source using raw oldText/newText bytes,
+// bypassing the ===BEFORE===/===AFTER=== delimiter parser.
+// It does NOT call writeAndShow — that is the caller's responsibility.
+func EditDirect(filename string, source, oldText, newText []byte) (*EditResult, error) {
+	if isBinary(source) {
+		return nil, fmt.Errorf("binary file detected; src edit only works on text files")
+	}
+	if len(source) > maxFileSize {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d)", len(source), maxFileSize)
+	}
+
+	if len(oldText) == 0 {
+		return nil, fmt.Errorf("oldText is empty; use src insert for insertions")
+	}
+	if bytes.Equal(oldText, newText) {
+		return nil, fmt.Errorf("old and new text are identical (no-op)")
+	}
+
+	return editCore(filename, source, oldText, newText)
+}
+
+// editCore is the shared replacement engine for Edit and EditDirect.
+func editCore(filename string, source, oldText, newText []byte) (*EditResult, error) {
 	// Detect and normalize CRLF for matching.
 	normalized, normalizedOld, hasCRLF := normalizeForMatch(source, oldText)
 
@@ -146,23 +172,40 @@ func parseEditInput(input []byte) (old, new []byte, err error) {
 	text := string(input)
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 
-	beforeIdx := -1
-	afterIdx := -1
+	// Collect ALL line indices for each marker — strict count validation.
+	var beforeLines, afterLines []int
 	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == beforeDelim && beforeIdx == -1 {
-			beforeIdx = i
-		} else if trimmed == afterDelim && afterIdx == -1 && beforeIdx >= 0 {
-			afterIdx = i
+		switch strings.TrimSpace(line) {
+		case beforeDelim:
+			beforeLines = append(beforeLines, i+1) // 1-based for error messages
+		case afterDelim:
+			afterLines = append(afterLines, i+1) // 1-based for error messages
 		}
 	}
 
-	if beforeIdx < 0 {
-		return nil, nil, fmt.Errorf("missing %s delimiter", beforeDelim)
+	switch {
+	case len(beforeLines) == 0:
+		return nil, nil, fmt.Errorf("no %s found", beforeDelim)
+	case len(beforeLines) > 1:
+		return nil, nil, fmt.Errorf(
+			"found %d lines matching %s (at lines %v). "+
+				"Expected exactly one. Use --before-file/--after-file "+
+				"for content containing literal markers",
+			len(beforeLines), beforeDelim, beforeLines)
 	}
-	if afterIdx < 0 {
-		return nil, nil, fmt.Errorf("missing %s delimiter", afterDelim)
+	switch {
+	case len(afterLines) == 0:
+		return nil, nil, fmt.Errorf("no %s found", afterDelim)
+	case len(afterLines) > 1:
+		return nil, nil, fmt.Errorf(
+			"found %d lines matching %s (at lines %v). "+
+				"Expected exactly one. Use --before-file/--after-file "+
+				"for content containing literal markers",
+			len(afterLines), afterDelim, afterLines)
 	}
+
+	beforeIdx := beforeLines[0] - 1 // convert back to 0-based
+	afterIdx := afterLines[0] - 1   // convert back to 0-based
 
 	oldLines := lines[beforeIdx+1 : afterIdx]
 	newLines := lines[afterIdx+1:]
