@@ -738,3 +738,26 @@ func TestIsMarkdown_NotMarkdown(t *testing.T) {
 	assert.False(t, isMarkdown("doc.py"))
 	assert.False(t, isMarkdown("Makefile"))
 }
+
+func TestEdit_WorksOnTpl(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "template.tpl")
+	orig := []byte("Hello {{name}}\nWelcome to our service.\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	stdin := []byte("===BEFORE===\nWelcome to our service.\n===AFTER===\nWelcome to our platform.\n")
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, stdin, func() {
+		root.SetArgs([]string{"edit", f})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "Welcome to our platform.")
+	assert.NotContains(t, string(result), "Welcome to our service.")
+	assert.Contains(t, string(result), "Hello {{name}}") // surrounding code intact
+}

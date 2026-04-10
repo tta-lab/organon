@@ -321,7 +321,7 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 		return err
 	}
 	if err := diff.Show(os.Stdout, source, result, filename); err != nil {
-		return err
+		return fmt.Errorf("edit applied to %s, but diff display failed: %w", filename, err)
 	}
 	if isMarkdown(filename) {
 		return printMarkdownTree(filename, result)
@@ -375,30 +375,17 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	beforeFile, _ := cmd.Flags().GetString("before-file")
-	afterFile, _ := cmd.Flags().GetString("after-file")
+	beforeFile, err := cmd.Flags().GetString("before-file")
+	if err != nil {
+		return fmt.Errorf("internal: --before-file flag error: %w", err)
+	}
+	afterFile, err := cmd.Flags().GetString("after-file")
+	if err != nil {
+		return fmt.Errorf("internal: --after-file flag error: %w", err)
+	}
 
-	switch {
-	case beforeFile != "" && afterFile == "":
-		return fmt.Errorf("both --before-file and --after-file are required together")
-	case beforeFile == "" && afterFile != "":
-		return fmt.Errorf("both --before-file and --after-file are required together")
-	case beforeFile != "" && afterFile != "":
-		beforeContent, err := os.ReadFile(beforeFile)
-		if err != nil {
-			return fmt.Errorf("read --before-file %q: %w", beforeFile, err)
-		}
-		afterContent, err := os.ReadFile(afterFile)
-		if err != nil {
-			return fmt.Errorf("read --after-file %q: %w", afterFile, err)
-		}
-		depth := getDepth(cmd)
-		result, err := srcop.EditDirect(filename, source, beforeContent, afterContent)
-		if err != nil {
-			return err
-		}
-		printDisclosure(os.Stderr, result)
-		return writeAndShow(filename, source, result.Content, depth)
+	if beforeFile != "" || afterFile != "" {
+		return runEditWithFiles(cmd, filename, source, beforeFile, afterFile)
 	}
 
 	// Default: read stdin with ===BEFORE===/===AFTER=== delimiters.
@@ -413,12 +400,35 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	}
 
 	depth := getDepth(cmd)
-
 	result, err := srcop.Edit(filename, source, stdinContent)
 	if err != nil {
 		return err
 	}
 
+	printDisclosure(os.Stderr, result)
+	return writeAndShow(filename, source, result.Content, depth)
+}
+
+// runEditWithFiles handles the --before-file/--after-file edit path.
+func runEditWithFiles(cmd *cobra.Command, filename string, source []byte, beforeFile, afterFile string) error {
+	if beforeFile == "" || afterFile == "" {
+		return fmt.Errorf("both --before-file and --after-file are required together")
+	}
+
+	beforeContent, err := os.ReadFile(beforeFile)
+	if err != nil {
+		return fmt.Errorf("read --before-file %q: %w", beforeFile, err)
+	}
+	afterContent, err := os.ReadFile(afterFile)
+	if err != nil {
+		return fmt.Errorf("read --after-file %q: %w", afterFile, err)
+	}
+
+	depth := getDepth(cmd)
+	result, err := srcop.EditDirect(filename, source, beforeContent, afterContent)
+	if err != nil {
+		return err
+	}
 	printDisclosure(os.Stderr, result)
 	return writeAndShow(filename, source, result.Content, depth)
 }
