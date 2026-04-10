@@ -163,6 +163,8 @@ func newEditCmd() *cobra.Command {
 		RunE: runEdit,
 	}
 	edit.Flags().StringP("section", "s", "", "")
+	edit.Flags().String("before-file", "", "")
+	edit.Flags().String("after-file", "", "")
 	root.AddCommand(edit)
 	return root
 }
@@ -224,7 +226,7 @@ func TestEdit_InvalidDelimiters(t *testing.T) {
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
-	assert.Contains(t, runErr.Error(), "missing ===BEFORE===")
+	assert.Contains(t, runErr.Error(), "no ===BEFORE=== found")
 }
 
 func TestEdit_NoMatch(t *testing.T) {
@@ -588,4 +590,151 @@ func TestLineBoundaryExtension_Integration(t *testing.T) {
 	result, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "Host string // server hostname")
+}
+
+// ---------- --before-file / --after-file ----------
+
+func TestEdit_BeforeFileOnly_FailsWithClearError(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	require.NoError(t, os.WriteFile(f, []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	beforeF := filepath.Join(dir, "before.txt")
+	require.NoError(t, os.WriteFile(beforeF, []byte("func main()\n"), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(""), func() {
+		root.SetArgs([]string{"edit",
+			"--before-file", beforeF,
+			f,
+		})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "both --before-file and --after-file are required together")
+}
+
+func TestEdit_AfterFileOnly_FailsWithClearError(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	require.NoError(t, os.WriteFile(f, []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	afterF := filepath.Join(dir, "after.txt")
+	require.NoError(t, os.WriteFile(afterF, []byte("func main() {}\n"), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(""), func() {
+		root.SetArgs([]string{"edit",
+			"--after-file", afterF,
+			f,
+		})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "both --before-file and --after-file are required together")
+}
+
+func TestEdit_BeforeFileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	require.NoError(t, os.WriteFile(f, []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	afterF := filepath.Join(dir, "after.txt")
+	require.NoError(t, os.WriteFile(afterF, []byte("func main() {}\n"), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(""), func() {
+		root.SetArgs([]string{"edit",
+			"--before-file", filepath.Join(dir, "nonexistent.txt"),
+			"--after-file", afterF,
+			f,
+		})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "read --before-file")
+	assert.Contains(t, runErr.Error(), "nonexistent.txt")
+}
+
+func TestEdit_AfterFileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	require.NoError(t, os.WriteFile(f, []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	beforeF := filepath.Join(dir, "before.txt")
+	require.NoError(t, os.WriteFile(beforeF, []byte("func main()\n"), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(""), func() {
+		root.SetArgs([]string{"edit",
+			"--before-file", beforeF,
+			"--after-file", filepath.Join(dir, "nonexistent.txt"),
+			f,
+		})
+		runErr = root.Execute()
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "read --after-file")
+	assert.Contains(t, runErr.Error(), "nonexistent.txt")
+}
+
+func TestEdit_BeforeFileAfterFile_Works(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	orig := []byte("package main\n\ntype Config struct {\n\tHost string\n\tPort int\n}\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	beforeF := filepath.Join(dir, "before.txt")
+	require.NoError(t, os.WriteFile(beforeF, []byte("\tHost string\n"), 0o644))
+
+	afterF := filepath.Join(dir, "after.txt")
+	require.NoError(t, os.WriteFile(afterF, []byte("\tHost string // server hostname\n"), 0o644))
+
+	root := newEditCmd()
+	var runErr error
+	pipeStdin(t, []byte(""), func() {
+		root.SetArgs([]string{"edit",
+			"--before-file", beforeF,
+			"--after-file", afterF,
+			f,
+		})
+		runErr = root.Execute()
+	})
+	require.NoError(t, runErr)
+
+	result, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "Host string // server hostname")
+	assert.Contains(t, string(result), "Port int") // surrounding code intact
+}
+
+// ---------- isMarkdown ----------
+
+func TestIsMarkdown_Tpl(t *testing.T) {
+	assert.True(t, isMarkdown("template.tpl"))
+	assert.True(t, isMarkdown("template.TPL"))
+}
+
+func TestIsMarkdown_Mdx(t *testing.T) {
+	assert.True(t, isMarkdown("doc.mdx"))
+}
+
+func TestIsMarkdown_Md(t *testing.T) {
+	assert.True(t, isMarkdown("doc.md"))
+	assert.True(t, isMarkdown("doc.MD"))
+}
+
+func TestIsMarkdown_Markdown(t *testing.T) {
+	assert.True(t, isMarkdown("doc.markdown"))
+}
+
+func TestIsMarkdown_NotMarkdown(t *testing.T) {
+	assert.False(t, isMarkdown("doc.go"))
+	assert.False(t, isMarkdown("doc.txt"))
+	assert.False(t, isMarkdown("doc.py"))
+	assert.False(t, isMarkdown("Makefile"))
 }

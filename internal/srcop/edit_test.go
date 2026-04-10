@@ -24,14 +24,14 @@ func TestParseEditInput_MissingBefore(t *testing.T) {
 	input := "===AFTER===\nnew text\n"
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing ===BEFORE===")
+	assert.Contains(t, err.Error(), "no ===BEFORE=== found")
 }
 
 func TestParseEditInput_MissingAfter(t *testing.T) {
 	input := "===BEFORE===\nold text\n"
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing ===AFTER===")
+	assert.Contains(t, err.Error(), "no ===AFTER=== found")
 }
 
 func TestParseEditInput_IdenticalOldNew(t *testing.T) {
@@ -399,4 +399,112 @@ func TestEdit_UnicodeFold(t *testing.T) {
 	assert.Contains(t, string(result.Content), "He said \"hi\" to her.",
 		"AFTER text must be applied via unicode-fold match")
 	assert.NotContains(t, string(result.Content), "\u201c", "matched source curly quotes replaced by AFTER")
+}
+
+// ---------- strict marker counting ----------
+
+func TestParseEditInput_ZeroMarkers(t *testing.T) {
+	input := "some content\nwith no markers\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no ===BEFORE=== found")
+}
+
+func TestParseEditInput_OnlyBeforeNoAfter(t *testing.T) {
+	input := "===BEFORE===\nold text\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no ===AFTER=== found")
+}
+
+func TestParseEditInput_NormalSingleMarker(t *testing.T) {
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n"
+	old, new, err := parseEditInput([]byte(input))
+	require.NoError(t, err)
+	assert.Equal(t, "old text\n", string(old))
+	assert.Equal(t, "new text\n", string(new))
+}
+
+func TestParseEditInput_TrailingAfterMarker(t *testing.T) {
+	// Model habit: trailing ===AFTER=== after the actual new text.
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "Expected exactly one")
+}
+
+func TestParseEditInput_BeforeContentContainsAfterMarker(t *testing.T) {
+	// Literal ===AFTER=== line in BEFORE content — must error, not silently corrupt.
+	input := "===BEFORE===\nold text\n===AFTER===\nmore old\n===AFTER===\nnew text\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "Expected exactly one")
+}
+
+func TestParseEditInput_DuplicateBeforeMarker(t *testing.T) {
+	input := "some content\n===BEFORE===\n===BEFORE===\nold text\n===AFTER===\nnew text\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===BEFORE===")
+	assert.Contains(t, err.Error(), "Expected exactly one")
+}
+
+func TestParseEditInput_DuplicateAfterMarker(t *testing.T) {
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "Expected exactly one")
+}
+
+// ---------- EditDirect ----------
+
+func TestEditDirect_ValidReplacement(t *testing.T) {
+	source := []byte("package example\n\nfunc Foo() {}\nfunc Bar() {}\n")
+	oldText := []byte("func Foo() {}\n")
+	newText := []byte("func Foo() { return 42 }\n")
+	result, err := EditDirect("example.go", source, oldText, newText)
+	require.NoError(t, err)
+	assert.Contains(t, string(result.Content), "func Foo() { return 42 }")
+	assert.Contains(t, string(result.Content), "func Bar() {}")
+}
+
+func TestEditDirect_EmptyOldText(t *testing.T) {
+	source := []byte("hello world\n")
+	_, err := EditDirect("file.txt", source, []byte{}, []byte("new\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oldText is empty")
+}
+
+func TestEditDirect_IdenticalOldNew(t *testing.T) {
+	source := []byte("hello world\n")
+	_, err := EditDirect("file.txt", source, []byte("hello\n"), []byte("hello\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no-op")
+}
+
+func TestEditDirect_BinaryFile(t *testing.T) {
+	source := []byte("normal\x00null\n")
+	_, err := EditDirect("binary.bin", source, []byte("null\n"), []byte("data\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "binary file")
+}
+
+func TestEditDirect_FileTooLarge(t *testing.T) {
+	source := make([]byte, maxFileSize+1)
+	for i := range source {
+		source[i] = 'a'
+	}
+	_, err := EditDirect("big.txt", source, []byte("aaa\n"), []byte("bbb\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large")
+}
+
+func TestEditDirect_NoMatch(t *testing.T) {
+	source := []byte("hello world\n")
+	_, err := EditDirect("file.txt", source, []byte("not present\n"), []byte("new\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }

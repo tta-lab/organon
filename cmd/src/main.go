@@ -19,7 +19,7 @@ import (
 
 func isMarkdown(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
-	return ext == ".md" || ext == ".markdown" || ext == ".mdx"
+	return ext == ".md" || ext == ".markdown" || ext == ".mdx" || ext == ".tpl"
 }
 
 func main() {
@@ -88,6 +88,10 @@ func main() {
 	editCmd.SilenceUsage = true
 	editCmd.Flags().StringP("section", "s", "",
 		"Scope edit to a symbol/section ID (use `src <file> --tree` to find IDs)")
+	editCmd.Flags().String("before-file", "",
+		"Read BEFORE content from a file instead of stdin (use with --after-file)")
+	editCmd.Flags().String("after-file", "",
+		"Read AFTER content from a file instead of stdin (use with --before-file)")
 
 	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd)
 
@@ -371,6 +375,33 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	beforeFile, _ := cmd.Flags().GetString("before-file")
+	afterFile, _ := cmd.Flags().GetString("after-file")
+
+	switch {
+	case beforeFile != "" && afterFile == "":
+		return fmt.Errorf("both --before-file and --after-file are required together")
+	case beforeFile == "" && afterFile != "":
+		return fmt.Errorf("both --before-file and --after-file are required together")
+	case beforeFile != "" && afterFile != "":
+		beforeContent, err := os.ReadFile(beforeFile)
+		if err != nil {
+			return fmt.Errorf("read --before-file %q: %w", beforeFile, err)
+		}
+		afterContent, err := os.ReadFile(afterFile)
+		if err != nil {
+			return fmt.Errorf("read --after-file %q: %w", afterFile, err)
+		}
+		depth := getDepth(cmd)
+		result, err := srcop.EditDirect(filename, source, beforeContent, afterContent)
+		if err != nil {
+			return err
+		}
+		printDisclosure(os.Stderr, result)
+		return writeAndShow(filename, source, result.Content, depth)
+	}
+
+	// Default: read stdin with ===BEFORE===/===AFTER=== delimiters.
 	stdinContent, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("read stdin: %w", err)
