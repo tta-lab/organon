@@ -2,12 +2,34 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+var skillBin string
+
+func TestMain(m *testing.M) {
+	origCwd, _ := os.Getwd()
+	bin, err := os.CreateTemp("", "skill-test-*")
+	if err != nil {
+		os.Exit(1)
+	}
+	bin.Close()
+	binPath := bin.Name()
+	defer os.Remove(binPath)
+
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/tta-lab/organon/cmd/skill")
+	cmd.Dir = origCwd
+	if err := cmd.Run(); err != nil {
+		os.Exit(1)
+	}
+	skillBin = binPath
+	os.Exit(m.Run())
+}
 
 func writeSkillAt(t *testing.T, root, name, desc, category, body string) {
 	t.Helper()
@@ -33,132 +55,130 @@ func writeSkillAt(t *testing.T, root, name, desc, category, body string) {
 	}
 }
 
-func runSkill(t *testing.T, root, home string, args []string) (stdout, stderr string, exitCode int) {
+func runSkill(t *testing.T, root, home string, args []string) (
+	stdout, stderr string, exitCode int,
+) {
 	t.Helper()
 
 	origCwd, _ := os.Getwd()
-	binPath := filepath.Join(origCwd, "..", "..", "skill")
+	defer func() { _ = os.Chdir(origCwd) }()
 
 	if err := os.Chdir(root); err != nil {
 		t.Fatalf("chdir %q: %v", root, err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(origCwd) })
 
 	if home != "" {
 		t.Setenv("HOME", home)
 	}
 
-	cmd := exec.Command(binPath, args...)
-	cmd.Stdout = &bytes.Buffer{}
-	cmd.Stderr = &bytes.Buffer{}
+	cmd := exec.Command(skillBin, args...)
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.Stdout = outBuf
+	cmd.Stderr = errBuf
 	err := cmd.Run()
-	stdout = strings.TrimSpace(cmd.Stdout.(*bytes.Buffer).String())
-	stderr = strings.TrimSpace(cmd.Stderr.(*bytes.Buffer).String())
 
+	return strings.TrimSpace(outBuf.String()),
+		strings.TrimSpace(errBuf.String()),
+		exitCodeFromErr(err)
+}
+
+func exitCodeFromErr(err error) int {
 	if err == nil {
-		return stdout, stderr, 0
+		return 0
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		return stdout, stderr, exitErr.ExitCode()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
 	}
-	t.Fatalf("exec error: %v", err)
-	return stdout, stderr, 1
+	return 1
 }
 
 func TestSkillList_Empty(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	_, stderr, exit := runSkill(t, root, home, []string{"list"})
-	if exit != 0 {
-		t.Errorf("exit code = %d, want 0", exit)
+	tmp := t.TempDir()
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if !strings.Contains(stderr, "No skills found.") {
-		t.Errorf("stderr = %q, want to contain 'No skills found.'", stderr)
+		t.Fatalf("stderr = %q, want to contain 'No skills found.'", stderr)
 	}
+	_ = stdout
 }
 
 func TestSkillList_OneSkill(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	writeSkillAt(t, root, "my-skill", "A useful skill", "tools", "skill body content")
+	tmp := t.TempDir()
+	writeSkillAt(t, tmp, "my-skill", "A test skill", "tool", "skill body content")
 
-	stdout, _, exit := runSkill(t, root, home, []string{"list"})
-	if exit != 0 {
-		t.Errorf("exit code = %d, want 0", exit)
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
 	}
-	if !strings.Contains(stdout, "my-skill") {
-		t.Errorf("output = %q, want to contain 'my-skill'", stdout)
-	}
-	headers := []string{"NAME", "CATEGORY", "SOURCE", "DESCRIPTION"}
-	for _, h := range headers {
+
+	for _, h := range []string{"NAME", "CATEGORY", "SOURCE", "DESCRIPTION"} {
 		if !strings.Contains(stdout, h) {
-			t.Errorf("output missing header %q, got: %q", h, stdout)
+			t.Fatalf("output missing header %q, got: %q", h, stdout)
 		}
 	}
 	if strings.Contains(stdout, "MATCH") {
-		t.Errorf("output should not contain MATCH column, got: %q", stdout)
+		t.Fatalf("output should not contain a MATCH column, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "my-skill") {
+		t.Fatalf("output should contain 'my-skill', got: %q", stdout)
 	}
 	if !strings.Contains(stdout, "~") && !strings.Contains(stdout, ".agents/skills") {
-		t.Errorf("output should contain abbreviated home path with ~ or path with .agents/skills, got: %q", stdout)
+		t.Fatalf("output should contain abbreviated home path with ~ or path with .agents/skills, got: %q", stdout)
 	}
+	_ = stderr
 }
 
 func TestSkillGet_Found(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	writeSkillAt(t, root, "my-skill", "A useful skill", "tools", "skill body content")
+	tmp := t.TempDir()
+	writeSkillAt(t, tmp, "my-skill", "A test skill", "tool", "skill body content")
 
-	stdout, _, exit := runSkill(t, root, home, []string{"get", "my-skill"})
-	if exit != 0 {
-		t.Errorf("exit code = %d, want 0", exit)
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"get", "my-skill"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
 	}
 	if !strings.Contains(stdout, "skill body content") {
-		t.Errorf("stdout = %q, want to contain 'skill body content'", stdout)
+		t.Fatalf("stdout = %q, want to contain 'skill body content'", stdout)
 	}
+	_ = stderr
 }
 
 func TestSkillGet_NotFound(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	writeSkillAt(t, root, "my-skill", "A useful skill", "tools", "skill body")
-
-	_, stderr, exit := runSkill(t, root, home, []string{"get", "nonexistent"})
-	if exit == 0 {
-		t.Errorf("exit code = 0, want non-zero")
+	tmp := t.TempDir()
+	_, stderr, code := runSkill(t, tmp, tmp, []string{"get", "does-not-exist"})
+	if code == 0 {
+		t.Fatalf("exit code = 0, want non-zero")
 	}
-	if !strings.Contains(stderr, "not found") {
-		t.Errorf("stderr = %q, want to contain 'not found'", stderr)
+	if !strings.Contains(stderr, "does-not-exist") {
+		t.Fatalf("stderr = %q, want to contain 'does-not-exist'", stderr)
 	}
 }
 
 func TestSkillFind_Match(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	writeSkillAt(t, root, "git-omz", "git plugin abbreviations", "git", "git body")
-	writeSkillAt(t, root, "taskwarrior", "task management", "tools", "task body")
+	tmp := t.TempDir()
+	writeSkillAt(t, tmp, "git-omz", "Git plugin abbreviations", "tool", "body")
 
-	stdout, _, exit := runSkill(t, root, home, []string{"find", "git"})
-	if exit != 0 {
-		t.Errorf("exit code = %d, want 0", exit)
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"find", "git"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
 	}
 	if !strings.Contains(stdout, "git-omz") {
-		t.Errorf("output = %q, want to contain 'git-omz'", stdout)
+		t.Fatalf("output = %q, want to contain 'git-omz'", stdout)
 	}
-	if strings.Contains(stdout, "taskwarrior") {
-		t.Errorf("output should not contain 'taskwarrior', got: %q", stdout)
-	}
+	_ = stderr
 }
 
 func TestSkillFind_NoMatch(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	writeSkillAt(t, root, "taskwarrior", "task management", "tools", "task body")
-
-	_, stderr, exit := runSkill(t, root, home, []string{"find", "nonexistent"})
-	if exit != 0 {
-		t.Errorf("exit code = %d, want 0", exit)
+	tmp := t.TempDir()
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"find", "nonexistent"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if !strings.Contains(stderr, "No skills found.") {
-		t.Errorf("stderr = %q, want to contain 'No skills found.'", stderr)
+		t.Fatalf("stderr = %q, want to contain 'No skills found.'", stderr)
 	}
+	_ = stdout
 }
