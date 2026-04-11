@@ -21,7 +21,7 @@ type SearchResult struct {
 }
 
 // Search performs a web search using the best available backend.
-// Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
+// Backend selection: TAVILY_API_KEY → Tavily, EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
 func Search(ctx context.Context, query string) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
@@ -39,10 +39,18 @@ func Search(ctx context.Context, query string) (string, error) {
 }
 
 // resolveSearcher returns the best available search backend.
-// Priority: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, fallback → DDG.
+// Priority: TAVILY_API_KEY → Tavily, EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, fallback → DDG.
 // Returns an error if a key is set but empty — this prevents silently
 // falling back when a user has misconfigured their API key.
 func resolveSearcher() (WebSearcher, error) {
+	tavilyKey, tavilySet := os.LookupEnv("TAVILY_API_KEY")
+	if tavilySet && tavilyKey == "" {
+		return nil, fmt.Errorf("TAVILY_API_KEY is set but empty; provide a valid key or unset it to use Exa/Brave/DuckDuckGo")
+	}
+	if tavilyKey != "" {
+		return NewTavilySearcher(tavilyKey), nil
+	}
+
 	exaKey, exaSet := os.LookupEnv("EXA_API_KEY")
 	if exaSet && exaKey == "" {
 		return nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave/DuckDuckGo")
