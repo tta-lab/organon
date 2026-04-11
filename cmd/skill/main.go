@@ -65,7 +65,7 @@ func newListCmd(out, errOut io.Writer) *cobra.Command {
 				_, _ = fmt.Fprintln(errOut, "No skills found.")
 				return nil
 			}
-			printSkillTable(out, skills)
+			printSkillTable(out, errOut, skills)
 			return nil
 		},
 	}
@@ -109,13 +109,13 @@ func newFindCmd(out, errOut io.Writer) *cobra.Command {
 				_, _ = fmt.Fprintln(errOut, "No skills found.")
 				return nil
 			}
-			printSkillTable(out, skills)
+			printSkillTable(out, errOut, skills)
 			return nil
 		},
 	}
 }
 
-func printSkillTable(out io.Writer, skills []skill.Skill) {
+func printSkillTable(out, errOut io.Writer, skills []skill.Skill) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tCATEGORY\tSOURCE\tDESCRIPTION")
 	for _, s := range skills {
@@ -134,5 +134,7 @@ func printSkillTable(out io.Writer, skills []skill.Skill) {
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, category, source, desc)
 	}
-	_ = tw.Flush()
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintf(errOut, "warning: output may be incomplete: %v\n", err)
+	}
 }

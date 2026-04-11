@@ -252,7 +252,8 @@ func TestGetSkill_Found(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "my-skill", "a test skill", "testing", "skill body content")
 
-	paths := []string{filepath.Join(root, ".agents/skills")}
+	skillDir := filepath.Join(root, ".agents/skills")
+	paths := []string{skillDir}
 	skill, err := GetSkill(paths, "my-skill")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -265,6 +266,12 @@ func TestGetSkill_Found(t *testing.T) {
 	}
 	if skill.Category != "testing" {
 		t.Errorf("Category = %q, want %q", skill.Category, "testing")
+	}
+	if skill.Source != skillDir {
+		t.Errorf("Source = %q, want %q", skill.Source, skillDir)
+	}
+	if skill.Path != filepath.Join(skillDir, "my-skill/SKILL.md") {
+		t.Errorf("Path = %q, want %q", skill.Path, filepath.Join(skillDir, "my-skill/SKILL.md"))
 	}
 	if skill.Body != "skill body content" {
 		t.Errorf("Body = %q, want %q", skill.Body, "skill body content")
@@ -304,8 +311,9 @@ func TestGetSkill_PriorityWins(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	cwdPath := filepath.Join(cwd, ".agents/skills")
 	paths := []string{
-		filepath.Join(cwd, ".agents/skills"),
+		cwdPath,
 		filepath.Join(home, ".agents/skills"),
 	}
 	skill, err := GetSkill(paths, "foo")
@@ -314,6 +322,12 @@ func TestGetSkill_PriorityWins(t *testing.T) {
 	}
 	if skill.Description != "cwd" {
 		t.Errorf("Description = %q, want %q", skill.Description, "cwd")
+	}
+	if skill.Source != cwdPath {
+		t.Errorf("Source = %q, want %q", skill.Source, cwdPath)
+	}
+	if skill.Path != filepath.Join(cwdPath, "foo/SKILL.md") {
+		t.Errorf("Path = %q, want %q", skill.Path, filepath.Join(cwdPath, "foo/SKILL.md"))
 	}
 }
 

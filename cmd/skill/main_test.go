@@ -60,18 +60,12 @@ func runSkill(t *testing.T, root, home string, args []string) (
 ) {
 	t.Helper()
 
-	origCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(origCwd) }()
-
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("chdir %q: %v", root, err)
-	}
-
 	if home != "" {
 		t.Setenv("HOME", home)
 	}
 
 	cmd := exec.Command(skillBin, args...)
+	cmd.Dir = root
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	cmd.Stdout = outBuf
@@ -181,4 +175,20 @@ func TestSkillFind_NoMatch(t *testing.T) {
 		t.Fatalf("stderr = %q, want to contain 'No skills found.'", stderr)
 	}
 	_ = stdout
+}
+
+func TestSkillList_EmptyCategoryRendersDash(t *testing.T) {
+	tmp := t.TempDir()
+	writeSkillAt(t, tmp, "no-category-skill", "A skill with no category", "", "body")
+
+	stdout, stderr, code := runSkill(t, tmp, tmp, []string{"list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, " - ") {
+		t.Fatalf("output should contain '-' for empty category, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "no-category-skill") {
+		t.Fatalf("output should contain 'no-category-skill', got: %q", stdout)
+	}
 }
