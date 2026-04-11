@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Organon is a Go monorepo producing three CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), and `alert` (agent-to-bridge messaging for alerts via Telegram).
+Organon is a Go monorepo producing four CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), `alert` (agent-to-bridge messaging for alerts via Telegram), and `skill` (filesystem-based skill discovery).
 
 ## Essential Commands
 
@@ -20,11 +20,13 @@ make ci           # fmt, vet, lint, test, build
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
 - `cmd/alert/` — agent-to-bridge messaging: POSTs alerts to a configurable endpoint via env var
+- `cmd/skill/` — filesystem-based skill discovery: list/get/find SKILL.md files from project-local and global agent skill directories
 
 ### Shared Packages
 - `internal/id/` — base62 ID generation and collision resolution
 - `internal/tree/` — generic box-drawing tree renderer
 - `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
+- `internal/skill/` — filesystem-based skill discovery and frontmatter parsing
 
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files
