@@ -19,7 +19,7 @@ func ParseFrontmatter(content []byte) (Meta, []byte) {
 	var meta Meta
 	rest, err := frontmatter.Parse(bytes.NewReader(content), &meta)
 	if err != nil {
-		return Meta{}, content
+		return Meta{}, bytes.TrimSpace(content)
 	}
 	return meta, bytes.TrimSpace(rest)
 }
