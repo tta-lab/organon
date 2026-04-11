@@ -1,6 +1,6 @@
 # Organon Quick Reference
 
-Two CLI tools for AI agents: `src` (symbol-aware source reading/editing), `web` (web search and page fetching).
+Three CLI tools for AI agents: `src` (symbol-aware source reading/editing), `web` (web search and page fetching), and `skill` (filesystem-based skill discovery).
 
 ## src
 
@@ -42,3 +42,13 @@ web fetch <url> --tree-threshold 8000  # custom auto-tree threshold
 Search backends: `EXA_API_KEY` → Exa, `BRAVE_API_KEY` → Brave, fallback → DuckDuckGo. (Empty key causes error — unset entirely for the next backend.)
 
 Fetch backend: `BROWSER_GATEWAY_URL` → browser gateway (no cache). Otherwise defuddle CLI with daily cache at `~/.cache/organon/scrapes/`.
+
+## skill
+
+```bash
+skill list                          # list all discovered skills
+skill get <name>                    # print skill body to stdout
+skill find <keyword>...             # find skills by keyword (OR match)
+```
+
+Discovery paths (priority order): project-local `{.agents,.crush,.claude,.cursor}/skills` first, then global `~/.{agents,crush,claude,cursor}/skills`. Skills are directories containing `SKILL.md` with YAML frontmatter.

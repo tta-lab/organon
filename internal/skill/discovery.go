@@ -118,10 +118,9 @@ func GetSkill(paths []string, name string) (*Skill, error) {
 // Matching is case-insensitive and checks both Name and Description.
 // Results are deduplicated and sorted by Name.
 func FindSkills(paths []string, keywords []string) ([]Skill, error) {
-	// Lowercase keywords once
-	var lowerKeywords []string
-	for _, k := range keywords {
-		lowerKeywords = append(lowerKeywords, strings.ToLower(k))
+	lowerKeywords := make([]string, len(keywords))
+	for i, k := range keywords {
+		lowerKeywords[i] = strings.ToLower(k)
 	}
 
 	seen := make(map[string]bool)

@@ -42,7 +42,7 @@ func runSkill(t *testing.T, root, home string, args []string) (stdout, stderr st
 	if err := os.Chdir(root); err != nil {
 		t.Fatalf("chdir %q: %v", root, err)
 	}
-	t.Cleanup(func() { os.Chdir(origCwd) })
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
 
 	if home != "" {
 		t.Setenv("HOME", home)
@@ -89,8 +89,11 @@ func TestSkillList_OneSkill(t *testing.T) {
 	if !strings.Contains(stdout, "my-skill") {
 		t.Errorf("output = %q, want to contain 'my-skill'", stdout)
 	}
-	if !strings.Contains(stdout, "NAME") || !strings.Contains(stdout, "CATEGORY") || !strings.Contains(stdout, "SOURCE") || !strings.Contains(stdout, "DESCRIPTION") {
-		t.Errorf("output missing header columns, got: %q", stdout)
+	headers := []string{"NAME", "CATEGORY", "SOURCE", "DESCRIPTION"}
+	for _, h := range headers {
+		if !strings.Contains(stdout, h) {
+			t.Errorf("output missing header %q, got: %q", h, stdout)
+		}
 	}
 	if strings.Contains(stdout, "MATCH") {
 		t.Errorf("output should not contain MATCH column, got: %q", stdout)

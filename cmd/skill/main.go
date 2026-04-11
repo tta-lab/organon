@@ -29,7 +29,7 @@ Discovery walks multiple paths in priority order (project-local first, then glob
 	}
 
 	cmd.AddCommand(newListCmd(out, errOut))
-	cmd.AddCommand(newGetCmd(out, errOut))
+	cmd.AddCommand(newGetCmd(out))
 	cmd.AddCommand(newFindCmd(out, errOut))
 
 	return cmd
@@ -62,7 +62,7 @@ func newListCmd(out, errOut io.Writer) *cobra.Command {
 				return err
 			}
 			if len(skills) == 0 {
-				fmt.Fprintln(errOut, "No skills found.")
+				_, _ = fmt.Fprintln(errOut, "No skills found.")
 				return nil
 			}
 			printSkillTable(out, skills)
@@ -71,7 +71,7 @@ func newListCmd(out, errOut io.Writer) *cobra.Command {
 	}
 }
 
-func newGetCmd(out, errOut io.Writer) *cobra.Command {
+func newGetCmd(out io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <name>",
 		Short: "Print skill content to stdout",
@@ -85,7 +85,7 @@ func newGetCmd(out, errOut io.Writer) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("skill %q not found", args[0])
 			}
-			fmt.Fprintln(out, s.Body)
+			_, _ = fmt.Fprintln(out, s.Body)
 			return nil
 		},
 	}
@@ -106,7 +106,7 @@ func newFindCmd(out, errOut io.Writer) *cobra.Command {
 				return err
 			}
 			if len(skills) == 0 {
-				fmt.Fprintln(errOut, "No skills found.")
+				_, _ = fmt.Fprintln(errOut, "No skills found.")
 				return nil
 			}
 			printSkillTable(out, skills)
@@ -117,7 +117,7 @@ func newFindCmd(out, errOut io.Writer) *cobra.Command {
 
 func printSkillTable(out io.Writer, skills []skill.Skill) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCATEGORY\tSOURCE\tDESCRIPTION")
+	_, _ = fmt.Fprintln(tw, "NAME\tCATEGORY\tSOURCE\tDESCRIPTION")
 	for _, s := range skills {
 		category := s.Category
 		if category == "" {
@@ -134,5 +134,5 @@ func printSkillTable(out io.Writer, skills []skill.Skill) {
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, category, source, desc)
 	}
-	tw.Flush()
+	_ = tw.Flush()
 }

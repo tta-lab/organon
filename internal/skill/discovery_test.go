@@ -8,23 +8,21 @@ import (
 	"testing"
 )
 
-func writeSkill(t *testing.T, root, subPath, name, desc, category, body string) {
-	t.Helper()
-	dir := filepath.Join(root, subPath, name)
+//nolint:unparam // path is subPath for future extensibility
+func writeSkill(t *testing.T, root, path, name, desc, category, body string) {
+	dir := filepath.Join(root, path, name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %q: %v", dir, err)
 	}
 	content := "---\n"
-	if name != "" || desc != "" || category != "" {
-		if name != "" {
-			content += "name: " + name + "\n"
-		}
-		if desc != "" {
-			content += "description: " + desc + "\n"
-		}
-		if category != "" {
-			content += "category: " + category + "\n"
-		}
+	if name != "" {
+		content += "name: " + name + "\n"
+	}
+	if desc != "" {
+		content += "description: " + desc + "\n"
+	}
+	if category != "" {
+		content += "category: " + category + "\n"
 	}
 	content += "---\n" + body
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
@@ -94,13 +92,17 @@ func TestListSkills_DedupFirstWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cwd, ".agents/skills/foo"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".agents/skills/foo/SKILL.md"), []byte("---\nname: foo\ndescription: cwd version\n---\ncwd body"), 0644); err != nil {
+	cwdSkillPath := filepath.Join(cwd, ".agents/skills/foo/SKILL.md")
+	cwdContent := "---\nname: foo\ndescription: cwd version\n---\ncwd body"
+	if err := os.WriteFile(cwdSkillPath, []byte(cwdContent), 0644); err != nil {
 		t.Fatal(err)
 	}
+	homeSkillPath := filepath.Join(home, ".agents/skills/foo/SKILL.md")
 	if err := os.MkdirAll(filepath.Join(home, ".agents/skills/foo"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".agents/skills/foo/SKILL.md"), []byte("---\nname: foo\ndescription: home version\n---\nhome body"), 0644); err != nil {
+	homeContent := "---\nname: foo\ndescription: home version\n---\nhome body"
+	if err := os.WriteFile(homeSkillPath, []byte(homeContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,13 +139,17 @@ func TestListSkills_CrossDirDedup(t *testing.T) {
 	if err := os.MkdirAll(cwdCrush, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwdCrush, "SKILL.md"), []byte("---\nname: foo\ndescription: crush version\n---\ncrush body"), 0644); err != nil {
+	crushSkillPath := filepath.Join(cwdCrush, "SKILL.md")
+	crushContent := "---\nname: foo\ndescription: crush version\n---\ncrush body"
+	if err := os.WriteFile(crushSkillPath, []byte(crushContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(homeAgents, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(homeAgents, "SKILL.md"), []byte("---\nname: foo\ndescription: agents version\n---\nagents body"), 0644); err != nil {
+	agentsSkillPath := filepath.Join(homeAgents, "SKILL.md")
+	agentsContent := "---\nname: foo\ndescription: agents version\n---\nagents body"
+	if err := os.WriteFile(agentsSkillPath, []byte(agentsContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,13 +290,17 @@ func TestGetSkill_PriorityWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cwd, ".agents/skills/foo"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwd, ".agents/skills/foo/SKILL.md"), []byte("---\nname: foo\ndescription: cwd\n---\ncwd body"), 0644); err != nil {
+	cwdSkill := filepath.Join(cwd, ".agents/skills/foo/SKILL.md")
+	cwdContent := "---\nname: foo\ndescription: cwd\n---\ncwd body"
+	if err := os.WriteFile(cwdSkill, []byte(cwdContent), 0644); err != nil {
 		t.Fatal(err)
 	}
+	homeSkill := filepath.Join(home, ".agents/skills/foo/SKILL.md")
 	if err := os.MkdirAll(filepath.Join(home, ".agents/skills/foo"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".agents/skills/foo/SKILL.md"), []byte("---\nname: foo\ndescription: home\n---\nhome body"), 0644); err != nil {
+	homeContent := "---\nname: foo\ndescription: home\n---\nhome body"
+	if err := os.WriteFile(homeSkill, []byte(homeContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
