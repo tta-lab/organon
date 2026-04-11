@@ -51,8 +51,8 @@ func DiscoveryPaths(cwd, home string) []string {
 // Returns skills sorted by Name.
 func ListSkills(paths []string) ([]Skill, error) {
 	seen := make(map[string]bool)
-	var result []Skill
-	errs := make([]error, 0, len(paths))
+	result := make([]Skill, 0, 8)
+	errs := make([]error, 0, 4)
 
 	for _, base := range paths {
 		entries, err := os.ReadDir(base)
@@ -137,16 +137,13 @@ func FindSkills(paths []string, keywords []string) ([]Skill, error) {
 	}
 
 	seen := make(map[string]bool)
-	var result []Skill
-	errs := make([]error, 0, len(paths))
+	result := make([]Skill, 0, 8)
+	errs := make([]error, 0, 4)
 
 	for _, base := range paths {
 		skills, scanErrs := scanSkillDir(base, lowerKeywords, seen)
 		errs = append(errs, scanErrs...)
-		for _, s := range skills {
-			seen[s.Name] = true
-			result = append(result, s)
-		}
+		result = append(result, skills...)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
@@ -173,10 +170,10 @@ func scanSkillDir(base string, lowerKeywords []string, seen map[string]bool) ([]
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() || seen[entry.Name()] {
+		if !entry.IsDir() {
 			continue
 		}
-		skill, scanErr := scanSkill(base, entry.Name(), lowerKeywords)
+		skill, scanErr := scanSkill(base, entry.Name(), lowerKeywords, seen)
 		if scanErr != nil {
 			if os.IsNotExist(scanErr) {
 				continue
@@ -194,7 +191,7 @@ func scanSkillDir(base string, lowerKeywords []string, seen map[string]bool) ([]
 
 // scanSkill reads and checks a single skill directory for keyword match.
 // Returns nil skill if no SKILL.md or no match; returns the error if the file couldn't be read.
-func scanSkill(base, dirName string, lowerKeywords []string) (*Skill, error) {
+func scanSkill(base, dirName string, lowerKeywords []string, seen map[string]bool) (*Skill, error) {
 	skillPath := filepath.Join(base, dirName, "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -207,10 +204,15 @@ func scanSkill(base, dirName string, lowerKeywords []string) (*Skill, error) {
 		name = meta.Name
 	}
 
+	if seen[name] {
+		return nil, nil
+	}
+
 	if !matchesKeywords(name, meta.Description, lowerKeywords) {
 		return nil, nil
 	}
 
+	seen[name] = true
 	s := newSkill(name, meta, base, skillPath, string(body))
 	return &s, nil
 }

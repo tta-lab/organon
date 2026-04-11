@@ -57,8 +57,8 @@ func TestListSkills_AllPathsMissing(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if skills != nil {
-		t.Errorf("expected nil, got %v", skills)
+	if len(skills) > 0 {
+		t.Errorf("expected empty, got %v", skills)
 	}
 }
 
@@ -406,7 +406,7 @@ func TestFindSkills_NoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if skills != nil {
-		t.Errorf("expected nil, got %v", skills)
+	if len(skills) > 0 {
+		t.Errorf("expected empty, got %v", skills)
 	}
 }
