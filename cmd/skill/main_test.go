@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,160 @@ func TestSkillFind_NoMatch(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "No skills found.") {
 		t.Fatalf("stderr = %q, want to contain 'No skills found.'", stderr)
+	}
+}
+
+func TestListCmd_JSONOutput(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillAt(t, tmpHome, "breathe", "Refresh context window", "agent", "some body")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, stderr, err := runSkill(t, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	s := skills[0]
+	for _, key := range []string{"name", "category", "source", "description"} {
+		if _, ok := s[key]; !ok {
+			t.Fatalf("skill missing key %q, got: %v", key, s)
+		}
+	}
+	if s["name"] != "breathe" {
+		t.Fatalf("name = %v, want breathe", s["name"])
+	}
+	if s["category"] != "agent" {
+		t.Fatalf("category = %v, want agent", s["category"])
+	}
+	if s["description"] != "Refresh context window" {
+		t.Fatalf("description = %v, want 'Refresh context window'", s["description"])
+	}
+	if s["source"] == "" {
+		t.Fatalf("source should not be empty, got: %v", s["source"])
+	}
+}
+
+func TestListCmd_JSONOutput_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, stderr, err := runSkill(t, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	if stdout != "[]\n" {
+		t.Fatalf("stdout = %q, want '[]\\n' for empty list", stdout)
+	}
+}
+
+func TestFindCmd_JSONOutput(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillAt(t, tmpHome, "breathe", "Refresh context window", "agent", "some body")
+
+	stdout, stderr, err := runSkill(t, []string{"find", "Refresh", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	s := skills[0]
+	if s["name"] != "breathe" {
+		t.Fatalf("name = %v, want breathe", s["name"])
+	}
+	if s["source"] == "" {
+		t.Fatalf("source should not be empty, got: %v", s["source"])
+	}
+}
+
+func TestFindCmd_JSONOutput_NoMatch(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	stdout, stderr, err := runSkill(t, []string{"find", "nonexistent", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	if stdout != "[]\n" {
+		t.Fatalf("stdout = %q, want '[]\\n' for no match", stdout)
+	}
+}
+func TestListCmd_JSONOutput_MultipleSkills(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillAt(t, tmpHome, "alpha", "First skill", "test", "body alpha")
+	writeSkillAt(t, tmpHome, "beta", "Second skill", "test", "body beta")
+	writeSkillAt(t, tmpHome, "gamma", "Third skill", "test", "body gamma")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, stderr, err := runSkill(t, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
+	}
+	if len(skills) != 3 {
+		t.Fatalf("expected 3 skills, got %d", len(skills))
+	}
+	names := make(map[string]bool)
+	for _, s := range skills {
+		name, ok := s["name"].(string)
+		if !ok {
+			t.Fatalf("name field missing or not string: %v", s["name"])
+		}
+		names[name] = true
+		if s["source"] == "" {
+			t.Fatalf("source should not be empty for skill %q", name)
+		}
+	}
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		if !names[want] {
+			t.Fatalf("expected skill %q in output, got: %v", want, names)
+		}
 	}
 }
 
