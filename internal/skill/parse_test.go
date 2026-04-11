@@ -69,7 +69,15 @@ name: bad
 	if meta.Name != "" || meta.Description != "" || meta.Category != "" {
 		t.Errorf("expected empty Meta on malformed YAML, got %+v", meta)
 	}
-	if string(body) != string(content) {
-		t.Errorf("body = %q, want %q", string(body), string(content))
+	if string(body) != string(bytes.TrimSpace(content)) {
+		t.Errorf("body = %q, want %q", string(body), string(bytes.TrimSpace(content)))
+	}
+}
+
+func TestParseFrontmatter_MalformedYAML_TrimsBody(t *testing.T) {
+	content := []byte("\n\n---\nname: bad\n  invalid: [\n---\n# Body\n\n")
+	_, body := ParseFrontmatter(content)
+	if bytes.HasPrefix(body, []byte("\n")) || bytes.HasSuffix(body, []byte("\n")) {
+		t.Errorf("body should be trimmed on error path, got %q", string(body))
 	}
 }
