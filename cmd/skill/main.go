@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -54,7 +55,8 @@ func resolvePaths(home string) ([]string, error) {
 }
 
 func newListCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all discovered skills",
 		Args:  cobra.NoArgs,
@@ -63,14 +65,12 @@ func newListCmd(out, errOut io.Writer, paths []string, home string) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			if len(skills) == 0 {
-				_, _ = fmt.Fprintln(errOut, "No skills found.")
-				return nil
-			}
-			printSkillTable(out, errOut, skills, home)
+			emitSkills(out, errOut, skills, home, jsonOut)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
+	return cmd
 }
 
 func newGetCmd(out io.Writer, paths []string) *cobra.Command {
@@ -90,7 +90,8 @@ func newGetCmd(out io.Writer, paths []string) *cobra.Command {
 }
 
 func newFindCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "find <keyword>...",
 		Short: "Find skills by keyword (OR match)",
 		Args:  cobra.MinimumNArgs(1),
@@ -99,14 +100,42 @@ func newFindCmd(out, errOut io.Writer, paths []string, home string) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			if len(skills) == 0 {
-				_, _ = fmt.Fprintln(errOut, "No skills found.")
-				return nil
-			}
-			printSkillTable(out, errOut, skills, home)
+			emitSkills(out, errOut, skills, home, jsonOut)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
+	return cmd
+}
+
+// skillJSON is the JSON-serializable shape emitted by --json output.
+type skillJSON struct {
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Source      string `json:"source"`
+	Description string `json:"description"`
+}
+
+func emitSkills(out, errOut io.Writer, skills []skill.Skill, home string, jsonOut bool) {
+	if jsonOut {
+		enc := json.NewEncoder(out)
+		outSkills := make([]skillJSON, len(skills))
+		for i, s := range skills {
+			outSkills[i] = skillJSON{
+				Name:        s.Name,
+				Category:    s.Category,
+				Source:      s.Source,
+				Description: s.Description,
+			}
+		}
+		_ = enc.Encode(outSkills)
+		return
+	}
+	if len(skills) == 0 {
+		_, _ = fmt.Fprintln(errOut, "No skills found.")
+		return
+	}
+	printSkillTable(out, errOut, skills, home)
 }
 
 func printSkillTable(out, errOut io.Writer, skills []skill.Skill, home string) {
