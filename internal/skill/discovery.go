@@ -1,7 +1,6 @@
 package skill
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -44,10 +43,8 @@ func ListSkills(paths []string) ([]Skill, error) {
 	for _, base := range paths {
 		entries, err := os.ReadDir(base)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("reading %q: %w", base, err)
+			// Skip paths that don't exist or can't be read (permission denied, etc.)
+			continue
 		}
 
 		for _, entry := range entries {
@@ -57,10 +54,7 @@ func ListSkills(paths []string) ([]Skill, error) {
 			skillPath := filepath.Join(base, entry.Name(), "SKILL.md")
 			data, err := os.ReadFile(skillPath)
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					continue
-				}
-				return nil, fmt.Errorf("reading %q: %w", skillPath, err)
+				continue
 			}
 
 			meta, body := ParseFrontmatter(data)
@@ -98,10 +92,7 @@ func GetSkill(paths []string, name string) (*Skill, error) {
 		skillPath := filepath.Join(base, name, "SKILL.md")
 		data, err := os.ReadFile(skillPath)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("reading %q: %w", skillPath, err)
+			continue
 		}
 
 		meta, body := ParseFrontmatter(data)
@@ -139,10 +130,8 @@ func FindSkills(paths []string, keywords []string) ([]Skill, error) {
 	for _, base := range paths {
 		entries, err := os.ReadDir(base)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return nil, fmt.Errorf("reading %q: %w", base, err)
+			// Skip paths that don't exist or can't be read (permission denied, etc.)
+			continue
 		}
 
 		for _, entry := range entries {
@@ -152,10 +141,7 @@ func FindSkills(paths []string, keywords []string) ([]Skill, error) {
 			skillPath := filepath.Join(base, entry.Name(), "SKILL.md")
 			data, err := os.ReadFile(skillPath)
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					continue
-				}
-				return nil, fmt.Errorf("reading %q: %w", skillPath, err)
+				continue
 			}
 
 			meta, body := ParseFrontmatter(data)
