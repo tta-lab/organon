@@ -212,6 +212,9 @@ func TestListCmd_JSONOutput(t *testing.T) {
 	if s["description"] != "Refresh context window" {
 		t.Fatalf("description = %v, want 'Refresh context window'", s["description"])
 	}
+	if s["source"] == "" {
+		t.Fatalf("source should not be empty, got: %v", s["source"])
+	}
 }
 
 func TestListCmd_JSONOutput_Empty(t *testing.T) {
@@ -254,8 +257,12 @@ func TestFindCmd_JSONOutput(t *testing.T) {
 	if len(skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(skills))
 	}
-	if skills[0]["name"] != "breathe" {
-		t.Fatalf("name = %v, want breathe", skills[0]["name"])
+	s := skills[0]
+	if s["name"] != "breathe" {
+		t.Fatalf("name = %v, want breathe", s["name"])
+	}
+	if s["source"] == "" {
+		t.Fatalf("source should not be empty, got: %v", s["source"])
 	}
 }
 
@@ -272,6 +279,50 @@ func TestFindCmd_JSONOutput_NoMatch(t *testing.T) {
 	}
 	if stdout != "[]\n" {
 		t.Fatalf("stdout = %q, want '[]\\n' for no match", stdout)
+	}
+}
+func TestListCmd_JSONOutput_MultipleSkills(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillAt(t, tmpHome, "alpha", "First skill", "test", "body alpha")
+	writeSkillAt(t, tmpHome, "beta", "Second skill", "test", "body beta")
+	writeSkillAt(t, tmpHome, "gamma", "Third skill", "test", "body gamma")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, stderr, err := runSkill(t, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
+	}
+	if len(skills) != 3 {
+		t.Fatalf("expected 3 skills, got %d", len(skills))
+	}
+	names := make(map[string]bool)
+	for _, s := range skills {
+		name, ok := s["name"].(string)
+		if !ok {
+			t.Fatalf("name field missing or not string: %v", s["name"])
+		}
+		names[name] = true
+		if s["source"] == "" {
+			t.Fatalf("source should not be empty for skill %q", name)
+		}
+	}
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		if !names[want] {
+			t.Fatalf("expected skill %q in output, got: %v", want, names)
+		}
 	}
 }
 
