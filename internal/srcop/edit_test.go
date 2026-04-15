@@ -431,7 +431,6 @@ func TestParseEditInput_TrailingAfterMarker(t *testing.T) {
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
-	assert.Contains(t, err.Error(), "Expected exactly one")
 }
 
 func TestParseEditInput_BeforeContentContainsAfterMarker(t *testing.T) {
@@ -440,7 +439,7 @@ func TestParseEditInput_BeforeContentContainsAfterMarker(t *testing.T) {
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
-	assert.Contains(t, err.Error(), "Expected exactly one")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
 }
 
 func TestParseEditInput_DuplicateBeforeMarker(t *testing.T) {
@@ -448,15 +447,66 @@ func TestParseEditInput_DuplicateBeforeMarker(t *testing.T) {
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 lines matching ===BEFORE===")
-	assert.Contains(t, err.Error(), "Expected exactly one")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
 }
 
 func TestParseEditInput_DuplicateAfterMarker(t *testing.T) {
-	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
+	// Genuine duplicate: two ===AFTER=== markers with content after the second.
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\nmore content\n"
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
-	assert.Contains(t, err.Error(), "Expected exactly one")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
+}
+func TestParseEditInput_TrailingAfterMarker_DiagnosesClosingDelimiter(t *testing.T) {
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Trailing ===AFTER===")
+	assert.Contains(t, err.Error(), "heredoc")
+	assert.NotContains(t, err.Error(), "--before-file")
+}
+func TestParseEditInput_TrailingAfterMarker_NoTrailingNewline(t *testing.T) {
+	input := "===BEFORE===\nold\n===AFTER===\nnew\n===AFTER==="
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Trailing ===AFTER===")
+	assert.Contains(t, err.Error(), "heredoc")
+}
+
+
+func TestParseEditInput_DuplicateAfterMarker_ShowsContext(t *testing.T) {
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\nmore content\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
+}
+
+func TestParseEditInput_DuplicateBeforeMarker_ShowsFraming(t *testing.T) {
+	input := "some content\n===BEFORE===\n===BEFORE===\nold text\n===AFTER===\nnew text\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===BEFORE===")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
+	assert.Contains(t, err.Error(), "src edit")
+}
+
+func TestParseEditInput_TwoCompleteEdits_SuggestsMultipleCalls(t *testing.T) {
+	input := "===BEFORE===\nold1\n===AFTER===\nnew1\n===BEFORE===\nold2\n===AFTER===\nnew2\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===BEFORE===")
+	assert.Contains(t, err.Error(), "src edit")
+}
+
+func TestParseEditInput_ThreeBeforeMarkers(t *testing.T) {
+	input := "===BEFORE===\nline1\n===BEFORE===\nline2\n===BEFORE===\nline3\n===AFTER===\nnew\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 3 lines matching ===BEFORE===")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs")
+	assert.Contains(t, err.Error(), "src edit")
 }
 
 // ---------- EditDirect ----------

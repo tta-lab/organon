@@ -189,19 +189,31 @@ func parseEditInput(input []byte) (old, new []byte, err error) {
 	case len(beforeLines) > 1:
 		return nil, nil, fmt.Errorf(
 			"found %d lines matching %s (at lines %v). "+
-				"Expected exactly one. Use --before-file/--after-file "+
-				"for content containing literal markers",
-			len(beforeLines), beforeDelim, beforeLines)
+				"section headers, not tag pairs — use multiple `src edit` calls for multiple edits. "+
+				"Use --before-file/--after-file only when content contains literal %s",
+			len(beforeLines), beforeDelim, beforeLines, beforeDelim)
 	}
 	switch {
 	case len(afterLines) == 0:
 		return nil, nil, fmt.Errorf("no %s found", afterDelim)
 	case len(afterLines) > 1:
+		// Detect trailing-===AFTER===: last marker at EOF or followed only by empty.
+		lastAfter := afterLines[len(afterLines)-1]
+		isTrailing := lastAfter >= len(lines) ||
+			(len(lines) > lastAfter && strings.TrimSpace(lines[lastAfter]) == "")
+		if isTrailing {
+			return nil, nil, fmt.Errorf(
+				"found %d lines matching %s (at lines %v). "+
+					"Trailing %s — a heredoc needs only one opening and closing delimiter; "+
+					"no closing delimiter is needed at EOF. "+
+					"Use multiple `src edit` calls for multiple edits",
+				len(afterLines), afterDelim, afterLines, afterDelim)
+		}
 		return nil, nil, fmt.Errorf(
 			"found %d lines matching %s (at lines %v). "+
-				"Expected exactly one. Use --before-file/--after-file "+
-				"for content containing literal markers",
-			len(afterLines), afterDelim, afterLines)
+				"section headers, not tag pairs — use multiple `src edit` calls for multiple edits. "+
+				"Use --before-file/--after-file only when content contains literal %s",
+			len(afterLines), afterDelim, afterLines, afterDelim)
 	}
 
 	beforeIdx := beforeLines[0] - 1 // convert back to 0-based
