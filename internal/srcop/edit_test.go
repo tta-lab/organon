@@ -431,6 +431,7 @@ func TestParseEditInput_TrailingAfterMarker(t *testing.T) {
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "This looks like a trailing")
 }
 
 func TestParseEditInput_BeforeContentContainsAfterMarker(t *testing.T) {
@@ -458,28 +459,13 @@ func TestParseEditInput_DuplicateAfterMarker(t *testing.T) {
 	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
 	assert.Contains(t, err.Error(), "section headers, not tag pairs")
 }
-func TestParseEditInput_TrailingAfterMarker_DiagnosesClosingDelimiter(t *testing.T) {
-	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
-	_, _, err := parseEditInput([]byte(input))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Trailing ===AFTER===")
-	assert.Contains(t, err.Error(), "heredoc")
-	assert.NotContains(t, err.Error(), "--before-file")
-}
+
 func TestParseEditInput_TrailingAfterMarker_NoTrailingNewline(t *testing.T) {
+	// Trailing case with no newline at EOF — still detected as trailing.
 	input := "===BEFORE===\nold\n===AFTER===\nnew\n===AFTER==="
 	_, _, err := parseEditInput([]byte(input))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Trailing ===AFTER===")
-	assert.Contains(t, err.Error(), "heredoc")
-}
-
-
-func TestParseEditInput_DuplicateAfterMarker_ShowsContext(t *testing.T) {
-	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\nmore content\n"
-	_, _, err := parseEditInput([]byte(input))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "This looks like a trailing")
 	assert.Contains(t, err.Error(), "section headers, not tag pairs")
 }
 
@@ -557,4 +543,41 @@ func TestEditDirect_NoMatch(t *testing.T) {
 	_, err := EditDirect("file.txt", source, []byte("not present\n"), []byte("new\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+// ---------- isTrailingAfterDelimiter — edge cases ----------
+
+func TestParseEditInput_TrailingAfterMarker_HasFraming(t *testing.T) {
+	// Trailing case: N=2 markers, all lines after second are blank.
+	// Error must include the "section headers, not tag pairs" framing.
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "section headers, not tag pairs",
+		"trailing branch must include orientation framing")
+}
+
+func TestParseEditInput_TrailingAfterMarker_BlankThenContent_FallsThroughToGeneric(t *testing.T) {
+	// Blank line after second ===AFTER===, then content — this is a genuine
+	// literal-marker case, NOT trailing. Must NOT emit the trailing error.
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n\nsome content here\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	// Must be the generic duplicate message, not the trailing one.
+	assert.Contains(t, err.Error(), "found 2 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "src edit")
+	assert.NotContains(t, err.Error(), "This looks like a trailing",
+		"blank-then-content pattern must not trigger trailing framing")
+}
+
+func TestParseEditInput_NThreeAfterMarkers_FallsThroughToGeneric(t *testing.T) {
+	// N=3 markers — ambiguous, fall through to generic (not trailing).
+	input := "===BEFORE===\nold text\n===AFTER===\nnew text\n===AFTER===\n===AFTER===\n"
+	_, _, err := parseEditInput([]byte(input))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found 3 lines matching ===AFTER===")
+	assert.Contains(t, err.Error(), "src edit")
+	assert.NotContains(t, err.Error(), "This looks like a trailing",
+		"N=3 must fall through to generic, not trailing framing")
 }
