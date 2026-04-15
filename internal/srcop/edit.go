@@ -167,6 +167,23 @@ func crlfOffset(original []byte, pos int) int {
 	return pos + offset
 }
 
+// isTrailingAfterDelimiter reports whether the N=2 after-marker case is a
+// trailing delimiter mistake: both markers are present, and every line after
+// the second one is blank.  When true the error uses the "trailing" framing;
+// when false the input falls through to the generic duplicate-marker message.
+func isTrailingAfterDelimiter(lines []string, afterLines []int) bool {
+	if len(afterLines) != 2 {
+		return false
+	}
+	secondIdx := afterLines[1] - 1 // afterLines are 1-based
+	for i := secondIdx + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // parseEditInput parses the BEFORE/AFTER block from input bytes.
 func parseEditInput(input []byte) (old, new []byte, err error) {
 	text := string(input)
@@ -196,19 +213,13 @@ func parseEditInput(input []byte) (old, new []byte, err error) {
 	switch {
 	case len(afterLines) == 0:
 		return nil, nil, fmt.Errorf("no %s found", afterDelim)
-	case len(afterLines) > 1:
-		// Detect trailing-===AFTER===: last marker at EOF or followed only by empty.
-		lastAfter := afterLines[len(afterLines)-1]
-		isTrailing := lastAfter >= len(lines) ||
-			(len(lines) > lastAfter && strings.TrimSpace(lines[lastAfter]) == "")
-		if isTrailing {
-			return nil, nil, fmt.Errorf(
-				"found %d lines matching %s (at lines %v). "+
-					"Trailing %s — a heredoc needs only one opening and closing delimiter; "+
-					"no closing delimiter is needed at EOF. "+
-					"Use multiple `src edit` calls for multiple edits",
-				len(afterLines), afterDelim, afterLines, afterDelim)
-		}
+	case len(afterLines) == 2 && isTrailingAfterDelimiter(lines, afterLines):
+		return nil, nil, fmt.Errorf(
+			"found 2 lines matching %s (at lines %v). "+
+				"This looks like a trailing %s — use section headers, not tag pairs. "+
+				"Use --before-file/--after-file for content containing literal markers",
+			afterDelim, afterLines, afterDelim)
+	case len(afterLines) >= 2:
 		return nil, nil, fmt.Errorf(
 			"found %d lines matching %s (at lines %v). "+
 				"section headers, not tag pairs — use multiple `src edit` calls for multiple edits. "+
