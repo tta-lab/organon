@@ -29,6 +29,10 @@ const (
 // Search performs a web search using the best available backend.
 // Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
 func Search(ctx context.Context, query string) (string, error) {
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
 	provider, searcher, err := resolveSearchProvider()
 	if err != nil {
 		return "", err

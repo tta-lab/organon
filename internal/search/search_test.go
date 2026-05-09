@@ -162,6 +162,13 @@ func TestSearchWithProvider_IncludesProviderNameOnFailure(t *testing.T) {
 	assert.ErrorContains(t, err, "backend down")
 }
 
+func TestSearch_EmptyQueryDoesNotResolveProvider(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "")
+	_, err := Search(context.Background(), "")
+	require.Error(t, err)
+	assert.EqualError(t, err, "query is required")
+}
+
 type failingSearcher struct{}
 
 func (failingSearcher) Search(context.Context, string) ([]SearchResult, error) {
