@@ -20,20 +20,30 @@ type SearchResult struct {
 	Position int
 }
 
+const (
+	providerExa   = "Exa"
+	providerBrave = "Brave"
+	providerDDG   = "DuckDuckGo"
+)
+
 // Search performs a web search using the best available backend.
 // Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
 func Search(ctx context.Context, query string) (string, error) {
+	provider, searcher, err := resolveSearchProvider()
+	if err != nil {
+		return "", err
+	}
+	return searchWithProvider(ctx, query, provider, searcher)
+}
+
+func searchWithProvider(ctx context.Context, query, provider string, searcher WebSearcher) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
-	searcher, err := resolveSearcher()
-	if err != nil {
-		return "", err
-	}
 	results, err := searcher.Search(ctx, query)
 	if err != nil {
-		return "", fmt.Errorf("search failed: %w", err)
+		return "", fmt.Errorf("search failed with %s provider: %w", provider, err)
 	}
 	return formatSearchResults(results), nil
 }
@@ -43,23 +53,28 @@ func Search(ctx context.Context, query string) (string, error) {
 // Returns an error if a key is set but empty — this prevents silently
 // falling back when a user has misconfigured their API key.
 func resolveSearcher() (WebSearcher, error) {
+	_, searcher, err := resolveSearchProvider()
+	return searcher, err
+}
+
+func resolveSearchProvider() (string, WebSearcher, error) {
 	exaKey, exaSet := os.LookupEnv("EXA_API_KEY")
 	if exaSet && exaKey == "" {
-		return nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave/DuckDuckGo")
+		return "", nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave/DuckDuckGo")
 	}
 	if exaKey != "" {
-		return NewExaSearcher(exaKey), nil
+		return providerExa, NewExaSearcher(exaKey), nil
 	}
 
 	braveKey, braveSet := os.LookupEnv("BRAVE_API_KEY")
 	if braveSet && braveKey == "" {
-		return nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it to use DuckDuckGo")
+		return "", nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it to use DuckDuckGo")
 	}
 	if braveKey != "" {
-		return NewBraveSearcher(braveKey), nil
+		return providerBrave, NewBraveSearcher(braveKey), nil
 	}
 
-	return NewDDGSearcher(), nil
+	return providerDDG, NewDDGSearcher(), nil
 }
 
 func formatSearchResults(results []SearchResult) string {

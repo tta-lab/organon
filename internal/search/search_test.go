@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -152,6 +153,19 @@ func TestResolveSearcher_NoKey(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := searcher.(*DDGSearcher)
 	assert.True(t, ok, "expected DDGSearcher when no API keys are set")
+}
+
+func TestSearchWithProvider_IncludesProviderNameOnFailure(t *testing.T) {
+	_, err := searchWithProvider(context.Background(), "test", "DuckDuckGo", failingSearcher{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "search failed with DuckDuckGo provider")
+	assert.ErrorContains(t, err, "backend down")
+}
+
+type failingSearcher struct{}
+
+func (failingSearcher) Search(context.Context, string) ([]SearchResult, error) {
+	return nil, errors.New("backend down")
 }
 
 // unsetEnv removes an env var for the duration of the test, restoring the
