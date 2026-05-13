@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/adrg/frontmatter v0.2.0
 	github.com/aymanbagabas/go-udiff v0.4.1
+	github.com/joho/godotenv v1.5.1
 	github.com/odvcencio/gotreesitter v0.9.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1

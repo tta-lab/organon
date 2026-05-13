@@ -1,6 +1,6 @@
 # organon
 
-Structure-aware tools for AI agents. Tree-sitter code editing, web page navigation, search. No daemon, no JSON, just stdin.
+Structure-aware tools for AI agents. Tree-sitter code editing, web page navigation, search, and skill discovery. No daemon, no JSON, just stdin.
 
 Organon provides three commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code and the web, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
 
@@ -51,14 +51,14 @@ Supports symbol-aware extraction for Go, Rust, TypeScript, TSX, Python, C, C++, 
 
 `src edit` is a text-based escape hatch for files where symbol editing is overkill (config files, unsupported languages, quick edits). It uses exact match with whitespace normalization fallbacks and works on any text file regardless of language support.
 
-### `url` — Web pages
+### `web fetch` — Web pages
 
 Fetch and navigate web pages with heading-based structure. Same `--tree` / `-s` pattern.
 
 ```bash
-url https://docs.example.com --tree     # heading tree with IDs
-url https://docs.example.com -s bK      # read a section
-url https://docs.example.com            # read full page
+web fetch https://docs.example.com --tree     # heading tree with IDs
+web fetch https://docs.example.com -s bK      # read a section
+web fetch https://docs.example.com            # read full page
 ```
 
 ### `web` — Web search
@@ -79,15 +79,14 @@ web docs fetch /reactjs/react.dev hooks  # fetch docs for a library
 CONTEXT7_API_KEY=... web docs resolve react  # with API key (higher rate limits)
 ```
 
-### `alert` — Agent alerts
+### `skill` — Skill discovery
 
-Send an alert message to the bridge service (e.g. Telegram via bridge). Requires `ALERT_ENDPOINT` env var.
+List, find, and read agent skills from project-local and global skill directories.
 
 ```bash
-alert --from flick "the db is gone"
-cat <<'EOF' | alert --from flick
-detailed message
-EOF
+skill list
+skill find web
+skill get organon-web
 ```
 
 ## Why
@@ -107,9 +106,9 @@ brew install tta-lab/ttal/organon
 ### From source
 
 ```bash
-go install github.com/tta-lab/organon/cmd/src@latest
-go install github.com/tta-lab/organon/cmd/web@latest
-go install github.com/tta-lab/organon/cmd/alert@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/web@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
 ```
 
 ### From release
@@ -122,9 +121,8 @@ Download binaries from [GitHub Releases](https://github.com/tta-lab/organon/rele
 temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
-│   ├── url    ← web page reading
-│   ├── web    ← web search
-│   └── alert  ← agent-to-bridge alerts
+│   ├── web    ← web search and page reading
+│   └── skill  ← skill discovery
 ├── standard tools (cat, ls, grep)
 └── user code
 

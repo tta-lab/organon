@@ -30,6 +30,18 @@ builds:
       - amd64
       - arm64
 
+  - id: skill
+    binary: skill
+    main: ./cmd/skill
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - formats: [tar.gz]
     name_template: >-
@@ -40,6 +52,7 @@ archives:
     builds:
       - src
       - web
+      - skill
 
 checksum:
   name_template: checksums.txt
@@ -65,9 +78,11 @@ brews:
     install: |
       bin.install "src"
       bin.install "web"
+      bin.install "skill"
     test: |
       system "#{bin}/src", "--help"
       system "#{bin}/web", "--help"
+      system "#{bin}/skill", "--help"
     repository:
       owner: tta-lab
       name: homebrew-ttal

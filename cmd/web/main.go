@@ -16,6 +16,11 @@ import (
 )
 
 func main() {
+	if err := loadTTALEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	root := &cobra.Command{
 		Use:   "web",
 		Short: "Web search and page fetching for AI agents",
