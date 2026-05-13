@@ -60,6 +60,10 @@ web fetch <url> --full                   # full content, skip auto-tree
 web fetch <url> --tree-threshold 8000    # customize auto-tree threshold (default: 5000)
 ```
 
+## Environment
+
+At startup, `web` loads `~/.config/ttal/.env` if it exists. Existing process environment variables win over values from that file.
+
 ## Search Backends
 
 - **Exa** — set `EXA_API_KEY` for highest quality results (used first)

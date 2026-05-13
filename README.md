@@ -1,6 +1,6 @@
 # organon
 
-Structure-aware tools for AI agents. Tree-sitter code editing, web page navigation, search. No daemon, no JSON, just stdin.
+Structure-aware tools for AI agents. Tree-sitter code editing, web page navigation, search, and skill discovery. No daemon, no JSON, just stdin.
 
 Organon provides three commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code and the web, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
 
@@ -51,14 +51,14 @@ Supports symbol-aware extraction for Go, Rust, TypeScript, TSX, Python, C, C++, 
 
 `src edit` is a text-based escape hatch for files where symbol editing is overkill (config files, unsupported languages, quick edits). It uses exact match with whitespace normalization fallbacks and works on any text file regardless of language support.
 
-### `url` — Web pages
+### `web fetch` — Web pages
 
 Fetch and navigate web pages with heading-based structure. Same `--tree` / `-s` pattern.
 
 ```bash
-url https://docs.example.com --tree     # heading tree with IDs
-url https://docs.example.com -s bK      # read a section
-url https://docs.example.com            # read full page
+web fetch https://docs.example.com --tree     # heading tree with IDs
+web fetch https://docs.example.com -s bK      # read a section
+web fetch https://docs.example.com            # read full page
 ```
 
 ### `web` — Web search
@@ -77,6 +77,16 @@ Resolve library names to Context7 IDs and fetch documentation.
 web docs resolve react       # list matching libraries with IDs
 web docs fetch /reactjs/react.dev hooks  # fetch docs for a library
 CONTEXT7_API_KEY=... web docs resolve react  # with API key (higher rate limits)
+```
+
+### `skill` — Skill discovery
+
+List, find, and read agent skills from project-local and global skill directories.
+
+```bash
+skill list
+skill find web
+skill get organon-web
 ```
 
 ## Why
@@ -98,6 +108,7 @@ brew install tta-lab/ttal/organon
 ```bash
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/web@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
 ```
 
 ### From release
@@ -110,8 +121,8 @@ Download binaries from [GitHub Releases](https://github.com/tta-lab/organon/rele
 temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
-│   ├── url    ← web page reading
-│   └── web    ← web search
+│   ├── web    ← web search and page reading
+│   └── skill  ← skill discovery
 ├── standard tools (cat, ls, grep)
 └── user code
 
