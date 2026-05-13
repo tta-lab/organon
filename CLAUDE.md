@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-Organon is a Go monorepo producing four CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), `alert` (agent-to-bridge messaging for alerts via Telegram), and `skill` (filesystem-based skill discovery).
+Organon is a Go monorepo producing three CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), and `skill` (filesystem-based skill discovery).
 
 ## Essential Commands
 
 ```bash
 make all          # fmt, vet, tidy, build
-make test         # go test -v ./...
-make build        # go build ./cmd/...
-make install      # go install ./cmd/...
+make test         # CGO_ENABLED=0 go test -v ./...
+make build        # CGO_ENABLED=0 go build ./cmd/...
+make install      # CGO_ENABLED=0 go install ./cmd/...
 make ci           # fmt, vet, lint, test, build
 ```
 
@@ -19,7 +19,6 @@ make ci           # fmt, vet, lint, test, build
 ### Binaries
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
-- `cmd/alert/` — agent-to-bridge messaging: POSTs alerts to a configurable endpoint via env var
 - `cmd/skill/` — filesystem-based skill discovery: list/get/find SKILL.md files from project-local and global agent skill directories
 
 ### Shared Packages
@@ -43,8 +42,8 @@ Fixture files live in `testdata/`. Tests include both unit tests and CLI integra
 
 ```bash
 make test
-go test ./internal/id/...
-go test -v -run TestSymbols ./internal/treesitter/...
+CGO_ENABLED=0 go test ./internal/id/...
+CGO_ENABLED=0 go test -v -run TestSymbols ./internal/treesitter/...
 ```
 
 ## Package Documentation
