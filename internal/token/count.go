@@ -17,6 +17,22 @@ var (
 	})
 )
 
+// Encode returns the individual token strings for text using Cl100kBase.
+// Falls back to regex split on error.
+func Encode(text string) []string {
+	codec, err := cl100k()
+	if err != nil {
+		return fallbackRE.FindAllString(text, -1)
+	}
+	_, names, err := codec.Encode(text)
+	if err != nil {
+		return fallbackRE.FindAllString(text, -1)
+	}
+	return names
+}
+
+// Count returns the token count of text using the default Cl100kBase tokenizer.
+// Falls back to a simple regex split on error.
 func Count(text string) int {
 	codec, err := cl100k()
 	if err != nil {
