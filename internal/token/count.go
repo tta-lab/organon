@@ -20,6 +20,7 @@ var (
 	fallbackRE = regexp.MustCompile(`[A-Za-z0-9]+|[\x{4e00}-\x{9fff}]|[^\s]`)
 	codecCache sync.Map
 )
+
 func getCodec(enc tokenizer.Encoding) (tokenizer.Codec, error) {
 	v, ok := codecCache.Load(enc)
 	if ok {

@@ -10,13 +10,14 @@ import (
 
 	"github.com/tta-lab/organon/internal/token"
 )
+
 var validEncodings = map[string]tokenizer.Encoding{
-	"gpt2":         token.GPT2,
-	"r50k_base":    token.R50kBase,
-	"p50k_base":    token.P50kBase,
-	"p50k_edit":    token.P50kEdit,
-	"cl100k_base":  token.Cl100kBase,
-	"o200k_base":   token.O200kBase,
+	"gpt2":        token.GPT2,
+	"r50k_base":   token.R50kBase,
+	"p50k_base":   token.P50kBase,
+	"p50k_edit":   token.P50kEdit,
+	"cl100k_base": token.Cl100kBase,
+	"o200k_base":  token.O200kBase,
 }
 
 func main() {
