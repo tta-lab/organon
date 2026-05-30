@@ -1,11 +1,11 @@
 package token
 
 import (
-	"github.com/tiktoken-go/tokenizer"
 	"regexp"
 	"sync"
-)
 
+	"github.com/tiktoken-go/tokenizer"
+)
 const (
 	Cl100kBase = tokenizer.Cl100kBase
 )
