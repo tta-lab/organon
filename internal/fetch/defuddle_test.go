@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,10 @@ import (
 )
 
 func TestDefuddleBackend_FetchHTML(t *testing.T) {
+	if _, err := exec.LookPath("defuddle"); err != nil {
+		t.Skip("defuddle not installed")
+	}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte("<html><head><title>Test</title></head><body><h1>H</h1><p>content</p></body></html>"))
