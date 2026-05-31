@@ -13,7 +13,7 @@ import (
 func TestDefuddleBackend_FetchHTML(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte("<html><head><title>Test Page</title></head><body><h1>Test</h1><p>content</p></body></html>"))
+		_, _ = w.Write([]byte("<html><head><title>Test</title></head><body><h1>H</h1><p>content</p></body></html>"))
 	}))
 	defer srv.Close()
 
@@ -21,14 +21,14 @@ func TestDefuddleBackend_FetchHTML(t *testing.T) {
 	content, err := backend.Fetch(context.Background(), srv.URL)
 	require.NoError(t, err)
 	assert.NotContains(t, content, "<html>")
-	assert.Contains(t, content, "## Test")
+	assert.Contains(t, content, "## H")
 	assert.Contains(t, content, "content")
 }
 
 func TestDefuddleBackend_FetchNonHTML(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte("package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"))
+		_, _ = w.Write([]byte("package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"))
 	}))
 	defer srv.Close()
 
@@ -56,8 +56,9 @@ func TestDefuddleBackend_FetchLiveNonHTML_SkipOnCI(t *testing.T) {
 		t.Skip("skipping live network test in short mode")
 	}
 
+	url := "https://raw.githubusercontent.com/tta-lab/organon/main/internal/fetch/doc.go"
 	backend := NewDefuddleCLIBackend()
-	content, err := backend.Fetch(context.Background(), "https://raw.githubusercontent.com/tta-lab/organon/main/internal/fetch/doc.go")
+	content, err := backend.Fetch(context.Background(), url)
 	require.NoError(t, err)
 	assert.Contains(t, content, "package fetch")
 	assert.NotContains(t, content, "Not an HTML page")
