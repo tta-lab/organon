@@ -39,6 +39,8 @@ linters:
         - name: import-shadowing
     gocyclo:
       min-complexity: 15
+    goconst:
+      ignore-tests: true
     lll:
       line-length: 120
 
