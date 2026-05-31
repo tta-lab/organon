@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -16,18 +17,43 @@ func TestDefuddleBackend_FetchHTML(t *testing.T) {
 		t.Skip("defuddle not installed")
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<html><head><title>Test</title></head><body><h1>H</h1><p>content</p></body></html>"))
-	}))
-	defer srv.Close()
+	htmlBody := "<html><head><title>T</title></head><body><h1>H</h1><p>content</p></body></html>"
 
-	backend := NewDefuddleCLIBackend()
-	content, err := backend.Fetch(context.Background(), srv.URL)
-	require.NoError(t, err)
-	assert.NotContains(t, content, "<html>")
-	assert.Contains(t, content, "## H")
-	assert.Contains(t, content, "content")
+	tests := []struct {
+		name        string
+		contentType string
+		wantHTML    bool
+	}{
+		{name: "lowercase", contentType: "text/html; charset=utf-8", wantHTML: true},
+		{name: "mixed case", contentType: "Text/HTML; charset=utf-8", wantHTML: true},
+		{name: "uppercase", contentType: "TEXT/HTML", wantHTML: true},
+		{name: "missing", contentType: "", wantHTML: true},
+		{name: "plain text", contentType: "text/plain", wantHTML: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.contentType != "" {
+					w.Header().Set("Content-Type", tt.contentType)
+				}
+				_, _ = w.Write([]byte(htmlBody))
+			}))
+			defer srv.Close()
+
+			backend := NewDefuddleCLIBackend()
+			content, err := backend.Fetch(context.Background(), srv.URL)
+			require.NoError(t, err)
+
+			if tt.wantHTML {
+				assert.NotContains(t, content, "<html>")
+				assert.Contains(t, content, "## H")
+				assert.Contains(t, content, "content")
+			} else {
+				assert.Contains(t, content, "<html>")
+			}
+		})
+	}
 }
 
 func TestDefuddleBackend_FetchNonHTML(t *testing.T) {
@@ -57,8 +83,8 @@ func TestDefuddleBackend_FetchHTTPError(t *testing.T) {
 }
 
 func TestDefuddleBackend_FetchLiveNonHTML_SkipOnCI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping live network test in short mode")
+	if testing.Short() || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		t.Skip("skipping live network test in short mode or CI")
 	}
 
 	url := "https://raw.githubusercontent.com/tta-lab/organon/main/internal/fetch/doc.go"

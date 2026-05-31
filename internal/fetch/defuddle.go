@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,6 +44,7 @@ func (b *defuddleCLIBackend) Fetch(ctx context.Context, url string) (string, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return "", fmt.Errorf("defuddle: HTTP %d", resp.StatusCode)
 	}
 
@@ -51,8 +54,14 @@ func (b *defuddleCLIBackend) Fetch(ctx context.Context, url string) (string, err
 		return "", fmt.Errorf("defuddle: read body: %w", err)
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "text/html") {
+	ct := resp.Header.Get("Content-Type")
+	mediatype, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		slog.Warn("defuddle: Content-Type parse failed, trying defuddle anyway",
+			"content-type", ct, "error", err)
+		mediatype = "text/html"
+	}
+	if !strings.EqualFold(mediatype, "text/html") {
 		return TruncateContent(string(body)), nil
 	}
 
@@ -75,7 +84,7 @@ func (b *defuddleCLIBackend) parseHTML(ctx context.Context, html []byte) (string
 		return "", err
 	}
 	if err := f.Close(); err != nil {
-		return "", err
+		slog.Warn("defuddle: temp file close error", "path", f.Name(), "error", err)
 	}
 
 	cmd := exec.CommandContext(ctx, "defuddle", "parse", f.Name(), "--markdown")
