@@ -14,6 +14,7 @@ const (
 	afterDelim      = "===AFTER==="
 	maxFileSize     = 100 * 1024 // 100KB
 	binaryCheckSize = 8192       // 8KB
+	passExact       = "exact"
 )
 
 // EditResult holds the result of an edit operation including match metadata.
@@ -97,7 +98,7 @@ func editCore(filename string, source, oldText, newText []byte) (*EditResult, er
 				applyReindent(newText, normalized[origStart:origEnd], target)
 			warnings = append(warnings, reindentWarnings...)
 		}
-	case "exact":
+	case passExact:
 		// Reindent is not applied for exact pass; warn if AFTER style mismatches target.
 		if target := indent.Detect(filename, source); target.Kind != indent.Unknown {
 			if after := indent.DetectByContent(newText); after.Kind != indent.Unknown && after.Kind != target.Kind {
@@ -283,7 +284,7 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 		name      string
 		normalize func([]byte) []byte
 	}{
-		{"exact", func(b []byte) []byte { return b }},
+		{passExact, func(b []byte) []byte { return b }},
 		{"trim-trailing", normalizeTrailingWS},
 		{"trim-both", normalizeBothWS},
 		{"unicode-fold", normalizeUnicode},
@@ -312,7 +313,7 @@ func findMatch(source, old []byte, filename string) (start, end int, pass string
 		}
 
 		// For exact pass, positions are already correct.
-		if p.name == "exact" {
+		if p.name == passExact {
 			return first, first + len(normOld), p.name, nil
 		}
 
