@@ -3,24 +3,24 @@ module github.com/tta-lab/organon
 go 1.26.1
 
 require (
+	github.com/BurntSushi/toml v0.3.1
 	github.com/adrg/frontmatter v0.2.0
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/joho/godotenv v1.5.1
 	github.com/odvcencio/gotreesitter v0.9.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	github.com/tiktoken-go/tokenizer v0.8.0
 	github.com/yuin/goldmark v1.7.16
 	golang.org/x/net v0.38.0
 )
 
 require (
-	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	github.com/tiktoken-go/tokenizer v0.8.0 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
