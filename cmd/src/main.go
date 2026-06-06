@@ -156,7 +156,7 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 			return noStructureError(filename, "reading by -s")
 		}
 		if treeOnly {
-			return noStructureError(filename, "showing --tree")
+			return noSymbolTreeError(filename)
 		}
 		fmt.Print(string(source))
 		return nil
@@ -172,7 +172,7 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 			return noStructureError(filename, "reading by -s")
 		}
 		if treeOnly {
-			return noStructureError(filename, "showing --tree")
+			return noSymbolTreeError(filename)
 		}
 		fmt.Print(string(source))
 		return nil
@@ -222,6 +222,13 @@ func runReplace(cmd *cobra.Command, args []string) error {
 	if !hasTreeSitterSupport(filename) {
 		return noStructureError(filename, "replace")
 	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "replace")
+	}
 
 	result, err := srcop.Replace(filename, source, symbolID, newContent, depth)
 	if err != nil {
@@ -266,6 +273,13 @@ func runInsert(cmd *cobra.Command, args []string) error {
 	if !hasTreeSitterSupport(filename) {
 		return noStructureError(filename, "insert")
 	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "insert")
+	}
 
 	var result []byte
 	if afterID != "" {
@@ -300,6 +314,13 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if !hasTreeSitterSupport(filename) {
 		return noStructureError(filename, "delete")
 	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "delete")
+	}
 
 	result, err := srcop.Delete(filename, source, symbolID, depth)
 	if err != nil {
@@ -327,6 +348,14 @@ func runComment(cmd *cobra.Command, args []string) error {
 	symbolID, _ := cmd.Flags().GetString("symbol")
 	readOnly, _ := cmd.Flags().GetBool("read")
 	depth := getDepth(cmd)
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return fmt.Errorf("comment requires code symbols in %s; use src edit %s for text edits",
+			filename, shellQuote(filename))
+	}
 
 	if readOnly {
 		comment, err := srcop.ReadComment(filename, source, symbolID, depth)
@@ -534,9 +563,22 @@ func hasTreeSitterSupport(filename string) bool {
 	return err == nil
 }
 
+func hasSymbolTree(filename string, source []byte, depth int) (bool, error) {
+	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
+	if err != nil {
+		return false, err
+	}
+	return len(treesitter.SymbolTree(symbols)) > 0, nil
+}
+
 func noStructureError(filename, action string) error {
 	return fmt.Errorf("%s requires a symbol or section, but %s does not have a symbol tree; use src edit %s",
 		action, filename, shellQuote(filename))
+}
+
+func noSymbolTreeError(filename string) error {
+	return fmt.Errorf("%s does not have a symbol tree; use src edit %s for text edits",
+		filename, shellQuote(filename))
 }
 
 func shellQuote(s string) string {

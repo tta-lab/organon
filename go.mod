@@ -3,7 +3,6 @@ module github.com/tta-lab/organon
 go 1.26.1
 
 require (
-	charm.land/lipgloss/v2 v2.0.3
 	github.com/BurntSushi/toml v0.3.1
 	github.com/adrg/frontmatter v0.2.0
 	github.com/aymanbagabas/go-udiff v0.4.1
@@ -17,6 +16,7 @@ require (
 )
 
 require (
+	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect

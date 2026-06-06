@@ -443,6 +443,64 @@ func TestUnsupportedTextReplaceSuggestsEdit(t *testing.T) {
 	assert.Equal(t, orig, string(result))
 }
 
+func TestEmptySymbolTreeMutationCommandsSuggestEdit(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*cobra.Command, string) error
+	}{
+		{
+			name: "replace",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().StringP("symbol", "s", "anything", "")
+				var err error
+				pipeStdin(t, []byte("replacement\n"), func() {
+					err = runReplace(cmd, []string{file})
+				})
+				return err
+			},
+		},
+		{
+			name: "insert",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().String("after", "anything", "")
+				cmd.Flags().String("before", "", "")
+				var err error
+				pipeStdin(t, []byte("replacement\n"), func() {
+					err = runInsert(cmd, []string{file})
+				})
+				return err
+			},
+		},
+		{
+			name: "delete",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().StringP("symbol", "s", "anything", "")
+				return runDelete(cmd, []string{file})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			f := filepath.Join(dir, "data.csv")
+			orig := "name,score\nada,10\n"
+			require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+			cmd := &cobra.Command{}
+			cmd.PersistentFlags().Int("depth", 2, "")
+			err := tc.run(cmd, f)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "requires a symbol or section")
+			assert.Contains(t, err.Error(), "src edit")
+
+			result, readErr := os.ReadFile(f)
+			require.NoError(t, readErr)
+			assert.Equal(t, orig, string(result))
+		})
+	}
+}
+
 func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, ".env")
