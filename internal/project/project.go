@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/tta-lab/organon/internal/org"
 )
 
 // Entry represents a project from projects.toml.
@@ -39,6 +41,7 @@ func Load(path string) ([]Entry, error) {
 	}
 
 	entries := flattenEntries(raw, "")
+	inheritGitHubTokenEnv(entries, filepath.Join(filepath.Dir(path), "orgs.toml"))
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Alias < entries[j].Alias
 	})
@@ -94,6 +97,24 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 		entries = append(entries, subEntries...)
 	}
 	return entries
+}
+func inheritGitHubTokenEnv(entries []Entry, orgsPath string) {
+	orgs, err := org.Load(orgsPath)
+	if err != nil {
+		return
+	}
+	tokenByOrg := make(map[string]string, len(orgs))
+	for _, e := range orgs {
+		tokenByOrg[e.Name] = e.GitHubTokenEnv
+	}
+	for i := range entries {
+		if entries[i].GitHubTokenEnv != "" {
+			continue
+		}
+		if tokenEnv := tokenByOrg[DeriveOrg(entries[i].Path)]; tokenEnv != "" {
+			entries[i].GitHubTokenEnv = tokenEnv
+		}
+	}
 }
 
 // Get returns a project by exact alias. Returns nil if not found.

@@ -30,6 +30,31 @@ path = "/home/neil/code/projects/tta-lab/lenos"
 		t.Errorf("expected sorted aliases, got %v", entries)
 	}
 }
+func TestLoadInheritsGitHubTokenEnvFromOrg(t *testing.T) {
+	dir := t.TempDir()
+	projectsPath := filepath.Join(dir, "projects.toml")
+	orgsPath := filepath.Join(dir, "orgs.toml")
+	os.WriteFile(projectsPath, []byte(`
+[fn-cli]
+name = "FlickNote CLI"
+path = "/home/neil/code/projects/GuionAI/flicknote-cli"
+`), 0644)
+	os.WriteFile(orgsPath, []byte(`
+[GuionAI]
+github_token_env = "GUION_GITHUB_TOKEN"
+`), 0644)
+
+	entries, err := Load(projectsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].GitHubTokenEnv != "GUION_GITHUB_TOKEN" {
+		t.Fatalf("expected inherited token env, got %q", entries[0].GitHubTokenEnv)
+	}
+}
 
 func TestLoadEmpty(t *testing.T) {
 	dir := t.TempDir()
