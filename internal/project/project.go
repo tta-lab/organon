@@ -12,9 +12,13 @@ import (
 
 // Entry represents a project from projects.toml.
 type Entry struct {
-	Alias string `toml:"-"`
-	Name  string `toml:"name"`
-	Path  string `toml:"path"`
+	Alias          string `toml:"-"                json:"alias,omitempty"`
+	Name           string `toml:"name"             json:"name,omitempty"`
+	Path           string `toml:"path"             json:"path,omitempty"`
+	Remote         string `toml:"remote"           json:"remote,omitempty"`
+	GitHubTokenEnv string `toml:"github_token_env" json:"github_token_env,omitempty"`
+	K8sApp         string `toml:"k8s_app"          json:"k8s_app,omitempty"`
+	K8sNamespace   string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
 }
 
 // Load reads projects.toml from path. Returns empty if the file doesn't exist.
@@ -63,15 +67,25 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 		_, hasName := sub["name"]
 		_, hasPath := sub["path"]
 		if hasName || hasPath {
-			var e Entry
+			e := Entry{Alias: fullKey}
 			if n, ok := sub["name"].(string); ok {
 				e.Name = n
 			}
 			if p, ok := sub["path"].(string); ok {
 				e.Path = p
 			}
-			// Also check for github_token_env, k8s_app, k8s_namespace - skip those
-			e.Alias = fullKey
+			if r, ok := sub["remote"].(string); ok {
+				e.Remote = r
+			}
+			if g, ok := sub["github_token_env"].(string); ok {
+				e.GitHubTokenEnv = g
+			}
+			if k, ok := sub["k8s_app"].(string); ok {
+				e.K8sApp = k
+			}
+			if kn, ok := sub["k8s_namespace"].(string); ok {
+				e.K8sNamespace = kn
+			}
 			entries = append(entries, e)
 		}
 

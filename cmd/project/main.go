@@ -59,17 +59,7 @@ func newListCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				type item struct {
-					Alias string `json:"alias"`
-					Name  string `json:"name"`
-					Path  string `json:"path"`
-					Org   string `json:"org"`
-				}
-				out := make([]item, len(entries))
-				for i, e := range entries {
-					out[i] = item{Alias: e.Alias, Name: e.Name, Path: e.Path, Org: project.DeriveOrg(e.Path)}
-				}
-				return json.NewEncoder(os.Stdout).Encode(out)
+				return json.NewEncoder(os.Stdout).Encode(entries)
 			}
 
 			if len(entries) == 0 {
@@ -120,15 +110,8 @@ func newGetCmd() *cobra.Command {
 				return err
 			}
 			if e != nil {
-				o := project.DeriveOrg(e.Path)
 				if jsonOut {
-					type item struct {
-						Alias string `json:"alias"`
-						Name  string `json:"name"`
-						Path  string `json:"path"`
-						Org   string `json:"org"`
-					}
-					return json.NewEncoder(os.Stdout).Encode(item{Alias: e.Alias, Name: e.Name, Path: e.Path, Org: o})
+					return json.NewEncoder(os.Stdout).Encode(e)
 				}
 				fmt.Printf("%s\n", e.Path)
 				return nil
@@ -166,13 +149,6 @@ func newResolveCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 
-			var resolved struct {
-				Alias          string `json:"alias"`
-				Path           string `json:"path"`
-				Org            string `json:"org"`
-				GitHubTokenEnv string `json:"github_token_env"`
-			}
-
 			// If it looks like a path (contains /), resolve by path first.
 			if strings.Contains(target, "/") {
 				e, err := project.GetByPath(config.ProjectsPath(), target)
@@ -180,49 +156,36 @@ func newResolveCmd() *cobra.Command {
 					return err
 				}
 				if e != nil {
-					resolved.Alias = e.Alias
-					resolved.Path = e.Path
-					resolved.Org = project.DeriveOrg(e.Path)
-					if resolved.Org != "" {
-						orgEntry, orgErr := org.Get(config.OrgsPath(), resolved.Org)
-						if orgErr == nil && orgEntry != nil {
-							resolved.GitHubTokenEnv = orgEntry.GitHubTokenEnv
-						}
-					}
-					return json.NewEncoder(os.Stdout).Encode(resolved)
+					return json.NewEncoder(os.Stdout).Encode(e)
 				}
 			}
 
-			// Resolve by alias (existing behavior).
+			// Resolve by alias.
 			e, err := project.Resolve(config.ProjectsPath(), target)
 			if err != nil {
 				return err
 			}
 
-			resolved.Alias = target
-
 			if e != nil {
-				resolved.Path = e.Path
-				resolved.Org = project.DeriveOrg(e.Path)
-			} else {
-				// Fall back to reference repos
-				repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
-				if repoErr != nil {
-					return repoErr
-				}
-				resolved.Path = repoPath
-				resolved.Org = reporef.DeriveOrg(repoPath)
+				return json.NewEncoder(os.Stdout).Encode(e)
 			}
 
-			// Look up org token env
-			if resolved.Org != "" {
-				orgEntry, orgErr := org.Get(config.OrgsPath(), resolved.Org)
-				if orgErr == nil && orgEntry != nil {
-					resolved.GitHubTokenEnv = orgEntry.GitHubTokenEnv
-				}
+			// Fall back to reference repos
+			repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
+			if repoErr != nil {
+				return repoErr
 			}
 
-			return json.NewEncoder(os.Stdout).Encode(resolved)
+			type refResolved struct {
+				Alias string `json:"alias"`
+				Path  string `json:"path"`
+				Org   string `json:"org"`
+			}
+			return json.NewEncoder(os.Stdout).Encode(refResolved{
+				Alias: target,
+				Path:  repoPath,
+				Org:   reporef.DeriveOrg(repoPath),
+			})
 		},
 	}
 	return cmd
