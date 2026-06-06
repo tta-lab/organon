@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,6 +151,24 @@ func pipeStdin(t *testing.T, content []byte, fn func()) {
 		r.Close()
 	}()
 	fn()
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stdout
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+	}()
+
+	fn()
+	require.NoError(t, w.Close())
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	return string(data)
 }
 
 // newEditCmd builds a cobra root command with the edit subcommand registered,
@@ -346,6 +365,142 @@ func TestEdit_UnsupportedFile_Text(t *testing.T) {
 		"hello world!\n")
 }
 
+func TestUnsupportedTextRootReadsFullContent(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "paper.tex")
+	orig := []byte("\\section{Intro}\nText here.\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runTreeOrRead(cmd, []string{f})
+	})
+	require.NoError(t, runErr)
+	assert.Equal(t, string(orig), out)
+}
+
+func TestEmptySymbolTreeRootReadsFullContent(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "data.csv")
+	orig := []byte("name,score\nada,10\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runTreeOrRead(cmd, []string{f})
+	})
+	require.NoError(t, runErr)
+	assert.Equal(t, string(orig), out)
+}
+
+func TestUnsupportedTextTreeExplainsEditFallback(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "data.csv")
+	require.NoError(t, os.WriteFile(f, []byte("name,score\nada,10\n"), 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+	require.NoError(t, cmd.Flags().Set("tree", "true"))
+
+	err := runTreeOrRead(cmd, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not have a symbol tree")
+	assert.Contains(t, err.Error(), "src edit")
+}
+
+func TestUnsupportedTextReplaceSuggestsEdit(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "paper.tex")
+	orig := "\\section{Intro}\nText here.\n"
+	require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().StringP("symbol", "s", "anything", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	var err error
+	pipeStdin(t, []byte("replacement\n"), func() {
+		err = runReplace(cmd, []string{f})
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a symbol or section")
+	assert.Contains(t, err.Error(), "src edit")
+
+	result, readErr := os.ReadFile(f)
+	require.NoError(t, readErr)
+	assert.Equal(t, orig, string(result))
+}
+
+func TestEmptySymbolTreeMutationCommandsSuggestEdit(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*cobra.Command, string) error
+	}{
+		{
+			name: "replace",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().StringP("symbol", "s", "anything", "")
+				var err error
+				pipeStdin(t, []byte("replacement\n"), func() {
+					err = runReplace(cmd, []string{file})
+				})
+				return err
+			},
+		},
+		{
+			name: "insert",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().String("after", "anything", "")
+				cmd.Flags().String("before", "", "")
+				var err error
+				pipeStdin(t, []byte("replacement\n"), func() {
+					err = runInsert(cmd, []string{file})
+				})
+				return err
+			},
+		},
+		{
+			name: "delete",
+			run: func(cmd *cobra.Command, file string) error {
+				cmd.Flags().StringP("symbol", "s", "anything", "")
+				return runDelete(cmd, []string{file})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			f := filepath.Join(dir, "data.csv")
+			orig := "name,score\nada,10\n"
+			require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+			cmd := &cobra.Command{}
+			cmd.PersistentFlags().Int("depth", 2, "")
+			err := tc.run(cmd, f)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "requires a symbol or section")
+			assert.Contains(t, err.Error(), "src edit")
+
+			result, readErr := os.ReadFile(f)
+			require.NoError(t, readErr)
+			assert.Equal(t, orig, string(result))
+		})
+	}
+}
+
 func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, ".env")
@@ -359,7 +514,8 @@ func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
-	assert.Contains(t, runErr.Error(), "unsupported file type")
+	assert.Contains(t, runErr.Error(), "scoped edit requires a symbol or section")
+	assert.Contains(t, runErr.Error(), "src edit")
 
 	// File must be unchanged — no half-applied edits.
 	result, err := os.ReadFile(f)
@@ -493,8 +649,7 @@ func TestEditCmd_ScopedNestedSymbol_LineBoundaryExtension(t *testing.T) {
 }
 
 func TestEditCmd_ScopedEmptyTree(t *testing.T) {
-	// .go file with only 'package main' (no symbols). resolveSectionBounds should
-	// return a clear 'symbol not found' error suggesting --tree.
+	// A file with no symbols cannot be scoped, but unscoped src edit still works.
 	dir := t.TempDir()
 	f := filepath.Join(dir, "empty.go")
 	require.NoError(t, os.WriteFile(f, []byte("package main\n"), 0o644))
@@ -506,8 +661,8 @@ func TestEditCmd_ScopedEmptyTree(t *testing.T) {
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
-	assert.Contains(t, runErr.Error(), "not found")
-	assert.Contains(t, runErr.Error(), "--tree")
+	assert.Contains(t, runErr.Error(), "scoped edit requires a symbol or section")
+	assert.Contains(t, runErr.Error(), "src edit")
 }
 
 // ---------- line boundary helpers ----------

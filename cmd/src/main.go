@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -148,12 +149,34 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 
 	depth := getDepth(cmd)
 	symbolID, _ := cmd.Flags().GetString("symbol")
+	treeOnly, _ := cmd.Flags().GetBool("tree")
+
+	if !hasTreeSitterSupport(filename) {
+		if symbolID != "" {
+			return noStructureError(filename, "reading by -s")
+		}
+		if treeOnly {
+			return noSymbolTreeError(filename)
+		}
+		fmt.Print(string(source))
+		return nil
+	}
 
 	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
 	if err != nil {
 		return err
 	}
 	nodes := treesitter.SymbolTree(symbols)
+	if len(nodes) == 0 {
+		if symbolID != "" {
+			return noStructureError(filename, "reading by -s")
+		}
+		if treeOnly {
+			return noSymbolTreeError(filename)
+		}
+		fmt.Print(string(source))
+		return nil
+	}
 
 	if symbolID != "" {
 		for i, n := range nodes {
@@ -196,6 +219,16 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
+	if !hasTreeSitterSupport(filename) {
+		return noStructureError(filename, "replace")
+	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "replace")
+	}
 
 	result, err := srcop.Replace(filename, source, symbolID, newContent, depth)
 	if err != nil {
@@ -237,6 +270,16 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
+	if !hasTreeSitterSupport(filename) {
+		return noStructureError(filename, "insert")
+	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "insert")
+	}
 
 	var result []byte
 	if afterID != "" {
@@ -268,6 +311,16 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
+	if !hasTreeSitterSupport(filename) {
+		return noStructureError(filename, "delete")
+	}
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return noStructureError(filename, "delete")
+	}
 
 	result, err := srcop.Delete(filename, source, symbolID, depth)
 	if err != nil {
@@ -287,10 +340,22 @@ func runComment(cmd *cobra.Command, args []string) error {
 	if isMarkdown(filename) {
 		return fmt.Errorf("comment command not supported for markdown files; use replace -s <id> instead")
 	}
+	if !hasTreeSitterSupport(filename) {
+		return fmt.Errorf("comment requires code symbols in %s; use src edit %s for text edits",
+			filename, shellQuote(filename))
+	}
 
 	symbolID, _ := cmd.Flags().GetString("symbol")
 	readOnly, _ := cmd.Flags().GetBool("read")
 	depth := getDepth(cmd)
+	hasSymbols, err := hasSymbolTree(filename, source, depth)
+	if err != nil {
+		return err
+	}
+	if !hasSymbols {
+		return fmt.Errorf("comment requires code symbols in %s; use src edit %s for text edits",
+			filename, shellQuote(filename))
+	}
 
 	if readOnly {
 		comment, err := srcop.ReadComment(filename, source, symbolID, depth)
@@ -473,11 +538,17 @@ func resolveSectionBounds(filename string, source []byte, sectionID string, dept
 	if isMarkdown(filename) {
 		return markdown.SectionBounds(source, sectionID)
 	}
+	if !hasTreeSitterSupport(filename) {
+		return 0, 0, noStructureError(filename, "scoped edit")
+	}
 	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
 	if err != nil {
 		return 0, 0, err
 	}
 	nodes := treesitter.SymbolTree(symbols)
+	if len(nodes) == 0 {
+		return 0, 0, noStructureError(filename, "scoped edit")
+	}
 	for i, n := range nodes {
 		if n.ID == sectionID {
 			return int(symbols[i].StartByte), int(symbols[i].EndByte), nil
@@ -485,6 +556,36 @@ func resolveSectionBounds(filename string, source []byte, sectionID string, dept
 	}
 	// When tree is empty, error message should still suggest --tree.
 	return 0, 0, fmt.Errorf("symbol %q not found; run --tree to see current IDs", sectionID)
+}
+
+func hasTreeSitterSupport(filename string) bool {
+	_, err := treesitter.LangNameFromExt(filename)
+	return err == nil
+}
+
+func hasSymbolTree(filename string, source []byte, depth int) (bool, error) {
+	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
+	if err != nil {
+		return false, err
+	}
+	return len(treesitter.SymbolTree(symbols)) > 0, nil
+}
+
+func noStructureError(filename, action string) error {
+	return fmt.Errorf("%s requires a symbol or section, but %s does not have a symbol tree; use src edit %s",
+		action, filename, shellQuote(filename))
+}
+
+func noSymbolTreeError(filename string) error {
+	return fmt.Errorf("%s does not have a symbol tree; use src edit %s for text edits",
+		filename, shellQuote(filename))
+}
+
+func shellQuote(s string) string {
+	if !strings.ContainsAny(s, " \t\n'\"\\$`") {
+		return s
+	}
+	return strconv.Quote(s)
 }
 
 // lineStartAt returns the byte offset of the start of the line containing pos.
