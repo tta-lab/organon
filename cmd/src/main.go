@@ -13,6 +13,7 @@ import (
 	"github.com/tta-lab/organon/internal/indent"
 	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/srcop"
+	"github.com/tta-lab/organon/internal/textdoc"
 	"github.com/tta-lab/organon/internal/tree"
 	"github.com/tta-lab/organon/internal/treesitter"
 )
@@ -145,6 +146,9 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 	if isMarkdown(filename) {
 		return runMarkdownTreeOrRead(cmd, filename, source)
 	}
+	if textdoc.Supported(filename) {
+		return runTextDocTreeOrRead(cmd, filename, source)
+	}
 
 	depth := getDepth(cmd)
 	symbolID, _ := cmd.Flags().GetString("symbol")
@@ -196,6 +200,13 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
+	if textdoc.Supported(filename) {
+		result, err := textdoc.Replace(filename, source, symbolID, newContent)
+		if err != nil {
+			return err
+		}
+		return writeAndShow(filename, source, result, depth)
+	}
 
 	result, err := srcop.Replace(filename, source, symbolID, newContent, depth)
 	if err != nil {
@@ -237,6 +248,18 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
+	if textdoc.Supported(filename) {
+		var result []byte
+		if afterID != "" {
+			result, err = textdoc.InsertAfter(filename, source, afterID, newContent)
+		} else {
+			result, err = textdoc.InsertBefore(filename, source, beforeID, newContent)
+		}
+		if err != nil {
+			return err
+		}
+		return writeAndShow(filename, source, result, depth)
+	}
 
 	var result []byte
 	if afterID != "" {
@@ -263,6 +286,13 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 	if isMarkdown(filename) {
 		result, err := markdown.DeleteSection(source, symbolID)
+		if err != nil {
+			return err
+		}
+		return writeAndShow(filename, source, result, depth)
+	}
+	if textdoc.Supported(filename) {
+		result, err := textdoc.Delete(filename, source, symbolID)
 		if err != nil {
 			return err
 		}
@@ -326,6 +356,9 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 	if isMarkdown(filename) {
 		return printMarkdownTree(filename, result)
 	}
+	if textdoc.Supported(filename) {
+		return printTextDocTree(filename, result)
+	}
 	// Skip tree display for file types tree-sitter doesn't support.
 	// The file was already written successfully — tree display is optional.
 	if _, err := treesitter.LangNameFromExt(filename); err != nil {
@@ -356,6 +389,28 @@ func printMarkdownTree(_ string, source []byte) error {
 		return err
 	}
 	fmt.Print(treeStr)
+	return nil
+}
+
+func runTextDocTreeOrRead(cmd *cobra.Command, filename string, source []byte) error {
+	symbolID, _ := cmd.Flags().GetString("symbol")
+	if symbolID != "" {
+		content, err := textdoc.Read(filename, source, symbolID)
+		if err != nil {
+			return err
+		}
+		fmt.Print(content)
+		return nil
+	}
+	return printTextDocTree(filename, source)
+}
+
+func printTextDocTree(filename string, source []byte) error {
+	nodes, err := textdoc.Nodes(filename, source)
+	if err != nil {
+		return err
+	}
+	fmt.Print(tree.Render(nodes))
 	return nil
 }
 
@@ -472,6 +527,9 @@ func runEditScoped(cmd *cobra.Command, filename string, source, input []byte, se
 func resolveSectionBounds(filename string, source []byte, sectionID string, depth int) (int, int, error) {
 	if isMarkdown(filename) {
 		return markdown.SectionBounds(source, sectionID)
+	}
+	if textdoc.Supported(filename) {
+		return textdoc.Bounds(filename, source, sectionID)
 	}
 	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
 	if err != nil {

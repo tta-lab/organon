@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tta-lab/organon/internal/markdown"
+	"github.com/tta-lab/organon/internal/textdoc"
 	"github.com/tta-lab/organon/internal/treesitter"
 )
 
@@ -344,6 +345,66 @@ func TestEdit_UnsupportedFile_Text(t *testing.T) {
 		"hello world\n",
 		"===BEFORE===\nhello world\n===AFTER===\nhello world!\n",
 		"hello world!\n")
+}
+
+func TestTextDocDispatch_ReadReplaceInsertDelete(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "scores.csv")
+	orig := []byte("name,score\nada,10\nlinus,9\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	require.NoError(t, runTreeOrRead(cmd, []string{f}))
+
+	nodes, err := textdoc.Nodes(f, orig)
+	require.NoError(t, err)
+	rowID := nodes[1].ID
+
+	require.NoError(t, cmd.Flags().Set("symbol", rowID))
+	require.NoError(t, runTreeOrRead(cmd, []string{f}))
+
+	replaceCmd := &cobra.Command{}
+	replaceCmd.Flags().StringP("symbol", "s", rowID, "")
+	replaceCmd.PersistentFlags().Int("depth", 2, "")
+	pipeStdin(t, []byte("ada,11\n"), func() {
+		err = runReplace(replaceCmd, []string{f})
+	})
+	require.NoError(t, err)
+	content, err := os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ada,11\n")
+	assert.NotContains(t, string(content), "ada,10\n")
+
+	nodes, err = textdoc.Nodes(f, content)
+	require.NoError(t, err)
+	rowID = nodes[1].ID
+
+	insertCmd := &cobra.Command{}
+	insertCmd.Flags().String("after", rowID, "")
+	insertCmd.Flags().String("before", "", "")
+	insertCmd.PersistentFlags().Int("depth", 2, "")
+	pipeStdin(t, []byte("grace,12\n"), func() {
+		err = runInsert(insertCmd, []string{f})
+	})
+	require.NoError(t, err)
+	content, err = os.ReadFile(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ada,11\ngrace,12\nlinus,9\n")
+
+	nodes, err = textdoc.Nodes(f, content)
+	require.NoError(t, err)
+	deleteID := nodes[3].ID
+	deleteCmd := &cobra.Command{}
+	deleteCmd.Flags().StringP("symbol", "s", deleteID, "")
+	deleteCmd.PersistentFlags().Int("depth", 2, "")
+	require.NoError(t, runDelete(deleteCmd, []string{f}))
+	content, err = os.ReadFile(f)
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "linus,9\n")
 }
 
 func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
