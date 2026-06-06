@@ -124,17 +124,25 @@ func ListFiltered(path, orgFilter string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if orgFilter == "" {
-		return entries, nil
+	if orgFilter != "" {
+		filtered := make([]Entry, 0)
+		for _, e := range entries {
+			if DeriveOrg(e.Path) == orgFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
 	}
 
-	filtered := make([]Entry, 0)
-	for _, e := range entries {
-		if DeriveOrg(e.Path) == orgFilter {
-			filtered = append(filtered, e)
+	sort.Slice(entries, func(i, j int) bool {
+		orgI := DeriveOrg(entries[i].Path)
+		orgJ := DeriveOrg(entries[j].Path)
+		if orgI != orgJ {
+			return orgI < orgJ
 		}
-	}
-	return filtered, nil
+		return entries[i].Alias < entries[j].Alias
+	})
+	return entries, nil
 }
 
 // DeriveOrg extracts the org name from a project or reference path.
