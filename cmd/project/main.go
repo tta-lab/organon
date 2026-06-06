@@ -77,11 +77,11 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 
-			dimColor, headerStyle, cellStyle, dimStyle := format.TableStyles()
+			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
 
 			rows := make([][]string, len(entries))
 			for i, e := range entries {
-				rows[i] = []string{e.Alias, e.Name, e.Path, project.DeriveOrg(e.Path)}
+				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name, e.Path}
 			}
 
 			t := table.New().
@@ -91,12 +91,9 @@ func newListCmd() *cobra.Command {
 					if row == table.HeaderRow {
 						return headerStyle
 					}
-					if col == 3 {
-						return dimStyle
-					}
 					return cellStyle
 				}).
-				Headers("ALIAS", "NAME", "PATH", "ORG").
+				Headers("ALIAS", "ORG", "NAME", "PATH").
 				Rows(rows...)
 
 			fmt.Println(t)
