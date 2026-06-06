@@ -103,12 +103,13 @@ func TestTavilySearcher_Search(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/search", r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "Bearer test-api-key", r.Header.Get("Authorization"))
 
-		var reqBody tavilySearchRequest
+		var reqBody map[string]any
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
-		assert.Equal(t, "test-api-key", reqBody.APIKey)
-		assert.Equal(t, "test query", reqBody.Query)
+		assert.NotContains(t, reqBody, "api_key")
+		assert.Equal(t, "test query", reqBody["query"])
 
 		resp := tavilySearchResponse{
 			Results: []tavilyResult{

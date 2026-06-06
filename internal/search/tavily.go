@@ -34,7 +34,6 @@ func NewTavilySearcher(apiKey string) *TavilySearcher {
 
 func (s *TavilySearcher) Search(ctx context.Context, query string) ([]SearchResult, error) {
 	reqBody := tavilySearchRequest{
-		APIKey:     s.apiKey,
 		Query:      query,
 		MaxResults: 10,
 	}
@@ -50,6 +49,7 @@ func (s *TavilySearcher) Search(ctx context.Context, query string) ([]SearchResu
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -78,7 +78,6 @@ func (s *TavilySearcher) Search(ctx context.Context, query string) ([]SearchResu
 }
 
 type tavilySearchRequest struct {
-	APIKey     string `json:"api_key"`
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
 }
