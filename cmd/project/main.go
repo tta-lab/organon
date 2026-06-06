@@ -79,15 +79,9 @@ func newListCmd() *cobra.Command {
 
 			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
 
-			home := os.Getenv("HOME")
-
 			rows := make([][]string, len(entries))
 			for i, e := range entries {
-				path := e.Path
-				if home != "" && strings.HasPrefix(path, home+"/") {
-					path = "~" + path[len(home):]
-				}
-				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name, path}
+				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name}
 			}
 
 			t := table.New().
@@ -99,11 +93,11 @@ func newListCmd() *cobra.Command {
 					}
 					return cellStyle
 				}).
-				Headers("ALIAS", "ORG", "NAME", "PATH").
+				Headers("ALIAS", "ORG", "NAME").
 				Rows(rows...)
 
 			fmt.Println(t)
-			fmt.Printf("\n%d projects\n", len(entries))
+			fmt.Printf("\n%d projects — use project get <alias> for the path\n", len(entries))
 			return nil
 		},
 	}
