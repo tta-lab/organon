@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/spf13/cobra"
+
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/format"
 	"github.com/tta-lab/organon/internal/org"
 	"github.com/tta-lab/organon/internal/project"
 	"github.com/tta-lab/organon/internal/reporef"
@@ -56,17 +59,7 @@ func newListCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				type item struct {
-					Alias string `json:"alias"`
-					Name  string `json:"name"`
-					Path  string `json:"path"`
-					Org   string `json:"org"`
-				}
-				out := make([]item, len(entries))
-				for i, e := range entries {
-					out[i] = item{Alias: e.Alias, Name: e.Name, Path: e.Path, Org: project.DeriveOrg(e.Path)}
-				}
-				return json.NewEncoder(os.Stdout).Encode(out)
+				return json.NewEncoder(os.Stdout).Encode(entries)
 			}
 
 			if len(entries) == 0 {
@@ -74,13 +67,27 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 
-			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "ALIAS\tNAME\tPATH\tORG")
-			for _, e := range entries {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Alias, e.Name, e.Path, project.DeriveOrg(e.Path))
+			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
+
+			rows := make([][]string, len(entries))
+			for i, e := range entries {
+				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name}
 			}
-			_ = tw.Flush()
-			fmt.Printf("\n%d projects\n", len(entries))
+
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					if row == table.HeaderRow {
+						return headerStyle
+					}
+					return cellStyle
+				}).
+				Headers("ALIAS", "ORG", "NAME").
+				Rows(rows...)
+
+			fmt.Println(t)
+			fmt.Printf("\n%d projects — use project get <alias> for the path\n", len(entries))
 			return nil
 		},
 	}
@@ -103,15 +110,8 @@ func newGetCmd() *cobra.Command {
 				return err
 			}
 			if e != nil {
-				o := project.DeriveOrg(e.Path)
 				if jsonOut {
-					type item struct {
-						Alias string `json:"alias"`
-						Name  string `json:"name"`
-						Path  string `json:"path"`
-						Org   string `json:"org"`
-					}
-					return json.NewEncoder(os.Stdout).Encode(item{Alias: e.Alias, Name: e.Name, Path: e.Path, Org: o})
+					return json.NewEncoder(os.Stdout).Encode(e)
 				}
 				fmt.Printf("%s\n", e.Path)
 				return nil
@@ -143,46 +143,49 @@ func newGetCmd() *cobra.Command {
 
 func newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resolve <alias>",
-		Short: "Resolve a project to its path, org, and GitHub token env",
+		Use:   "resolve <alias-or-path>",
+		Short: "Resolve a project alias or path to alias, path, org, and GitHub token env",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			alias := args[0]
-			e, err := project.Resolve(config.ProjectsPath(), alias)
+			target := args[0]
+
+			// If it looks like a path (contains /), resolve by path first.
+			if strings.Contains(target, "/") {
+				e, err := project.GetByPath(config.ProjectsPath(), target)
+				if err != nil {
+					return err
+				}
+				if e != nil {
+					return json.NewEncoder(os.Stdout).Encode(e)
+				}
+			}
+
+			// Resolve by alias.
+			e, err := project.Resolve(config.ProjectsPath(), target)
 			if err != nil {
 				return err
 			}
 
-			var resolved struct {
-				Alias          string `json:"alias"`
-				Path           string `json:"path"`
-				Org            string `json:"org"`
-				GitHubTokenEnv string `json:"github_token_env"`
-			}
-			resolved.Alias = alias
-
 			if e != nil {
-				resolved.Path = e.Path
-				resolved.Org = project.DeriveOrg(e.Path)
-			} else {
-				// Fall back to reference repos
-				repoPath, repoErr := reporef.Resolve(alias, config.DefaultReferencesPath())
-				if repoErr != nil {
-					return repoErr
-				}
-				resolved.Path = repoPath
-				resolved.Org = reporef.DeriveOrg(repoPath)
+				return json.NewEncoder(os.Stdout).Encode(e)
 			}
 
-			// Look up org token env
-			if resolved.Org != "" {
-				orgEntry, orgErr := org.Get(config.OrgsPath(), resolved.Org)
-				if orgErr == nil && orgEntry != nil {
-					resolved.GitHubTokenEnv = orgEntry.GitHubTokenEnv
-				}
+			// Fall back to reference repos
+			repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
+			if repoErr != nil {
+				return repoErr
 			}
 
-			return json.NewEncoder(os.Stdout).Encode(resolved)
+			type refResolved struct {
+				Alias string `json:"alias"`
+				Path  string `json:"path"`
+				Org   string `json:"org"`
+			}
+			return json.NewEncoder(os.Stdout).Encode(refResolved{
+				Alias: target,
+				Path:  repoPath,
+				Org:   reporef.DeriveOrg(repoPath),
+			})
 		},
 	}
 	return cmd
@@ -273,12 +276,29 @@ func newOrgListCmd() *cobra.Command {
 				return nil
 			}
 
-			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "ORG\tGITHUB_TOKEN_ENV")
-			for _, e := range entries {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\n", e.Name, e.GitHubTokenEnv)
+			dimColor, headerStyle, cellStyle, dimStyle := format.TableStyles()
+
+			rows := make([][]string, len(entries))
+			for i, e := range entries {
+				rows[i] = []string{e.Name, e.GitHubTokenEnv}
 			}
-			_ = tw.Flush()
+
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					if row == table.HeaderRow {
+						return headerStyle
+					}
+					if col == 1 {
+						return dimStyle
+					}
+					return cellStyle
+				}).
+				Headers("ORG", "GITHUB_TOKEN_ENV").
+				Rows(rows...)
+
+			fmt.Println(t)
 			fmt.Printf("\n%d orgs\n", len(entries))
 			return nil
 		},

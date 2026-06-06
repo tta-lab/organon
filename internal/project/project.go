@@ -12,9 +12,13 @@ import (
 
 // Entry represents a project from projects.toml.
 type Entry struct {
-	Alias string `toml:"-"`
-	Name  string `toml:"name"`
-	Path  string `toml:"path"`
+	Alias          string `toml:"-"                json:"alias,omitempty"`
+	Name           string `toml:"name"             json:"name,omitempty"`
+	Path           string `toml:"path"             json:"path,omitempty"`
+	Remote         string `toml:"remote"           json:"remote,omitempty"`
+	GitHubTokenEnv string `toml:"github_token_env" json:"github_token_env,omitempty"`
+	K8sApp         string `toml:"k8s_app"          json:"k8s_app,omitempty"`
+	K8sNamespace   string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
 }
 
 // Load reads projects.toml from path. Returns empty if the file doesn't exist.
@@ -63,15 +67,25 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 		_, hasName := sub["name"]
 		_, hasPath := sub["path"]
 		if hasName || hasPath {
-			var e Entry
+			e := Entry{Alias: fullKey}
 			if n, ok := sub["name"].(string); ok {
 				e.Name = n
 			}
 			if p, ok := sub["path"].(string); ok {
 				e.Path = p
 			}
-			// Also check for github_token_env, k8s_app, k8s_namespace - skip those
-			e.Alias = fullKey
+			if r, ok := sub["remote"].(string); ok {
+				e.Remote = r
+			}
+			if g, ok := sub["github_token_env"].(string); ok {
+				e.GitHubTokenEnv = g
+			}
+			if k, ok := sub["k8s_app"].(string); ok {
+				e.K8sApp = k
+			}
+			if kn, ok := sub["k8s_namespace"].(string); ok {
+				e.K8sNamespace = kn
+			}
 			entries = append(entries, e)
 		}
 
@@ -90,6 +104,20 @@ func Get(path, alias string) (*Entry, error) {
 	}
 	for i := range entries {
 		if entries[i].Alias == alias {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// GetByPath returns a project by exact filesystem path. Returns nil if not found.
+func GetByPath(projectsPath, targetPath string) (*Entry, error) {
+	entries, err := Load(projectsPath)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].Path == targetPath {
 			return &entries[i], nil
 		}
 	}
@@ -124,17 +152,25 @@ func ListFiltered(path, orgFilter string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if orgFilter == "" {
-		return entries, nil
+	if orgFilter != "" {
+		filtered := make([]Entry, 0)
+		for _, e := range entries {
+			if DeriveOrg(e.Path) == orgFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
 	}
 
-	filtered := make([]Entry, 0)
-	for _, e := range entries {
-		if DeriveOrg(e.Path) == orgFilter {
-			filtered = append(filtered, e)
+	sort.Slice(entries, func(i, j int) bool {
+		orgI := DeriveOrg(entries[i].Path)
+		orgJ := DeriveOrg(entries[j].Path)
+		if orgI != orgJ {
+			return orgI < orgJ
 		}
-	}
-	return filtered, nil
+		return entries[i].Alias < entries[j].Alias
+	})
+	return entries, nil
 }
 
 // DeriveOrg extracts the org name from a project or reference path.
