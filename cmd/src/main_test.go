@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tta-lab/organon/internal/markdown"
-	"github.com/tta-lab/organon/internal/textdoc"
 	"github.com/tta-lab/organon/internal/treesitter"
 )
 
@@ -151,6 +151,24 @@ func pipeStdin(t *testing.T, content []byte, fn func()) {
 		r.Close()
 	}()
 	fn()
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stdout
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+	}()
+
+	fn()
+	require.NoError(t, w.Close())
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	return string(data)
 }
 
 // newEditCmd builds a cobra root command with the edit subcommand registered,
@@ -347,10 +365,10 @@ func TestEdit_UnsupportedFile_Text(t *testing.T) {
 		"hello world!\n")
 }
 
-func TestTextDocDispatch_ReadReplaceInsertDelete(t *testing.T) {
+func TestUnsupportedTextRootReadsFullContent(t *testing.T) {
 	dir := t.TempDir()
-	f := filepath.Join(dir, "scores.csv")
-	orig := []byte("name,score\nada,10\nlinus,9\n")
+	f := filepath.Join(dir, "paper.tex")
+	orig := []byte("\\section{Intro}\nText here.\n")
 	require.NoError(t, os.WriteFile(f, orig, 0o644))
 
 	cmd := &cobra.Command{}
@@ -358,53 +376,71 @@ func TestTextDocDispatch_ReadReplaceInsertDelete(t *testing.T) {
 	cmd.Flags().StringP("symbol", "s", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 
-	require.NoError(t, runTreeOrRead(cmd, []string{f}))
-
-	nodes, err := textdoc.Nodes(f, orig)
-	require.NoError(t, err)
-	rowID := nodes[1].ID
-
-	require.NoError(t, cmd.Flags().Set("symbol", rowID))
-	require.NoError(t, runTreeOrRead(cmd, []string{f}))
-
-	replaceCmd := &cobra.Command{}
-	replaceCmd.Flags().StringP("symbol", "s", rowID, "")
-	replaceCmd.PersistentFlags().Int("depth", 2, "")
-	pipeStdin(t, []byte("ada,11\n"), func() {
-		err = runReplace(replaceCmd, []string{f})
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runTreeOrRead(cmd, []string{f})
 	})
-	require.NoError(t, err)
-	content, err := os.ReadFile(f)
-	require.NoError(t, err)
-	assert.Contains(t, string(content), "ada,11\n")
-	assert.NotContains(t, string(content), "ada,10\n")
+	require.NoError(t, runErr)
+	assert.Equal(t, string(orig), out)
+}
 
-	nodes, err = textdoc.Nodes(f, content)
-	require.NoError(t, err)
-	rowID = nodes[1].ID
+func TestEmptySymbolTreeRootReadsFullContent(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "data.csv")
+	orig := []byte("name,score\nada,10\n")
+	require.NoError(t, os.WriteFile(f, orig, 0o644))
 
-	insertCmd := &cobra.Command{}
-	insertCmd.Flags().String("after", rowID, "")
-	insertCmd.Flags().String("before", "", "")
-	insertCmd.PersistentFlags().Int("depth", 2, "")
-	pipeStdin(t, []byte("grace,12\n"), func() {
-		err = runInsert(insertCmd, []string{f})
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runTreeOrRead(cmd, []string{f})
 	})
-	require.NoError(t, err)
-	content, err = os.ReadFile(f)
-	require.NoError(t, err)
-	assert.Contains(t, string(content), "ada,11\ngrace,12\nlinus,9\n")
+	require.NoError(t, runErr)
+	assert.Equal(t, string(orig), out)
+}
 
-	nodes, err = textdoc.Nodes(f, content)
-	require.NoError(t, err)
-	deleteID := nodes[3].ID
-	deleteCmd := &cobra.Command{}
-	deleteCmd.Flags().StringP("symbol", "s", deleteID, "")
-	deleteCmd.PersistentFlags().Int("depth", 2, "")
-	require.NoError(t, runDelete(deleteCmd, []string{f}))
-	content, err = os.ReadFile(f)
-	require.NoError(t, err)
-	assert.NotContains(t, string(content), "linus,9\n")
+func TestUnsupportedTextTreeExplainsEditFallback(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "data.csv")
+	require.NoError(t, os.WriteFile(f, []byte("name,score\nada,10\n"), 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+	require.NoError(t, cmd.Flags().Set("tree", "true"))
+
+	err := runTreeOrRead(cmd, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not have a symbol tree")
+	assert.Contains(t, err.Error(), "src edit")
+}
+
+func TestUnsupportedTextReplaceSuggestsEdit(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "paper.tex")
+	orig := "\\section{Intro}\nText here.\n"
+	require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().StringP("symbol", "s", "anything", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+
+	var err error
+	pipeStdin(t, []byte("replacement\n"), func() {
+		err = runReplace(cmd, []string{f})
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a symbol or section")
+	assert.Contains(t, err.Error(), "src edit")
+
+	result, readErr := os.ReadFile(f)
+	require.NoError(t, readErr)
+	assert.Equal(t, orig, string(result))
 }
 
 func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
@@ -420,7 +456,8 @@ func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
-	assert.Contains(t, runErr.Error(), "unsupported file type")
+	assert.Contains(t, runErr.Error(), "scoped edit requires a symbol or section")
+	assert.Contains(t, runErr.Error(), "src edit")
 
 	// File must be unchanged — no half-applied edits.
 	result, err := os.ReadFile(f)
@@ -554,8 +591,7 @@ func TestEditCmd_ScopedNestedSymbol_LineBoundaryExtension(t *testing.T) {
 }
 
 func TestEditCmd_ScopedEmptyTree(t *testing.T) {
-	// .go file with only 'package main' (no symbols). resolveSectionBounds should
-	// return a clear 'symbol not found' error suggesting --tree.
+	// A file with no symbols cannot be scoped, but unscoped src edit still works.
 	dir := t.TempDir()
 	f := filepath.Join(dir, "empty.go")
 	require.NoError(t, os.WriteFile(f, []byte("package main\n"), 0o644))
@@ -567,8 +603,8 @@ func TestEditCmd_ScopedEmptyTree(t *testing.T) {
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
-	assert.Contains(t, runErr.Error(), "not found")
-	assert.Contains(t, runErr.Error(), "--tree")
+	assert.Contains(t, runErr.Error(), "scoped edit requires a symbol or section")
+	assert.Contains(t, runErr.Error(), "src edit")
 }
 
 // ---------- line boundary helpers ----------
