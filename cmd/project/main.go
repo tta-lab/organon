@@ -160,15 +160,11 @@ func newGetCmd() *cobra.Command {
 
 func newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resolve <alias>",
-		Short: "Resolve a project to its path, org, and GitHub token env",
+		Use:   "resolve <alias-or-path>",
+		Short: "Resolve a project alias or path to alias, path, org, and GitHub token env",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			alias := args[0]
-			e, err := project.Resolve(config.ProjectsPath(), alias)
-			if err != nil {
-				return err
-			}
+			target := args[0]
 
 			var resolved struct {
 				Alias          string `json:"alias"`
@@ -176,14 +172,41 @@ func newResolveCmd() *cobra.Command {
 				Org            string `json:"org"`
 				GitHubTokenEnv string `json:"github_token_env"`
 			}
-			resolved.Alias = alias
+
+			// If it looks like a path (contains /), resolve by path first.
+			if strings.Contains(target, "/") {
+				e, err := project.GetByPath(config.ProjectsPath(), target)
+				if err != nil {
+					return err
+				}
+				if e != nil {
+					resolved.Alias = e.Alias
+					resolved.Path = e.Path
+					resolved.Org = project.DeriveOrg(e.Path)
+					if resolved.Org != "" {
+						orgEntry, orgErr := org.Get(config.OrgsPath(), resolved.Org)
+						if orgErr == nil && orgEntry != nil {
+							resolved.GitHubTokenEnv = orgEntry.GitHubTokenEnv
+						}
+					}
+					return json.NewEncoder(os.Stdout).Encode(resolved)
+				}
+			}
+
+			// Resolve by alias (existing behavior).
+			e, err := project.Resolve(config.ProjectsPath(), target)
+			if err != nil {
+				return err
+			}
+
+			resolved.Alias = target
 
 			if e != nil {
 				resolved.Path = e.Path
 				resolved.Org = project.DeriveOrg(e.Path)
 			} else {
 				// Fall back to reference repos
-				repoPath, repoErr := reporef.Resolve(alias, config.DefaultReferencesPath())
+				repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
 				if repoErr != nil {
 					return repoErr
 				}

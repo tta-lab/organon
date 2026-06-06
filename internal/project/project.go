@@ -96,6 +96,20 @@ func Get(path, alias string) (*Entry, error) {
 	return nil, nil
 }
 
+// GetByPath returns a project by exact filesystem path. Returns nil if not found.
+func GetByPath(projectsPath, targetPath string) (*Entry, error) {
+	entries, err := Load(projectsPath)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].Path == targetPath {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // Resolve returns a project by alias with hierarchical fallback.
 // "fb.ap" tries "fb.ap", then "fb". Returns nil if not found.
 func Resolve(path, alias string) (*Entry, error) {
