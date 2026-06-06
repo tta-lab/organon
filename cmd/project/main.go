@@ -79,9 +79,15 @@ func newListCmd() *cobra.Command {
 
 			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
 
+			home := os.Getenv("HOME")
+
 			rows := make([][]string, len(entries))
 			for i, e := range entries {
-				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name, e.Path}
+				path := e.Path
+				if home != "" && strings.HasPrefix(path, home+"/") {
+					path = "~" + path[len(home):]
+				}
+				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name, path}
 			}
 
 			t := table.New().
