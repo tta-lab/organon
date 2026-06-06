@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/spf13/cobra"
+
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/format"
 	"github.com/tta-lab/organon/internal/org"
 	"github.com/tta-lab/organon/internal/project"
 	"github.com/tta-lab/organon/internal/reporef"
@@ -74,12 +77,29 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 
-			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "ALIAS\tNAME\tPATH\tORG")
-			for _, e := range entries {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Alias, e.Name, e.Path, project.DeriveOrg(e.Path))
+			dimColor, headerStyle, cellStyle, dimStyle := format.TableStyles()
+
+			rows := make([][]string, len(entries))
+			for i, e := range entries {
+				rows[i] = []string{e.Alias, e.Name, e.Path, project.DeriveOrg(e.Path)}
 			}
-			_ = tw.Flush()
+
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					if row == table.HeaderRow {
+						return headerStyle
+					}
+					if col == 3 {
+						return dimStyle
+					}
+					return cellStyle
+				}).
+				Headers("ALIAS", "NAME", "PATH", "ORG").
+				Rows(rows...)
+
+			fmt.Println(t)
 			fmt.Printf("\n%d projects\n", len(entries))
 			return nil
 		},
@@ -273,12 +293,29 @@ func newOrgListCmd() *cobra.Command {
 				return nil
 			}
 
-			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "ORG\tGITHUB_TOKEN_ENV")
-			for _, e := range entries {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\n", e.Name, e.GitHubTokenEnv)
+			dimColor, headerStyle, cellStyle, dimStyle := format.TableStyles()
+
+			rows := make([][]string, len(entries))
+			for i, e := range entries {
+				rows[i] = []string{e.Name, e.GitHubTokenEnv}
 			}
-			_ = tw.Flush()
+
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					if row == table.HeaderRow {
+						return headerStyle
+					}
+					if col == 1 {
+						return dimStyle
+					}
+					return cellStyle
+				}).
+				Headers("ORG", "GITHUB_TOKEN_ENV").
+				Rows(rows...)
+
+			fmt.Println(t)
 			fmt.Printf("\n%d orgs\n", len(entries))
 			return nil
 		},
