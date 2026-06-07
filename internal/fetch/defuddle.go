@@ -55,10 +55,13 @@ func (b *defuddleCLIBackend) Fetch(ctx context.Context, url string) (string, err
 	}
 
 	ct := resp.Header.Get("Content-Type")
-	mediatype, _, err := mime.ParseMediaType(ct)
-	if err != nil {
-		slog.Warn("defuddle: Content-Type parse failed, trying defuddle anyway",
-			"content-type", ct, "error", err)
+	mediatype, _, _ := mime.ParseMediaType(ct)
+
+	if IsBinaryContentType(mediatype) || IsBinaryBody(body) {
+		return "", BinaryFetchError(url, ct)
+	}
+
+	if mediatype == "" {
 		mediatype = "text/html"
 	}
 	if !strings.EqualFold(mediatype, "text/html") {
