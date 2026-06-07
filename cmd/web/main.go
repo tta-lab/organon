@@ -85,6 +85,12 @@ func runFetch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("fetch %s: %w", targetURL, err)
 	}
 
+	// Backend-agnostic binary check: catches binary returned by any backend
+	// (defuddle checks Content-Type too, but gateway may not).
+	if fetch.IsBinaryBody([]byte(content)) {
+		return fetch.BinaryFetchError(targetURL, "")
+	}
+
 	result, err := markdown.RenderContent([]byte(content), showTree, section, full, treeThreshold)
 	if err != nil {
 		return err
