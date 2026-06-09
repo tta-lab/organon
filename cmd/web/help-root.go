@@ -14,11 +14,5 @@ var helpFetch string
 //go:embed help/docs.md
 var helpDocs string
 
-//go:embed help/docs-resolve.md
-var helpDocsResolve string
-
-//go:embed help/docs-fetch.md
-var helpDocsFetch string
-
 //go:embed help/sgraph.md
 var helpSgraph string
