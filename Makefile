@@ -12,10 +12,10 @@ install:
 	@$(GO_ENV) go install ./cmd/...
 
 test:
-	@$(GO_ENV) gotestsum --format dots -- go test ./...
+	@$(GO_ENV) gotestsum --format dots
 
 test-verbose:
-	@$(GO_ENV) gotestsum --format standard-verbose -- go test -v ./...
+	@$(GO_ENV) gotestsum --format standard-verbose
 
 fmt:
 	@gofmt -w -s .
