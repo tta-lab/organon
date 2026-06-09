@@ -27,8 +27,35 @@ func main() {
 	root := &cobra.Command{
 		Use:   "src <file> [flags]",
 		Short: "Structure-aware source file reading and editing",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runTreeOrRead,
+		Long: `src reads and edits source files with symbol-aware navigation.
+It understands the structure of source files — functions, types, methods — and
+lets you navigate and modify them precisely without guessing line numbers.
+
+## When to use
+  - Scanning a file's structure before editing
+  - Reading a specific function/type without loading the whole file
+  - Editing symbols by ID (no text matching needed)
+  - Small targeted text replacements in any file type
+
+## When not to use
+  - Grepping for text across files (use rg/grep)
+  - Creating new files (use cat > file <<'EOF')
+
+## Common workflow
+  1. src path/to/file.go                    # inspect symbol tree
+  2. src path/to/file.go --symbol-id Ab      # read one symbol by ID
+  3. src replace path/to/file.go --symbol-id Ab < new.go  # replace it
+
+## Supported languages
+Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and
+others via tree-sitter auto-inference. Markdown (.md, .markdown, .mdx) uses
+heading-based sections instead of tree-sitter symbols.
+
+## Output
+Tree view with 2-char base62 symbol IDs (0–9, A–Z, a–z), or full source of a
+read symbol. Edits show a colored diff then the updated tree.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runTreeOrRead,
 	}
 	root.SilenceUsage = true
 
@@ -37,58 +64,151 @@ func main() {
 
 	// Root-only flags
 	root.Flags().Bool("tree", false, "Force tree view")
-	root.Flags().StringP("symbol", "s", "", "Symbol ID to read")
+	root.Flags().String("symbol-id", "", "Symbol ID to read")
 
 	replaceCmd := &cobra.Command{
-		Use:   "replace <file> -s <id>",
+		Use:   "replace <file> --symbol-id <id>",
 		Short: "Replace a symbol (new content via stdin)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runReplace,
+		Long: `Replace an entire symbol (function, type, method, or markdown section)
+by its 2-char ID. New content is read from stdin.
+
+## When to use
+  - Changing a whole function implementation
+  - Replacing a type definition
+  - Updating a markdown section
+
+## When not to use
+  - Small text fragments within a symbol (use edit)
+  - Adding new symbols (use insert)
+
+## Examples
+  echo "func newImpl() {}" | src replace main.go --symbol-id aB
+  cat new_type.go | src replace types.go --symbol-id cD`,
+		Args: cobra.ExactArgs(1),
+		RunE: runReplace,
 	}
 	replaceCmd.SilenceUsage = true
-	replaceCmd.Flags().StringP("symbol", "s", "", "Symbol ID to replace")
-	_ = replaceCmd.MarkFlagRequired("symbol")
+	replaceCmd.Flags().String("symbol-id", "", "Symbol ID to replace")
+	_ = replaceCmd.MarkFlagRequired("symbol-id")
 
 	insertCmd := &cobra.Command{
-		Use:   "insert <file>",
+		Use:   "insert <file> --after <id>|--before <id>",
 		Short: "Insert content before/after a symbol (stdin)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runInsert,
+		Long: `Insert new content before or after a symbol by its 2-char ID.
+Content is read from stdin. Exactly one of --after or --before is required.
+
+## When to use
+  - Adding a new import or constant before an existing block
+  - Inserting a new function in a specific position
+  - Prepending or appending to a markdown section
+
+## Examples
+  echo "// new block" | src insert main.go --after aB
+  cat new_func.go | src insert main.go --before aB
+
+## Output
+Colored diff of the change, then updated symbol tree.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runInsert,
 	}
 	insertCmd.SilenceUsage = true
 	insertCmd.Flags().String("after", "", "Insert after symbol ID")
 	insertCmd.Flags().String("before", "", "Insert before symbol ID")
 
 	deleteCmd := &cobra.Command{
-		Use:   "delete <file> -s <id>",
+		Use:   "delete <file> --symbol-id <id>",
 		Short: "Delete a symbol",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runDelete,
+		Long: `Delete a symbol or markdown section by its 2-char ID.
+
+## Example
+  src delete main.go --symbol-id aB
+
+## Output
+Colored diff of the deletion, then updated symbol tree.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runDelete,
 	}
 	deleteCmd.SilenceUsage = true
-	deleteCmd.Flags().StringP("symbol", "s", "", "Symbol ID to delete")
-	_ = deleteCmd.MarkFlagRequired("symbol")
+	deleteCmd.Flags().String("symbol-id", "", "Symbol ID to delete")
+	_ = deleteCmd.MarkFlagRequired("symbol-id")
 
 	commentCmd := &cobra.Command{
-		Use:   "comment <file> -s <id>",
-		Short: "Add/replace doc comment on a symbol (stdin)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runComment,
+		Use:   "comment <file> --symbol-id <id> [--read]",
+		Short: "Read or write a doc comment on a symbol (stdin for write)",
+		Long: `Read an existing doc comment or write a new one on a code symbol.
+
+## When to use
+  - Reading the current doc comment before editing
+  - Writing or replacing a doc comment
+
+## When not to use
+  - Markdown files (use replace --symbol-id instead)
+
+## Examples
+  src comment main.go --symbol-id aB --read                # read existing
+  echo "// Foo does X" | src comment main.go --symbol-id aB  # write
+
+## Output
+For --read: the comment text only. For write: colored diff + updated tree.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runComment,
 	}
 	commentCmd.SilenceUsage = true
-	commentCmd.Flags().StringP("symbol", "s", "", "Symbol ID")
+	commentCmd.Flags().String("symbol-id", "", "Symbol ID")
 	commentCmd.Flags().Bool("read", false, "Read existing doc comment instead of writing")
-	_ = commentCmd.MarkFlagRequired("symbol")
+	_ = commentCmd.MarkFlagRequired("symbol-id")
 
 	editCmd := &cobra.Command{
-		Use:   "edit <file>",
+		Use:   "edit <file> [--symbol-id <id>] [--before-file <f> --after-file <f>]",
 		Short: "Replace text using exact match (stdin: ===BEFORE===/===AFTER===)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runEdit,
+		Long: `Replace exactly matched text in any file using ===BEFORE===/===AFTER=== blocks.
+One edit per invocation. Use multiple calls for multiple replacements.
+
+## When to use
+  - Config files (YAML, JSON, TOML, etc.)
+  - Unsupported languages (no tree-sitter grammar)
+  - Small targeted text changes where symbol replace would be overkill
+  - Files without a symbol tree
+
+## When not to use
+  - Replacing a whole function/type in a supported language (use replace)
+  - Inserting new content (use insert)
+  - Deleting a symbol (use delete)
+
+## Input format
+  cat <<'EOF' | src edit path/to/file.go
+  ===BEFORE===
+  exact old text
+  ===AFTER===
+  new text
+  EOF
+
+## Scoped editing
+  src edit path/to/file.go --symbol-id Ab
+Limits the search to one symbol/section, eliminating ambiguity when the
+same text appears in multiple places within a file.
+
+## Matching strategy (4 tolerant passes)
+  1. Exact byte match
+  2. Trailing whitespace trimmed per line
+  3. Full whitespace trimmed + auto-reindent to file style
+  4. Unicode folding (curly quotes → straight, em dashes → hyphen, etc.)
+
+When a non-exact pass fires, the match method and any reindent transform
+are printed to stderr.
+
+## File-based editing
+  --before-file and --after-file read content from files instead of stdin.
+  Both must be provided together.
+
+## Output
+Colored diff of old→new, then updated symbol tree (for supported files).`,
+		Args: cobra.ExactArgs(1),
+		RunE: runEdit,
 	}
 	editCmd.SilenceUsage = true
-	editCmd.Flags().StringP("section", "s", "",
-		"Scope edit to a symbol/section ID (use `src <file> --tree` to find IDs)")
+	editCmd.Flags().String("symbol-id", "",
+		"Scope edit to a symbol/section ID (use `src <file>` to find IDs)")
 	editCmd.Flags().String("before-file", "",
 		"Read BEFORE content from a file instead of stdin (use with --after-file)")
 	editCmd.Flags().String("after-file", "",
@@ -148,12 +268,12 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 	}
 
 	depth := getDepth(cmd)
-	symbolID, _ := cmd.Flags().GetString("symbol")
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	treeOnly, _ := cmd.Flags().GetBool("tree")
 
 	if !hasTreeSitterSupport(filename) {
 		if symbolID != "" {
-			return noStructureError(filename, "reading by -s")
+			return noStructureError(filename, "reading by --symbol-id")
 		}
 		if treeOnly {
 			return noSymbolTreeError(filename)
@@ -169,7 +289,7 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 	nodes := treesitter.SymbolTree(symbols)
 	if len(nodes) == 0 {
 		if symbolID != "" {
-			return noStructureError(filename, "reading by -s")
+			return noStructureError(filename, "reading by --symbol-id")
 		}
 		if treeOnly {
 			return noSymbolTreeError(filename)
@@ -204,7 +324,7 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	symbolID, _ := cmd.Flags().GetString("symbol")
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	depth := getDepth(cmd)
 
 	newContent, err := io.ReadAll(os.Stdin)
@@ -301,7 +421,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	symbolID, _ := cmd.Flags().GetString("symbol")
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	depth := getDepth(cmd)
 
 	if isMarkdown(filename) {
@@ -338,14 +458,14 @@ func runComment(cmd *cobra.Command, args []string) error {
 	}
 
 	if isMarkdown(filename) {
-		return fmt.Errorf("comment command not supported for markdown files; use replace -s <id> instead")
+		return fmt.Errorf("comment command not supported for markdown files; use replace --symbol-id <id> instead")
 	}
 	if !hasTreeSitterSupport(filename) {
 		return fmt.Errorf("comment requires code symbols in %s; use src edit %s for text edits",
 			filename, shellQuote(filename))
 	}
 
-	symbolID, _ := cmd.Flags().GetString("symbol")
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	readOnly, _ := cmd.Flags().GetBool("read")
 	depth := getDepth(cmd)
 	hasSymbols, err := hasSymbolTree(filename, source, depth)
@@ -401,9 +521,9 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 
 // runMarkdownTreeOrRead handles the root command for .md files.
 // --tree and --depth flags are no-ops for markdown: the heading tree is always shown
-// (unless -s is given), since markdown structure is heading-based, not depth-bounded.
+// (unless --symbol-id is given), since markdown structure is heading-based, not depth-bounded.
 func runMarkdownTreeOrRead(cmd *cobra.Command, filename string, source []byte) error {
-	symbolID, _ := cmd.Flags().GetString("symbol")
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	if symbolID != "" {
 		content, err := markdown.ReadSection(source, symbolID)
 		if err != nil {
@@ -459,7 +579,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read stdin: %w", err)
 	}
 
-	sectionID, _ := cmd.Flags().GetString("section")
+	sectionID, _ := cmd.Flags().GetString("symbol-id")
 	if sectionID != "" {
 		return runEditScoped(cmd, filename, source, stdinContent, sectionID)
 	}

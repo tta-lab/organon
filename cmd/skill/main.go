@@ -31,12 +31,29 @@ func main() {
 
 func newRootCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "skill",
-		Short: "Skill discovery CLI — list, get, and find skills",
-		Long: `Discover and read skills from agent skill directories.
+		Use:   "skill [command]",
+		Short: "Discover and read agent skills from the filesystem",
+		Long: `Discover and read skills from agent skill directories on the filesystem.
+Skills are directories containing a SKILL.md file with YAML frontmatter
+(name, description, category).
 
-Skills are directories containing a SKILL.md file with YAML frontmatter.
-Discovery walks multiple paths in priority order (project-local first, then global).`,
+## Discovery paths (priority order, first match wins)
+  1. {cwd}/.agents/skills
+  2. {cwd}/.crush/skills
+  3. {cwd}/.claude/skills
+  4. {cwd}/.cursor/skills
+  5. ~/.agents/skills
+  6. ~/.crush/skills
+  7. ~/.claude/skills
+  8. ~/.cursor/skills
+
+Project-local paths (1–4) take priority over global paths (5–8).
+Within each scope: .agents > .crush > .claude > .cursor.
+
+## Subcommands
+  list   List all discovered skills (name, category, source, description)
+  get    Print a skill's full body to stdout (frontmatter stripped)
+  find   Search skills by keyword (case-insensitive OR match)`,
 	}
 
 	cmd.AddCommand(newListCmd(out, errOut, paths, home))

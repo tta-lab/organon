@@ -60,7 +60,7 @@ func TestMarkdownDispatch_Tree(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("tree", false, "")
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 
 	err = runTreeOrRead(cmd, []string{f.Name()})
@@ -77,9 +77,9 @@ func TestMarkdownDispatch_ReadSection(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("tree", false, "")
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
-	require.NoError(t, cmd.Flags().Set("symbol", id))
+	require.NoError(t, cmd.Flags().Set("symbol-id", id))
 
 	err := runTreeOrRead(cmd, []string{f})
 	assert.NoError(t, err)
@@ -104,9 +104,9 @@ func TestMarkdownDispatch_Replace(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	cmd := &cobra.Command{}
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
-	require.NoError(t, cmd.Flags().Set("symbol", id))
+	require.NoError(t, cmd.Flags().Set("symbol-id", id))
 
 	err = runReplace(cmd, []string{f})
 	require.NoError(t, r.Close())
@@ -125,15 +125,15 @@ func TestMarkdownDispatch_CommentUnsupported(t *testing.T) {
 	require.NoError(t, os.WriteFile(f, []byte("# Doc\n\n## Section\n\nContent.\n"), 0o644))
 
 	cmd := &cobra.Command{}
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.Flags().Bool("read", false, "")
 	cmd.PersistentFlags().Int("depth", 2, "")
-	require.NoError(t, cmd.Flags().Set("symbol", "xx"))
+	require.NoError(t, cmd.Flags().Set("symbol-id", "xx"))
 
 	err := runComment(cmd, []string{f})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported for markdown files")
-	assert.Contains(t, err.Error(), "replace -s <id>")
+	assert.Contains(t, err.Error(), "replace --symbol-id <id>")
 }
 
 // pipeStdin replaces os.Stdin with a pipe that contains content, runs fn, then restores.
@@ -181,7 +181,7 @@ func newEditCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: runEdit,
 	}
-	edit.Flags().StringP("section", "s", "", "")
+	edit.Flags().String("symbol-id", "", "")
 	edit.Flags().String("before-file", "", "")
 	edit.Flags().String("after-file", "", "")
 	root.AddCommand(edit)
@@ -373,7 +373,7 @@ func TestUnsupportedTextRootReadsFullContent(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("tree", false, "")
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 
 	var runErr error
@@ -392,7 +392,7 @@ func TestEmptySymbolTreeRootReadsFullContent(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("tree", false, "")
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 
 	var runErr error
@@ -410,7 +410,7 @@ func TestUnsupportedTextTreeExplainsEditFallback(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("tree", false, "")
-	cmd.Flags().StringP("symbol", "s", "", "")
+	cmd.Flags().String("symbol-id", "", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 	require.NoError(t, cmd.Flags().Set("tree", "true"))
 
@@ -427,7 +427,7 @@ func TestUnsupportedTextReplaceSuggestsEdit(t *testing.T) {
 	require.NoError(t, os.WriteFile(f, []byte(orig), 0o644))
 
 	cmd := &cobra.Command{}
-	cmd.Flags().StringP("symbol", "s", "anything", "")
+	cmd.Flags().String("symbol-id", "anything", "")
 	cmd.PersistentFlags().Int("depth", 2, "")
 
 	var err error
@@ -451,7 +451,7 @@ func TestEmptySymbolTreeMutationCommandsSuggestEdit(t *testing.T) {
 		{
 			name: "replace",
 			run: func(cmd *cobra.Command, file string) error {
-				cmd.Flags().StringP("symbol", "s", "anything", "")
+				cmd.Flags().String("symbol-id", "anything", "")
 				var err error
 				pipeStdin(t, []byte("replacement\n"), func() {
 					err = runReplace(cmd, []string{file})
@@ -474,7 +474,7 @@ func TestEmptySymbolTreeMutationCommandsSuggestEdit(t *testing.T) {
 		{
 			name: "delete",
 			run: func(cmd *cobra.Command, file string) error {
-				cmd.Flags().StringP("symbol", "s", "anything", "")
+				cmd.Flags().String("symbol-id", "anything", "")
 				return runDelete(cmd, []string{file})
 			},
 		},
@@ -510,7 +510,7 @@ func TestEdit_SectionOnUnsupportedFile_FailsBeforeWrite(t *testing.T) {
 	root := newEditCmd()
 	var runErr error
 	pipeStdin(t, []byte("===BEFORE===\nFOO=bar\n===AFTER===\nFOO=baz\n"), func() {
-		root.SetArgs([]string{"edit", "-s", "anyid", f})
+		root.SetArgs([]string{"edit", "--symbol-id", "anyid", f})
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
@@ -561,7 +561,7 @@ func TestEditCmd_ScopedResolvesAmbiguity(t *testing.T) {
 	// Scoped edit to first function only.
 	scopedStdin := []byte("===BEFORE===\n\treturn 1\n===AFTER===\n\treturn 42\n")
 	pipeStdin(t, scopedStdin, func() {
-		root.SetArgs([]string{"edit", "-s", firstID, f})
+		root.SetArgs([]string{"edit", "--symbol-id", firstID, f})
 		runErr = root.Execute()
 	})
 	require.NoError(t, runErr)
@@ -596,7 +596,7 @@ func TestEditCmd_ScopedMarkdown(t *testing.T) {
 	// Scoped edit to Section A only.
 	scopedStdin := []byte("===BEFORE===\nSame line.\n===AFTER===\nDifferent line.\n")
 	pipeStdin(t, scopedStdin, func() {
-		root.SetArgs([]string{"edit", "-s", idA, f})
+		root.SetArgs([]string{"edit", "--symbol-id", idA, f})
 		runErr = root.Execute()
 	})
 	require.NoError(t, runErr)
@@ -615,7 +615,7 @@ func TestEditCmd_ScopedSymbolNotFound(t *testing.T) {
 	root := newEditCmd()
 	var runErr error
 	pipeStdin(t, []byte("===BEFORE===\nfunc main()\n===AFTER===\nfunc main() {}\n"), func() {
-		root.SetArgs([]string{"edit", "-s", "notfoundid", f})
+		root.SetArgs([]string{"edit", "--symbol-id", "notfoundid", f})
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
@@ -638,7 +638,7 @@ func TestEditCmd_ScopedNestedSymbol_LineBoundaryExtension(t *testing.T) {
 	root := newEditCmd()
 	var runErr error
 	pipeStdin(t, []byte("===BEFORE===\n\tHost string\n===AFTER===\n\tHost string // server hostname\n"), func() {
-		root.SetArgs([]string{"edit", "-s", hostID, f})
+		root.SetArgs([]string{"edit", "--symbol-id", hostID, f})
 		runErr = root.Execute()
 	})
 	require.NoError(t, runErr)
@@ -657,7 +657,7 @@ func TestEditCmd_ScopedEmptyTree(t *testing.T) {
 	root := newEditCmd()
 	var runErr error
 	pipeStdin(t, []byte("===BEFORE===\npackage main\n===AFTER===\npackage main\n"), func() {
-		root.SetArgs([]string{"edit", "-s", "anyid", f})
+		root.SetArgs([]string{"edit", "--symbol-id", "anyid", f})
 		runErr = root.Execute()
 	})
 	require.Error(t, runErr)
@@ -737,7 +737,7 @@ func TestLineBoundaryExtension_Integration(t *testing.T) {
 	root := newEditCmd()
 	var runErr error
 	pipeStdin(t, []byte("===BEFORE===\n\tHost string\n===AFTER===\n\tHost string // server hostname\n"), func() {
-		root.SetArgs([]string{"edit", "-s", hostID, f})
+		root.SetArgs([]string{"edit", "--symbol-id", hostID, f})
 		runErr = root.Execute()
 	})
 	require.NoError(t, runErr, "line boundary extension should succeed")

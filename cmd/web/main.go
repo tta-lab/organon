@@ -16,35 +16,86 @@ import (
 )
 
 func main() {
-	if err := loadTTALEnv(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	root := &cobra.Command{
-		Use:   "web",
-		Short: "Web search and page fetching for AI agents",
+		Use:   "web [command]",
+		Short: "Search the web and fetch web pages",
+		Long: `web is a unified web tool for AI agents: search the web, fetch and read
+pages, browse library documentation, and search code.
+		
+Subcommands:
+  search   Search the web for information
+  fetch    Fetch a web page as markdown
+  docs     Look up library documentation via Context7
+  sgraph   Search public code on Sourcegraph`,
 	}
+	root.SilenceUsage = true
 
-	root.AddCommand(newSearchCmd())
-	root.AddCommand(newFetchCmd())
-	root.AddCommand(newSgraphCmd())
+	docsCmd := &cobra.Command{
+		Use:   "docs",
+		Short: "Library documentation via Context7",
+		Long: `Look up library documentation via Context7 API.
 
-	docsCmd := &cobra.Command{Use: "docs", Short: "Library documentation via Context7"}
-	docsCmd.AddCommand(newDocsResolveCmd())
-	docsCmd.AddCommand(newDocsFetchCmd())
-	root.AddCommand(docsCmd)
+## Two-step workflow
+  1. web docs resolve <library-name>     # find library IDs
+  2. web docs fetch <library-id> <topic>  # read docs
+
+## Backend
+  CONTEXT7_API_KEY set   → authenticated, higher rate limits
+  CONTEXT7_API_KEY unset → anonymous, rate limited`,
+	}
+	docsCmd.AddCommand(newDocsResolveCmd(), newDocsFetchCmd())
+
+	root.AddCommand(
+		newSearchCmd(),
+		newFetchCmd(),
+		docsCmd,
+		newSgraphCmd(),
+	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
+func newFetchCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fetch <url> [flags]",
+		Short: "Fetch and read a web page as markdown",
+		Long: `Fetch a web page and render it as markdown. Long pages (>5000 chars)
+auto-show a heading tree so you can read specific sections.
+
+## Two-step workflow for long pages
+  1. web fetch https://docs.example.com/api       # shows heading tree
+  2. web fetch https://docs.example.com/api --section-id 3f  # read one section
+
+## Fetch backends
+  BROWSER_GATEWAY_URL set   → browser gateway (JS-rendered, no cache)
+  BROWSER_GATEWAY_URL unset → defuddle CLI (daily disk cache at ~/.cache/organon/scrapes/)`,
+		Args: cobra.ExactArgs(1),
+		RunE: runFetch,
+	}
+	cmd.Flags().String("section-id", "", "Section ID to read")
+	cmd.Flags().Bool("tree", false, "Force heading tree view")
+	cmd.Flags().Bool("full", false, "Full content, skip auto-tree")
+	cmd.Flags().Int("tree-threshold", 5000, "Auto-tree threshold in characters")
+	return cmd
+}
+
 func newSearchCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the web",
-		Args:  cobra.ExactArgs(1),
+		Long: `Search the web and return ranked results with titles, URLs, and snippets.
+Results limited to 10. Use quotes for exact phrases.
+
+Search backends (tried in order):
+  EXA_API_KEY set     → Exa (highest quality)
+  BRAVE_API_KEY set   → Brave Search API
+  Neither set         → DuckDuckGo (free, no key needed)
+
+Setting a key to an empty string returns an error. Leave the variable
+unset to use the next backend.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := search.Search(context.Background(), args[0])
 			if err != nil {
@@ -56,26 +107,10 @@ func newSearchCmd() *cobra.Command {
 	}
 }
 
-func newFetchCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "fetch <url>",
-		Short: "Fetch and read a web page as markdown",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runFetch,
-	}
-
-	cmd.Flags().Bool("tree", false, "Show heading tree")
-	cmd.Flags().StringP("section", "s", "", "Section ID to read")
-	cmd.Flags().Bool("full", false, "Show full content without truncation check")
-	cmd.Flags().Int("tree-threshold", markdown.DefaultTreeThreshold, "Auto-tree above this char count")
-
-	return cmd
-}
-
 func runFetch(cmd *cobra.Command, args []string) error {
 	targetURL := args[0]
 	showTree, _ := cmd.Flags().GetBool("tree")
-	section, _ := cmd.Flags().GetString("section")
+	section, _ := cmd.Flags().GetString("section-id")
 	full, _ := cmd.Flags().GetBool("full")
 	treeThreshold, _ := cmd.Flags().GetInt("tree-threshold")
 
