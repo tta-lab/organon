@@ -11,5 +11,15 @@ by its 2-char ID. New content is read from stdin.
   - Adding new symbols (use insert)
 
 ## Examples
+  # single-line
   echo "func newImpl() {}" | src replace main.go -s aB
+
+  # from a file
   cat new_type.go | src replace types.go -s cD
+
+  # multi-line heredoc
+  cat <<'EOF' | src replace main.go -s aB
+  func newImpl() {
+      return nil
+  }
+  EOF
