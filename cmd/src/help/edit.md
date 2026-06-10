@@ -34,6 +34,17 @@ same text appears in multiple places within a file.
 When a non-exact pass fires, the match method and any reindent transform
 are printed to stderr.
 
+## If edit fails
+
+If edit fails (text not found, multiple matches, or non-exact pass failed):
+
+- Re-scan the file with `src <file>` to get fresh symbol IDs
+- Add more surrounding lines to your ===BEFORE=== block
+- Use `--symbol-id <id>` to scope the edit to one symbol, eliminating ambiguity
+- Add 3+ lines of context if the same text appears in multiple places
+- If nothing else works, manually apply the change using `src replace -s <id>` or `src insert`
+- Never use sed, awk, perl, or python to write to existing files
+
 ## File-based editing
   --before-file and --after-file read content from files instead of stdin.
   Both must be provided together.

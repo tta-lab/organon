@@ -3,7 +3,7 @@ auto-show a heading tree so you can read specific sections.
 
 ## Two-step workflow for long pages
   1. web fetch https://docs.example.com/api       # shows heading tree
-  2. web fetch https://docs.example.com/api --section-id 3f  # read one section
+  2. web fetch https://docs.example.com/api -s 3f  # read one section
 
 ## Fetch backends
   BROWSER_GATEWAY_URL set   → browser gateway (JS-rendered, no cache)

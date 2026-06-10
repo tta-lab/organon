@@ -55,7 +55,7 @@ func newFetchCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runFetch,
 	}
-	cmd.Flags().String("section-id", "", "Section ID to read")
+	cmd.Flags().StringP("section-id", "s", "", "Section ID to read")
 	cmd.Flags().Bool("tree", false, "Force heading tree view")
 	cmd.Flags().Bool("full", false, "Full content, skip auto-tree")
 	cmd.Flags().Int("tree-threshold", 5000, "Auto-tree threshold in characters")
