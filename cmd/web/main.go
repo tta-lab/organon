@@ -22,28 +22,51 @@ func main() {
 	}
 
 	root := &cobra.Command{
-		Use:   "web",
-		Short: "Web search and page fetching for AI agents",
+		Use:   "web [command]",
+		Short: "Search the web and fetch web pages",
+		Long:  helpRoot,
 	}
+	root.SilenceUsage = true
 
-	root.AddCommand(newSearchCmd())
-	root.AddCommand(newFetchCmd())
-	root.AddCommand(newSgraphCmd())
+	docsCmd := &cobra.Command{
+		Use:   "docs",
+		Short: "Library documentation via Context7",
+		Long:  helpDocs,
+	}
+	docsCmd.AddCommand(newDocsResolveCmd(), newDocsFetchCmd())
 
-	docsCmd := &cobra.Command{Use: "docs", Short: "Library documentation via Context7"}
-	docsCmd.AddCommand(newDocsResolveCmd())
-	docsCmd.AddCommand(newDocsFetchCmd())
-	root.AddCommand(docsCmd)
+	root.AddCommand(
+		newSearchCmd(),
+		newFetchCmd(),
+		docsCmd,
+		newSgraphCmd(),
+	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
+func newFetchCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fetch <url> [flags]",
+		Short: "Fetch and read a web page as markdown",
+		Long:  helpFetch,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runFetch,
+	}
+	cmd.Flags().StringP("section-id", "s", "", "Section ID to read")
+	cmd.Flags().Bool("tree", false, "Force heading tree view")
+	cmd.Flags().Bool("full", false, "Full content, skip auto-tree")
+	cmd.Flags().Int("tree-threshold", 5000, "Auto-tree threshold in characters")
+	return cmd
+}
+
 func newSearchCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the web",
+		Long:  helpSearch,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := search.Search(context.Background(), args[0])
@@ -56,26 +79,10 @@ func newSearchCmd() *cobra.Command {
 	}
 }
 
-func newFetchCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "fetch <url>",
-		Short: "Fetch and read a web page as markdown",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runFetch,
-	}
-
-	cmd.Flags().Bool("tree", false, "Show heading tree")
-	cmd.Flags().StringP("section", "s", "", "Section ID to read")
-	cmd.Flags().Bool("full", false, "Show full content without truncation check")
-	cmd.Flags().Int("tree-threshold", markdown.DefaultTreeThreshold, "Auto-tree above this char count")
-
-	return cmd
-}
-
 func runFetch(cmd *cobra.Command, args []string) error {
 	targetURL := args[0]
 	showTree, _ := cmd.Flags().GetBool("tree")
-	section, _ := cmd.Flags().GetString("section")
+	section, _ := cmd.Flags().GetString("section-id")
 	full, _ := cmd.Flags().GetBool("full")
 	treeThreshold, _ := cmd.Flags().GetInt("tree-threshold")
 
@@ -115,7 +122,7 @@ func newDocsResolveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "resolve <query>",
 		Short: "Resolve a library name to Context7 IDs",
-		Long:  "Lists Context7 library candidates for <query>. Pick an ID and pass it to 'web docs fetch'.",
+		Long:  helpDocsResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDocsResolve,
 	}
@@ -156,14 +163,9 @@ func newDocsFetchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch <library-id> [topic]",
 		Short: "Fetch documentation for a resolved Context7 library ID",
-		Long: `Fetches Context7 docs for <library-id> (from 'web docs resolve').
-<library-id> may be passed with or without the leading slash.
-[topic] is freeform natural language ("hooks", "how to handle errors").
-
-To pin a version, pass the version-suffixed ID returned by 'web docs resolve'
-(e.g. /reactjs/react.dev/18.2.0).`,
-		Args: cobra.RangeArgs(1, 2),
-		RunE: runDocsFetch,
+		Long:  helpDocsFetch,
+		Args:  cobra.RangeArgs(1, 2),
+		RunE:  runDocsFetch,
 	}
 	cmd.Flags().Int("tokens", 0, "Token budget (0 = backend default)")
 	return cmd
@@ -203,19 +205,9 @@ func newSgraphCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sgraph <query>",
 		Short: "Search code across public repositories via Sourcegraph",
-		Long: `Queries Sourcegraph's public GraphQL API to search code across public
-repositories. Uses Sourcegraph query syntax: repo:, file:, lang:, type:symbol,
-regex patterns, and boolean operators (AND/OR/NOT).
-
-Examples:
-  web sgraph "repo:^github\.com/golang/go$ fmt.Println"
-  web sgraph "lang:go context.WithTimeout" --count 20
-  web sgraph "file:Dockerfile alpine" --context 15 --timeout 60
-  web sgraph "lang:typescript useState type:symbol"
-
-Only searches public repositories. Unauthenticated; rate limits may apply.`,
-		Args: cobra.ExactArgs(1),
-		RunE: runSgraph,
+		Long:  helpSgraph,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSgraph,
 	}
 	cmd.Flags().IntP("count", "c", 10, "Max results to return (10-20, default 10)")
 	cmd.Flags().IntP("context", "C", 10, "Lines of context around each match")

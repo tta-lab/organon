@@ -12,7 +12,18 @@ install:
 	@$(GO_ENV) go install ./cmd/...
 
 test:
-	@$(GO_ENV) go test -v ./...
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		$(GO_ENV) gotestsum --format dots; \
+	else \
+		$(GO_ENV) go test ./...; \
+	fi
+
+test-verbose:
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		$(GO_ENV) gotestsum --format standard-verbose; \
+	else \
+		$(GO_ENV) go test -v ./...; \
+	fi
 
 fmt:
 	@gofmt -w -s .

@@ -13,14 +13,10 @@ import (
 func main() {
 	root := &cobra.Command{
 		Use:   "token [text | file path]",
-		Short: "Count LLM tokens in text or a file",
-		Long: `Count the number of LLM tokens in text (positional arg) or the
-contents of a file (if the arg is a valid file path).
-Uses tiktoken-go with the cl100k_base tokenizer (Claude / GPT-4).
-Reports the tokenizer used and the token count.
-Use -v to show individual token names.`,
-		Args: cobra.ExactArgs(1),
-		RunE: run,
+		Short: "Count LLM tokens in text or files",
+		Long:  helpRoot,
+		Args:  cobra.ExactArgs(1),
+		RunE:  run,
 	}
 	root.Flags().BoolP("file", "f", false, "Force arg to be treated as a file path")
 	root.Flags().BoolP("verbose", "v", false, "Show individual token names")

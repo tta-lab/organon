@@ -28,11 +28,13 @@ go.work.sum
 .env
 
 # Binaries
+/project
 /src
+/token
 /url
 /web
 
 # Editor/IDE
 # .idea/
 # .vscode/
-skill
+/skill

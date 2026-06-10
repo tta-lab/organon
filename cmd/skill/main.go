@@ -31,12 +31,9 @@ func main() {
 
 func newRootCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "skill",
-		Short: "Skill discovery CLI — list, get, and find skills",
-		Long: `Discover and read skills from agent skill directories.
-
-Skills are directories containing a SKILL.md file with YAML frontmatter.
-Discovery walks multiple paths in priority order (project-local first, then global).`,
+		Use:   "skill [command]",
+		Short: "Discover and read agent skills from the filesystem",
+		Long:  helpRoot,
 	}
 
 	cmd.AddCommand(newListCmd(out, errOut, paths, home))
