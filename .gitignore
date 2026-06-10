@@ -28,7 +28,9 @@ go.work.sum
 .env
 
 # Binaries
+/project
 /src
+/token
 /url
 /web
 

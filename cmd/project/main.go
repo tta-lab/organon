@@ -26,8 +26,8 @@ func main() {
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Project management CLI — list, resolve, and jump to projects",
-		Long:  `Read-only project management. Edits go directly to ~/.config/ttal/projects.toml and orgs.toml.`,
+		Short: "Manage registered projects — list, get, resolve, and navigate",
+		Long:  helpRoot,
 	}
 
 	cmd.AddCommand(newListCmd())
@@ -46,7 +46,7 @@ func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list [org]",
 		Short: "List all projects",
-		Long:  `List all projects from projects.toml. Optionally filter by org.`,
+		Long:  helpList,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var orgFilter string
@@ -102,6 +102,7 @@ func newGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <alias>",
 		Short: "Get a project by alias (includes references)",
+		Long:  helpGet,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
@@ -145,6 +146,7 @@ func newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve <alias-or-path>",
 		Short: "Resolve a project alias or path to alias, path, org, and GitHub token env",
+		Long:  helpResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
@@ -197,13 +199,8 @@ func newJumpCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "jump <alias|org/repo>",
 		Short: "Print the filesystem path for a project or reference repo",
-		Long: `Resolve and print a path suitable for cd.
-
-Resolution order:
-  1. Exact alias in projects.toml (with hierarchical fallback: fb.ap -> fb.ap, then fb)
-  2. org/repo pattern -> clone from GitHub if missing
-  3. Bare name -> find unique match in references directory`,
-		Args: cobra.ExactArgs(1),
+		Long:  helpJump,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 
@@ -241,6 +238,7 @@ func newOrgCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "org",
 		Short: "List and get orgs from orgs.toml",
+		Long:  helpOrg,
 	}
 	cmd.AddCommand(newOrgListCmd())
 	cmd.AddCommand(newOrgGetCmd())
