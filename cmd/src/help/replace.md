@@ -11,5 +11,5 @@ by its 2-char ID. New content is read from stdin.
   - Adding new symbols (use insert)
 
 ## Examples
-  echo "func newImpl() {}" | src replace main.go --symbol-id aB
-  cat new_type.go | src replace types.go --symbol-id cD
+  echo "func newImpl() {}" | src replace main.go -s aB
+  cat new_type.go | src replace types.go -s cD

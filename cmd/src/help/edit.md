@@ -21,7 +21,7 @@ One edit per invocation. Use multiple calls for multiple replacements.
   EOF
 
 ## Scoped editing
-  src edit path/to/file.go --symbol-id Ab
+  src edit path/to/file.go -s Ab
 Limits the search to one symbol/section, eliminating ambiguity when the
 same text appears in multiple places within a file.
 

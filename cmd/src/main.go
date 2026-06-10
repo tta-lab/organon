@@ -38,7 +38,7 @@ func main() {
 
 	// Root-only flags
 	root.Flags().Bool("tree", false, "Force tree view")
-	root.Flags().String("symbol-id", "", "Symbol ID to read")
+	root.Flags().StringP("symbol-id", "s", "", "Symbol ID to read")
 
 	replaceCmd := &cobra.Command{
 		Use:   "replace <file> --symbol-id <id>",
@@ -48,7 +48,7 @@ func main() {
 		RunE:  runReplace,
 	}
 	replaceCmd.SilenceUsage = true
-	replaceCmd.Flags().String("symbol-id", "", "Symbol ID to replace")
+	replaceCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID to replace")
 	_ = replaceCmd.MarkFlagRequired("symbol-id")
 
 	insertCmd := &cobra.Command{
@@ -70,7 +70,7 @@ func main() {
 		RunE:  runDelete,
 	}
 	deleteCmd.SilenceUsage = true
-	deleteCmd.Flags().String("symbol-id", "", "Symbol ID to delete")
+	deleteCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID to delete")
 	_ = deleteCmd.MarkFlagRequired("symbol-id")
 
 	commentCmd := &cobra.Command{
@@ -81,7 +81,7 @@ func main() {
 		RunE:  runComment,
 	}
 	commentCmd.SilenceUsage = true
-	commentCmd.Flags().String("symbol-id", "", "Symbol ID")
+	commentCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID")
 	commentCmd.Flags().Bool("read", false, "Read existing doc comment instead of writing")
 	_ = commentCmd.MarkFlagRequired("symbol-id")
 
@@ -93,8 +93,8 @@ func main() {
 		RunE:  runEdit,
 	}
 	editCmd.SilenceUsage = true
-	editCmd.Flags().String("symbol-id", "",
-		"Scope edit to a symbol/section ID (use `src <file>` to find IDs)")
+	editCmd.Flags().StringP("symbol-id", "s", "",
+		"Scope edit to a symbol/section ID (use src <file> to find IDs)")
 	editCmd.Flags().String("before-file", "",
 		"Read BEFORE content from a file instead of stdin (use with --after-file)")
 	editCmd.Flags().String("after-file", "",

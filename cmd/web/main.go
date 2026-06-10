@@ -122,7 +122,7 @@ func newDocsResolveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "resolve <query>",
 		Short: "Resolve a library name to Context7 IDs",
-		Long:  "Lists Context7 library candidates for <query>. Pick an ID and pass it to 'web docs fetch'.",
+		Long:  helpDocsResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDocsResolve,
 	}
@@ -163,14 +163,9 @@ func newDocsFetchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch <library-id> [topic]",
 		Short: "Fetch documentation for a resolved Context7 library ID",
-		Long: `Fetches Context7 docs for <library-id> (from 'web docs resolve').
-<library-id> may be passed with or without the leading slash.
-[topic] is freeform natural language ("hooks", "how to handle errors").
-
-To pin a version, pass the version-suffixed ID returned by 'web docs resolve'
-(e.g. /reactjs/react.dev/18.2.0).`,
-		Args: cobra.RangeArgs(1, 2),
-		RunE: runDocsFetch,
+		Long:  helpDocsFetch,
+		Args:  cobra.RangeArgs(1, 2),
+		RunE:  runDocsFetch,
 	}
 	cmd.Flags().Int("tokens", 0, "Token budget (0 = backend default)")
 	return cmd

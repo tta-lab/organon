@@ -14,8 +14,8 @@ lets you navigate and modify them precisely without guessing line numbers.
 
 ## Common workflow
   1. src path/to/file.go                    # inspect symbol tree
-  2. src path/to/file.go --symbol-id Ab      # read one symbol by ID
-  3. src replace path/to/file.go --symbol-id Ab < new.go  # replace it
+  2. src path/to/file.go -s Ab              # read one symbol by ID (--symbol-id also works)
+  3. src replace path/to/file.go -s Ab < new.go  # replace it
 
 ## Supported languages
 Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and
