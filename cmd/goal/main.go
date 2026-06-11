@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -45,19 +46,22 @@ func newAddCmd() *cobra.Command {
 	var status string
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "add [--status <status>] <text>",
+		Use:   "add [--status <status>]",
 		Short: "Create a new goal file",
-		Long: `Create a new goal file with the given body text.
+		Long: `Create a new goal file with the body read from stdin.
 Defaults to status "draft". Use --status to specify a different initial status.
 Fails if the file already exists unless --force is passed.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := resolvePath()
 			if err != nil {
 				return err
 			}
 
-			body := readBody(args[0], cmd)
+			body, err := readBodyStdin(cmd)
+			if err != nil {
+				return err
+			}
 			return goal.Add(path, body, status, force)
 		},
 	}
@@ -70,17 +74,20 @@ Fails if the file already exists unless --force is passed.`,
 
 func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update <text>",
+		Use:   "update",
 		Short: "Replace the goal body, preserving status",
-		Long:  "Replace the entire body of the goal file, keeping the current status.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Replace the entire body of the goal file with stdin, keeping the current status.",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := resolvePath()
 			if err != nil {
 				return err
 			}
 
-			body := readBody(args[0], cmd)
+			body, err := readBodyStdin(cmd)
+			if err != nil {
+				return err
+			}
 			return goal.Update(path, body)
 		},
 	}
@@ -91,17 +98,20 @@ func newUpdateCmd() *cobra.Command {
 
 func newAppendCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "append <text>",
+		Use:   "append",
 		Short: "Append text to the goal body",
-		Long:  "Append text to the goal body, separated by a blank line. Preserves the current status.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Append stdin to the goal body, separated by a blank line. Preserves the current status.",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := resolvePath()
 			if err != nil {
 				return err
 			}
 
-			text := readBody(args[0], cmd)
+			text, err := readBodyStdin(cmd)
+			if err != nil {
+				return err
+			}
 			return goal.Append(path, text)
 		},
 	}
@@ -178,22 +188,11 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// readBody returns body text. If the arg is "-", it reads from stdin.
-// Otherwise it returns the arg directly.
-func readBody(arg string, cmd *cobra.Command) string {
-	if arg == "-" && cmd.InOrStdin() != nil {
-		var sb strings.Builder
-		buf := make([]byte, 4096)
-		for {
-			n, err := cmd.InOrStdin().Read(buf)
-			if n > 0 {
-				sb.Write(buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-		return strings.TrimRight(sb.String(), "\n")
+// readBodyStdin returns body text read from stdin.
+func readBodyStdin(cmd *cobra.Command) (string, error) {
+	data, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("read stdin: %w", err)
 	}
-	return arg
+	return strings.TrimRight(string(data), "\n"), nil
 }
