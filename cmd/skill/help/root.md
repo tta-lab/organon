@@ -1,6 +1,7 @@
 Discover and read skills from agent skill directories on the filesystem.
 Skills are directories containing a SKILL.md file with YAML frontmatter
-(name, description, category).
+(name, description, category). The frontmatter name is required and is
+the only skill identity; directory names are storage locations, not aliases.
 
 ## Discovery paths (priority order, first match wins)
   1. {cwd}/.agents/skills
@@ -16,6 +17,6 @@ Project-local paths (1–4) take priority over global paths (5–8).
 Within each scope: .agents > .crush > .claude > .cursor.
 
 ## Subcommands
-  list   List all discovered skills (name, category, source, description)
+  list   List all discovered skills as name, description, and SKILL.md path
   get    Print a skill's full body to stdout (frontmatter stripped)
   find   Search skills by keyword (case-insensitive OR match)

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/tta-lab/organon/internal/skill"
@@ -23,22 +21,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	cmd := newRootCmd(os.Stdout, os.Stderr, paths, home)
+	cmd := newRootCmd(os.Stdout, os.Stderr, paths)
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func newRootCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
+func newRootCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill [command]",
 		Short: "Discover and read agent skills from the filesystem",
 		Long:  helpRoot,
 	}
 
-	cmd.AddCommand(newListCmd(out, errOut, paths, home))
+	cmd.AddCommand(newListCmd(out, errOut, paths))
 	cmd.AddCommand(newGetCmd(out, paths))
-	cmd.AddCommand(newFindCmd(out, errOut, paths, home))
+	cmd.AddCommand(newFindCmd(out, errOut, paths))
 
 	return cmd
 }
@@ -51,7 +49,7 @@ func resolvePaths(home string) ([]string, error) {
 	return skill.DiscoveryPaths(cwd, home), nil
 }
 
-func newListCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
+func newListCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -62,7 +60,7 @@ func newListCmd(out, errOut io.Writer, paths []string, home string) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			return emitSkills(out, errOut, skills, home, jsonOut)
+			return emitSkills(out, errOut, skills, jsonOut)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
@@ -85,7 +83,7 @@ func newGetCmd(out io.Writer, paths []string) *cobra.Command {
 	}
 }
 
-func newFindCmd(out, errOut io.Writer, paths []string, home string) *cobra.Command {
+func newFindCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "find <keyword>...",
@@ -96,7 +94,7 @@ func newFindCmd(out, errOut io.Writer, paths []string, home string) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			return emitSkills(out, errOut, skills, home, jsonOut)
+			return emitSkills(out, errOut, skills, jsonOut)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
@@ -122,10 +120,10 @@ func skillJSONFromSkill(s skill.Skill) skillJSON {
 	}
 }
 
-// emitSkills writes skills to out in JSON or table format.
+// emitSkills writes skills to out in JSON or bullet format.
 // For JSON output, encoding errors are returned as errors so the caller
-// (cobra) can exit non-zero. For table output, nothing is returned.
-func emitSkills(out, errOut io.Writer, skills []skill.Skill, home string, jsonOut bool) error {
+// (cobra) can exit non-zero. For bullet output, nothing is returned.
+func emitSkills(out, errOut io.Writer, skills []skill.Skill, jsonOut bool) error {
 	if jsonOut {
 		enc := json.NewEncoder(out)
 		outSkills := make([]skillJSON, len(skills))
@@ -138,29 +136,13 @@ func emitSkills(out, errOut io.Writer, skills []skill.Skill, home string, jsonOu
 		_, _ = fmt.Fprintln(errOut, "No skills found.")
 		return nil
 	}
-	printSkillTable(out, errOut, skills, home)
+	printSkillBullets(out, skills)
 	return nil
 }
 
-func printSkillTable(out, errOut io.Writer, skills []skill.Skill, home string) {
-	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tCATEGORY\tSOURCE\tDESCRIPTION")
+func printSkillBullets(out io.Writer, skills []skill.Skill) {
+	_, _ = fmt.Fprintln(out, "Available skills:")
 	for _, s := range skills {
-		category := s.Category
-		if category == "" {
-			category = "-"
-		}
-		source := s.Source
-		if home != "" && strings.HasPrefix(source, home) {
-			source = "~" + strings.TrimPrefix(source, home)
-		}
-		desc := s.Description
-		if len(desc) > 80 {
-			desc = desc[:77] + "..."
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, category, source, desc)
-	}
-	if err := tw.Flush(); err != nil {
-		fmt.Fprintf(errOut, "warning: output may be incomplete: %v\n", err)
+		fmt.Fprintf(out, "- %s: %s (file: %s)\n", s.Name, s.Description, s.Path)
 	}
 }

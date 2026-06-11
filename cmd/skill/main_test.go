@@ -17,22 +17,26 @@ func runSkill(t *testing.T, args []string) (stdout, stderr string, err error) {
 	if home != "" {
 		paths, _ = resolvePaths(home) //nolint:errcheck // test isolation
 	}
-	cmd := newRootCmd(&outBuf, &errBuf, paths, home)
+	cmd := newRootCmd(&outBuf, &errBuf, paths)
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	return outBuf.String(), errBuf.String(), err
 }
 
 func writeSkillAt(t *testing.T, root, name, desc, category, body string) {
+	writeSkillFileAt(t, root, name, name, desc, category, body)
+}
+
+func writeSkillFileAt(t *testing.T, root, dirName, frontmatterName, desc, category, body string) {
 	t.Helper()
-	dir := filepath.Join(root, ".agents", "skills", name)
+	dir := filepath.Join(root, ".agents", "skills", dirName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %q: %v", dir, err)
 	}
 	content := "---\n"
-	if name != "" || desc != "" || category != "" {
-		if name != "" {
-			content += "name: " + name + "\n"
+	if frontmatterName != "" || desc != "" || category != "" {
+		if frontmatterName != "" {
+			content += "name: " + frontmatterName + "\n"
 		}
 		if desc != "" {
 			content += "description: " + desc + "\n"
@@ -65,12 +69,13 @@ func TestSkillList_Empty(t *testing.T) {
 	}
 }
 
-func TestSkillList_OneSkill(t *testing.T) {
+func TestSkillList_PrintsModelFriendlyBullets(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	writeSkillAt(t, tmpHome, "my-skill", "A test skill", "tool", "skill body content")
+	longDesc := "A test skill with a long description that should stay intact because list output is agent routing context"
+	writeSkillAt(t, tmpHome, "my-skill", longDesc, "tool", "skill body content")
 
 	origCwd, _ := os.Getwd()
 	os.Chdir(tmp)                           //nolint:errcheck // test isolation
@@ -80,19 +85,15 @@ func TestSkillList_OneSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, h := range []string{"NAME", "CATEGORY", "SOURCE", "DESCRIPTION"} {
-		if !strings.Contains(stdout, h) {
-			t.Fatalf("output missing header %q, got: %q", h, stdout)
+	wantPath := filepath.Join(tmpHome, ".agents", "skills", "my-skill", "SKILL.md")
+	want := "Available skills:\n- my-skill: " + longDesc + " (file: " + wantPath + ")\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	for _, unwanted := range []string{"NAME", "CATEGORY", "SOURCE", "..."} {
+		if strings.Contains(stdout, unwanted) {
+			t.Fatalf("stdout should not contain %q, got: %q", unwanted, stdout)
 		}
-	}
-	if strings.Contains(stdout, "MATCH") {
-		t.Fatalf("output should not contain a MATCH column, got: %q", stdout)
-	}
-	if !strings.Contains(stdout, "my-skill") {
-		t.Fatalf("output should contain 'my-skill', got: %q", stdout)
-	}
-	if !strings.Contains(stdout, "~") && !strings.Contains(stdout, ".agents/skills") {
-		t.Fatalf("output should contain abbreviated home path with ~ or path with .agents/skills, got: %q", stdout)
 	}
 }
 
@@ -116,6 +117,41 @@ func TestSkillGet_Found(t *testing.T) {
 	}
 }
 
+func TestSkillGet_UsesFrontmatterNameNotDirectoryName(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillFileAt(t, tmpHome, "storage-dir", "frontmatter-name", "A test skill", "tool", "skill body content")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, _, err := runSkill(t, []string{"list"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantPath := filepath.Join(tmpHome, ".agents", "skills", "storage-dir", "SKILL.md")
+	want := "Available skills:\n- frontmatter-name: A test skill (file: " + wantPath + ")\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+
+	stdout, _, err = runSkill(t, []string{"get", "frontmatter-name"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "skill body content") {
+		t.Fatalf("stdout = %q, want skill body content", stdout)
+	}
+
+	_, _, err = runSkill(t, []string{"get", "storage-dir"})
+	if err == nil {
+		t.Fatal("expected directory-name lookup to fail")
+	}
+}
+
 func TestSkillGet_NotFound(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()
@@ -131,6 +167,30 @@ func TestSkillGet_NotFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") && !strings.Contains(stderr, "does-not-exist") {
 		t.Fatalf("error = %v, stderr = %q, want 'not found' in either", err, stderr)
+	}
+}
+
+func TestSkillList_SkipsMissingFrontmatterName(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillFileAt(t, tmpHome, "storage-dir", "", "Missing name", "tool", "body")
+	writeSkillFileAt(t, tmpHome, "valid-dir", "valid-name", "Valid name", "tool", "body")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, _, err := runSkill(t, []string{"list"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "storage-dir") || strings.Contains(stdout, "Missing name") {
+		t.Fatalf("stdout exposed missing-name skill: %q", stdout)
+	}
+	if !strings.Contains(stdout, "valid-name") {
+		t.Fatalf("stdout = %q, want valid-name", stdout)
 	}
 }
 
@@ -326,7 +386,7 @@ func TestListCmd_JSONOutput_MultipleSkills(t *testing.T) {
 	}
 }
 
-func TestSkillList_EmptyCategoryRendersDash(t *testing.T) {
+func TestSkillList_EmptyDescriptionRendersNameAndPath(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -341,10 +401,9 @@ func TestSkillList_EmptyCategoryRendersDash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, " - ") {
-		t.Fatalf("output should contain '-' for empty category, got: %q", stdout)
-	}
-	if !strings.Contains(stdout, "no-category-skill") {
-		t.Fatalf("output should contain 'no-category-skill', got: %q", stdout)
+	wantPath := filepath.Join(tmpHome, ".agents", "skills", "no-category-skill", "SKILL.md")
+	want := "Available skills:\n- no-category-skill: A skill with no category (file: " + wantPath + ")\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }

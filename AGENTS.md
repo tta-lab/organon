@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Organon is a Go monorepo producing five CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), `skill` (filesystem-based skill discovery), `token` (LLM token counting), and `project` (project management CLI).
+Organon is a Go monorepo producing six CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), `skill` (filesystem-based skill discovery), `token` (LLM token counting), `project` (project management CLI), and `goal` (Lenos session goal file management).
 
 ## Essential Commands
 
@@ -22,6 +22,7 @@ make ci           # fmt, vet, lint, test, build
 - `cmd/skill/` — filesystem-based skill discovery: list/get/find SKILL.md files from project-local and global agent skill directories
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
 - `cmd/project/` — project management CLI: list, get, resolve, and jump to registered projects
+- `cmd/goal/` — Lenos session goal file CLI: add/update/append/get/status via `$LENOS_GOAL`
 
 ### Shared Packages
 - `internal/id/` — base62 ID generation and collision resolution
@@ -47,6 +48,16 @@ Fixture files live in `testdata/`. Tests include both unit tests and CLI integra
 make test                            # gotestsum with go test fallback
 CGO_ENABLED=0 go test ./internal/id/...
 CGO_ENABLED=0 go test -v -run TestSymbols ./internal/treesitter/...
+```
+
+## CLI Design
+
+For commands that accept potentially multiline content, read that content from stdin. Do not add positional body/text arguments for multiline payloads. Document examples with quoted heredocs:
+
+```bash
+cat <<'EOF' | tool command --flag value
+multiline content
+EOF
 ```
 
 ## Package Documentation
