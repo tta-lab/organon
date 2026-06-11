@@ -24,15 +24,19 @@ func runSkill(t *testing.T, args []string) (stdout, stderr string, err error) {
 }
 
 func writeSkillAt(t *testing.T, root, name, desc, category, body string) {
+	writeSkillFileAt(t, root, name, name, desc, category, body)
+}
+
+func writeSkillFileAt(t *testing.T, root, dirName, frontmatterName, desc, category, body string) {
 	t.Helper()
-	dir := filepath.Join(root, ".agents", "skills", name)
+	dir := filepath.Join(root, ".agents", "skills", dirName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %q: %v", dir, err)
 	}
 	content := "---\n"
-	if name != "" || desc != "" || category != "" {
-		if name != "" {
-			content += "name: " + name + "\n"
+	if frontmatterName != "" || desc != "" || category != "" {
+		if frontmatterName != "" {
+			content += "name: " + frontmatterName + "\n"
 		}
 		if desc != "" {
 			content += "description: " + desc + "\n"
@@ -113,6 +117,41 @@ func TestSkillGet_Found(t *testing.T) {
 	}
 }
 
+func TestSkillGet_UsesFrontmatterNameNotDirectoryName(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillFileAt(t, tmpHome, "storage-dir", "frontmatter-name", "A test skill", "tool", "skill body content")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, _, err := runSkill(t, []string{"list"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantPath := filepath.Join(tmpHome, ".agents", "skills", "storage-dir", "SKILL.md")
+	want := "Available skills:\n- frontmatter-name: A test skill (file: " + wantPath + ")\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+
+	stdout, _, err = runSkill(t, []string{"get", "frontmatter-name"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "skill body content") {
+		t.Fatalf("stdout = %q, want skill body content", stdout)
+	}
+
+	_, _, err = runSkill(t, []string{"get", "storage-dir"})
+	if err == nil {
+		t.Fatal("expected directory-name lookup to fail")
+	}
+}
+
 func TestSkillGet_NotFound(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()
@@ -128,6 +167,30 @@ func TestSkillGet_NotFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") && !strings.Contains(stderr, "does-not-exist") {
 		t.Fatalf("error = %v, stderr = %q, want 'not found' in either", err, stderr)
+	}
+}
+
+func TestSkillList_SkipsMissingFrontmatterName(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillFileAt(t, tmpHome, "storage-dir", "", "Missing name", "tool", "body")
+	writeSkillFileAt(t, tmpHome, "valid-dir", "valid-name", "Valid name", "tool", "body")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, _, err := runSkill(t, []string{"list"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "storage-dir") || strings.Contains(stdout, "Missing name") {
+		t.Fatalf("stdout exposed missing-name skill: %q", stdout)
+	}
+	if !strings.Contains(stdout, "valid-name") {
+		t.Fatalf("stdout = %q, want valid-name", stdout)
 	}
 }
 

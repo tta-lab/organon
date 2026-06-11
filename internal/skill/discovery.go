@@ -79,10 +79,10 @@ func ListSkills(paths []string) ([]Skill, error) {
 			}
 
 			meta, body := ParseFrontmatter(data)
-			name := entry.Name()
-			if meta.Name != "" {
-				name = meta.Name
+			if meta.Name == "" {
+				continue
 			}
+			name := meta.Name
 
 			if seen[name] {
 				continue
@@ -102,27 +102,17 @@ func ListSkills(paths []string) ([]Skill, error) {
 	return result, nil
 }
 
-// GetSkill returns the skill matching the given directory name, using priority order.
-// The name is interpreted as a directory name; if the directory's SKILL.md has a
-// frontmatter 'name' field, Skill.Name will be that value instead of the directory name.
+// GetSkill returns the skill matching the given frontmatter name, using priority order.
 // Returns an error wrapping fs.ErrNotExist if no matching skill is found.
 func GetSkill(paths []string, name string) (*Skill, error) {
-	for _, base := range paths {
-		skillPath := filepath.Join(base, name, "SKILL.md")
-		data, err := os.ReadFile(skillPath)
-		if err != nil {
-			continue
+	skills, err := ListSkills(paths)
+	for i := range skills {
+		if skills[i].Name == name {
+			return &skills[i], nil
 		}
-
-		meta, body := ParseFrontmatter(data)
-		// Use frontmatter name if present, otherwise fall back to dir name
-		skillName := name
-		if meta.Name != "" {
-			skillName = meta.Name
-		}
-
-		s := newSkill(skillName, meta, base, skillPath, string(body))
-		return &s, nil
+	}
+	if err != nil {
+		return nil, errors.Join(err, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist))
 	}
 	return nil, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist)
 }
@@ -199,10 +189,10 @@ func scanSkill(base, dirName string, lowerKeywords []string, seen map[string]boo
 	}
 
 	meta, body := ParseFrontmatter(data)
-	name := dirName
-	if meta.Name != "" {
-		name = meta.Name
+	if meta.Name == "" {
+		return nil, nil
 	}
+	name := meta.Name
 
 	if seen[name] {
 		return nil, nil

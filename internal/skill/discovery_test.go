@@ -10,13 +10,17 @@ import (
 
 //nolint:unparam // path is subPath for future extensibility
 func writeSkill(t *testing.T, root, path, name, desc, category, body string) {
-	dir := filepath.Join(root, path, name)
+	writeSkillFile(t, root, path, name, name, desc, category, body)
+}
+
+func writeSkillFile(t *testing.T, root, path, dirName, frontmatterName, desc, category, body string) {
+	dir := filepath.Join(root, path, dirName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %q: %v", dir, err)
 	}
 	content := "---\n"
-	if name != "" {
-		content += "name: " + name + "\n"
+	if frontmatterName != "" {
+		content += "name: " + frontmatterName + "\n"
 	}
 	if desc != "" {
 		content += "description: " + desc + "\n"
@@ -179,9 +183,9 @@ func TestListSkills_CrossDirDedup(t *testing.T) {
 	}
 }
 
-func TestListSkills_FrontmatterNameOverridesDir(t *testing.T) {
+func TestListSkills_UsesFrontmatterNameAsIdentity(t *testing.T) {
 	root := t.TempDir()
-	writeSkill(t, root, ".agents/skills", "bar", "a bar skill", "tools", "bar body")
+	writeSkillFile(t, root, ".agents/skills", "storage-dir", "bar", "a bar skill", "tools", "bar body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
 	skills, err := ListSkills(paths)
@@ -193,6 +197,50 @@ func TestListSkills_FrontmatterNameOverridesDir(t *testing.T) {
 	}
 	if skills[0].Name != "bar" {
 		t.Errorf("Name = %q, want %q", skills[0].Name, "bar")
+	}
+}
+
+func TestListSkills_SkipsMissingFrontmatterName(t *testing.T) {
+	root := t.TempDir()
+	writeSkillFile(t, root, ".agents/skills", "storage-dir", "", "missing name", "tools", "body")
+	writeSkillFile(t, root, ".agents/skills", "valid-dir", "valid", "valid skill", "tools", "body")
+
+	paths := []string{filepath.Join(root, ".agents/skills")}
+	skills, err := ListSkills(paths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("got %d skills, want 1", len(skills))
+	}
+	if skills[0].Name != "valid" {
+		t.Fatalf("Name = %q, want valid", skills[0].Name)
+	}
+}
+
+func TestListSkills_DedupsByFrontmatterNameFirstWins(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "cwd")
+	home := filepath.Join(root, "home")
+	writeSkillFile(t, cwd, ".agents/skills", "first-dir", "same-name", "cwd version", "tools", "cwd body")
+	writeSkillFile(t, home, ".agents/skills", "second-dir", "same-name", "home version", "tools", "home body")
+
+	paths := []string{
+		filepath.Join(cwd, ".agents/skills"),
+		filepath.Join(home, ".agents/skills"),
+	}
+	skills, err := ListSkills(paths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("got %d skills, want 1", len(skills))
+	}
+	if skills[0].Description != "cwd version" {
+		t.Fatalf("Description = %q, want cwd version", skills[0].Description)
+	}
+	if skills[0].Path != filepath.Join(cwd, ".agents/skills/first-dir/SKILL.md") {
+		t.Fatalf("Path = %q, want first-dir skill", skills[0].Path)
 	}
 }
 
@@ -331,6 +379,54 @@ func TestGetSkill_PriorityWins(t *testing.T) {
 	}
 }
 
+func TestGetSkill_ResolvesFrontmatterNameNotDirectoryName(t *testing.T) {
+	root := t.TempDir()
+	writeSkillFile(
+		t,
+		root,
+		".agents/skills",
+		"storage-dir",
+		"frontmatter-name",
+		"a test skill",
+		"testing",
+		"skill body content",
+	)
+
+	skillDir := filepath.Join(root, ".agents/skills")
+	paths := []string{skillDir}
+	skill, err := GetSkill(paths, "frontmatter-name")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skill.Name != "frontmatter-name" {
+		t.Fatalf("Name = %q, want frontmatter-name", skill.Name)
+	}
+	if skill.Path != filepath.Join(skillDir, "storage-dir/SKILL.md") {
+		t.Fatalf("Path = %q, want storage-dir skill path", skill.Path)
+	}
+
+	_, err = GetSkill(paths, "storage-dir")
+	if err == nil {
+		t.Fatal("expected directory-name lookup to fail")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("errors.Is(err, fs.ErrNotExist) = false, want true; err = %v", err)
+	}
+}
+
+func TestGetSkill_SkipsMissingFrontmatterName(t *testing.T) {
+	root := t.TempDir()
+	writeSkillFile(t, root, ".agents/skills", "storage-dir", "", "missing name", "testing", "body")
+
+	_, err := GetSkill([]string{filepath.Join(root, ".agents/skills")}, "storage-dir")
+	if err == nil {
+		t.Fatal("expected missing-name skill not to resolve")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("errors.Is(err, fs.ErrNotExist) = false, want true; err = %v", err)
+	}
+}
+
 func TestFindSkills_NameMatch(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "git-omz", "git plugin abbreviations", "git", "git body")
@@ -346,6 +442,40 @@ func TestFindSkills_NameMatch(t *testing.T) {
 	}
 	if skills[0].Name != "git-omz" {
 		t.Errorf("Name = %q, want %q", skills[0].Name, "git-omz")
+	}
+}
+
+func TestFindSkills_UsesFrontmatterNameOnly(t *testing.T) {
+	root := t.TempDir()
+	writeSkillFile(t, root, ".agents/skills", "storage-dir", "visible-name", "visible description", "tools", "body")
+	writeSkillFile(t, root, ".agents/skills", "missing-name-dir", "", "missing name", "tools", "body")
+
+	paths := []string{filepath.Join(root, ".agents/skills")}
+	skills, err := FindSkills(paths, []string{"visible"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("got %d skills, want 1", len(skills))
+	}
+	if skills[0].Name != "visible-name" {
+		t.Fatalf("Name = %q, want visible-name", skills[0].Name)
+	}
+
+	skills, err = FindSkills(paths, []string{"storage-dir"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 0 {
+		t.Fatalf("got %d skills for directory-name match, want 0", len(skills))
+	}
+
+	skills, err = FindSkills(paths, []string{"missing"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skills) != 0 {
+		t.Fatalf("got %d missing-name skills, want 0", len(skills))
 	}
 }
 
