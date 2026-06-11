@@ -8,7 +8,7 @@ command fails with a clear error.
 
 ## Commands
 
-  goal add    [--status active|blocked|complete] <body>
+  goal add    [--status draft|active|blocked|complete] <body>
   goal update <body>
   goal append <body>
   goal get    [--json]
