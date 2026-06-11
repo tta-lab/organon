@@ -54,6 +54,30 @@ builds:
       - amd64
       - arm64
 
+  - id: goal
+    binary: goal
+    main: ./cmd/goal
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: token
+    binary: token
+    main: ./cmd/token
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - formats: [tar.gz]
     name_template: >-
@@ -66,6 +90,8 @@ archives:
       - web
       - skill
       - project
+      - goal
+      - token
 
 checksum:
   name_template: checksums.txt
