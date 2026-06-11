@@ -67,32 +67,27 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 
-			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
-
-			rows := make([][]string, len(entries))
-			for i, e := range entries {
-				rows[i] = []string{e.Alias, project.DeriveOrg(e.Path), e.Name}
-			}
-
-			t := table.New().
-				Border(lipgloss.RoundedBorder()).
-				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
-				StyleFunc(func(row, col int) lipgloss.Style {
-					if row == table.HeaderRow {
-						return headerStyle
-					}
-					return cellStyle
-				}).
-				Headers("ALIAS", "ORG", "NAME").
-				Rows(rows...)
-
-			fmt.Println(t)
-			fmt.Printf("\n%d projects — use project get <alias> for the path\n", len(entries))
+			printProjectBullets(entries)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	return cmd
+}
+
+func printProjectBullets(entries []project.Entry) {
+	fmt.Println("Available projects:")
+	for _, e := range entries {
+		if e.Name != "" && e.Path != "" {
+			fmt.Printf("- %s: %s (path: %s)\n", e.Alias, e.Name, e.Path)
+			continue
+		}
+		if e.Name != "" {
+			fmt.Printf("- %s: %s\n", e.Alias, e.Name)
+			continue
+		}
+		fmt.Printf("- %s: %s\n", e.Alias, e.Path)
+	}
 }
 
 // --- get ---
