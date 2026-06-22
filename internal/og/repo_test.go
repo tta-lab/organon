@@ -48,12 +48,34 @@ func TestComputeBumpedTagReusesUnpushedLocalLatestTag(t *testing.T) {
 	repo := testGitRepoWithRemote(t)
 	gitRun(t, repo, "tag", "v1.2.3")
 
-	tag, err := computeBumpedTag(repo, "patch")
+	tag, err := computeBumpedTag(&repoContext{WorkDir: repo}, "patch")
 	if err != nil {
 		t.Fatalf("computeBumpedTag: %v", err)
 	}
 	if tag != "v1.2.3" {
 		t.Fatalf("computeBumpedTag = %q, want unpushed local tag v1.2.3", tag)
+	}
+}
+
+func TestShouldBumpLatestTagUsesCredentialAwareGit(t *testing.T) {
+	repo := testGitRepoWithRemote(t)
+	ctx := &repoContext{WorkDir: repo, RemoteURL: "https://git.example.test/org/repo.git"}
+	var gotArgs []string
+	restore := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		gotArgs = append([]string(nil), args...)
+		return nil
+	})
+	defer restore()
+
+	shouldBump, err := shouldBumpLatestTag(ctx, "v1.2.3")
+	if err != nil {
+		t.Fatalf("shouldBumpLatestTag: %v", err)
+	}
+	if !shouldBump {
+		t.Fatal("shouldBumpLatestTag = false, want true when remote tag exists")
+	}
+	if strings.Join(gotArgs, " ") != "ls-remote --exit-code --tags origin refs/tags/v1.2.3" {
+		t.Fatalf("credential-aware git args = %v", gotArgs)
 	}
 }
 
@@ -165,4 +187,11 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func stubRunGitWithCreds(t *testing.T, fn func(*repoContext, ...string) error) func() {
+	t.Helper()
+	old := runGitWithCredsFunc
+	runGitWithCredsFunc = fn
+	return func() { runGitWithCredsFunc = old }
 }

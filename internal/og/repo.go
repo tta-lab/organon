@@ -136,7 +136,13 @@ func runGit(workDir string, args ...string) error {
 	return nil
 }
 
+var runGitWithCredsFunc = runGitWithCredsImpl
+
 func runGitWithCreds(ctxInfo *repoContext, args ...string) error {
+	return runGitWithCredsFunc(ctxInfo, args...)
+}
+
+func runGitWithCredsImpl(ctxInfo *repoContext, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
@@ -173,8 +179,8 @@ func latestTag(workDir string) (string, error) {
 	return "", nil
 }
 
-func computeBumpedTag(workDir, level string) (string, error) {
-	latest, err := latestTag(workDir)
+func computeBumpedTag(ctxInfo *repoContext, level string) (string, error) {
+	latest, err := latestTag(ctxInfo.WorkDir)
 	if err != nil {
 		return "", err
 	}
@@ -190,7 +196,7 @@ func computeBumpedTag(workDir, level string) (string, error) {
 			return "", fmt.Errorf("invalid --bump value %q", level)
 		}
 	}
-	shouldBump, err := shouldBumpLatestTag(workDir, latest)
+	shouldBump, err := shouldBumpLatestTag(ctxInfo, latest)
 	if err != nil {
 		return "", err
 	}
@@ -221,12 +227,12 @@ func computeBumpedTag(workDir, level string) (string, error) {
 	return fmt.Sprintf("v%d.%d.%d%s", maj, min, pat, suffix), nil
 }
 
-func shouldBumpLatestTag(workDir, tag string) (bool, error) {
-	if err := runGit(workDir, "remote", "get-url", remoteOrigin); err != nil {
+func shouldBumpLatestTag(ctxInfo *repoContext, tag string) (bool, error) {
+	if err := runGit(ctxInfo.WorkDir, "remote", "get-url", remoteOrigin); err != nil {
 		return true, nil
 	}
 	ref := "refs/tags/" + tag
-	if err := runGit(workDir, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref); err != nil {
+	if err := runGitWithCreds(ctxInfo, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref); err != nil {
 		if exitCode(err) == 2 {
 			return false, nil
 		}

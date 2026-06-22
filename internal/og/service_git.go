@@ -55,7 +55,7 @@ func (s Service) GitTag(req Request) (Response, error) {
 	}
 	tag := req.Tag
 	if req.Bump != "" {
-		tag, err = computeBumpedTag(ctx.WorkDir, req.Bump)
+		tag, err = computeBumpedTag(ctx, req.Bump)
 		if err != nil {
 			return Response{}, err
 		}
