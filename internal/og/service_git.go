@@ -34,18 +34,8 @@ func (s Service) GitPull(req Request) (Response, error) {
 
 	pr, err := findPR(ctx, stateAll)
 	if err == nil && pr.Merged {
-		if err := ensureCleanBranchForCleanup(ctx); err != nil {
+		if err := cleanupMergedBranch(ctx); err != nil {
 			return Response{}, err
-		}
-		for _, args := range [][]string{
-			{"switch", ctx.DefaultBase},
-			{"pull", "--ff-only", remoteOrigin, ctx.DefaultBase},
-			{"branch", "-D", ctx.Branch},
-			{"push", remoteOrigin, "--delete", ctx.Branch},
-		} {
-			if err := runGitWithCreds(ctx, args...); err != nil {
-				return Response{}, err
-			}
 		}
 		return success(Response{
 			Message: fmt.Sprintf("Pulled %s. Deleted %s locally and remotely", ctx.DefaultBase, ctx.Branch),

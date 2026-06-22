@@ -18,7 +18,10 @@ func NewForgejoProvider(host string) (Provider, error) {
 		token = os.Getenv("FORGEJO_ACCESS_TOKEN")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("FORGEJO_TOKEN or FORGEJO_ACCESS_TOKEN environment variable is required")
+		token = os.Getenv("GITEA_TOKEN")
+	}
+	if token == "" {
+		return nil, fmt.Errorf("FORGEJO_TOKEN, FORGEJO_ACCESS_TOKEN, or GITEA_TOKEN environment variable is required")
 	}
 
 	return NewForgejoProviderWithToken(host, token)

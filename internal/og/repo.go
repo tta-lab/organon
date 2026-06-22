@@ -99,10 +99,10 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 }
 
 func tokenEnvFor(provider gitprovider.ProviderType, e *project.Entry) string {
-	if e != nil && e.GitHubTokenEnv != "" {
-		return e.GitHubTokenEnv
-	}
 	if provider == gitprovider.ProviderGitHub {
+		if e != nil && e.GitHubTokenEnv != "" {
+			return e.GitHubTokenEnv
+		}
 		for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 			if os.Getenv(name) != "" {
 				return name
@@ -110,12 +110,7 @@ func tokenEnvFor(provider gitprovider.ProviderType, e *project.Entry) string {
 		}
 		return "GITHUB_TOKEN"
 	}
-	for _, name := range []string{"FORGEJO_TOKEN", "GITEA_TOKEN"} {
-		if os.Getenv(name) != "" {
-			return name
-		}
-	}
-	return "FORGEJO_TOKEN"
+	return gitutil.ForgeTokenEnv()
 }
 
 func gitOutput(workDir string, args ...string) (string, error) {
@@ -252,4 +247,30 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 		)
 	}
 	return nil
+}
+
+func cleanupMergedBranch(ctxInfo *repoContext) error {
+	if err := ensureCleanBranchForCleanup(ctxInfo); err != nil {
+		return err
+	}
+	remoteExists := remoteBranchExists(ctxInfo)
+	for _, args := range [][]string{
+		{"switch", ctxInfo.DefaultBase},
+		{"pull", "--ff-only", remoteOrigin, ctxInfo.DefaultBase},
+	} {
+		if err := runGitWithCreds(ctxInfo, args...); err != nil {
+			return err
+		}
+	}
+	if remoteExists {
+		if err := runGitWithCreds(ctxInfo, "push", remoteOrigin, "--delete", ctxInfo.Branch); err != nil {
+			return err
+		}
+	}
+	return runGitWithCreds(ctxInfo, "branch", "-D", ctxInfo.Branch)
+}
+
+func remoteBranchExists(ctxInfo *repoContext) bool {
+	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
+	return runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef) == nil
 }

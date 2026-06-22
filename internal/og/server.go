@@ -44,6 +44,11 @@ func HTTPHandler(fn HandlerFunc) http.HandlerFunc {
 			_ = json.NewEncoder(w).Encode(Response{Error: "decode request: " + err.Error()})
 			return
 		}
+		if req.Token != "" || req.TokenEnv != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(Response{Error: "token fields are not accepted in daemon requests"})
+			return
+		}
 		resp, err := fn(req)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)

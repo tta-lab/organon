@@ -69,5 +69,21 @@ func tokenForRemote(remoteURL, projectAlias string) string {
 	if strings.Contains(remoteURL, "github.com") {
 		return project.ResolveGitHubToken(projectAlias)
 	}
-	return os.Getenv("FORGEJO_TOKEN")
+	return ForgeToken()
+}
+
+// ForgeTokenEnv returns the first configured token environment variable for
+// Forgejo/Gitea-compatible remotes.
+func ForgeTokenEnv() string {
+	for _, name := range []string{"FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
+		if os.Getenv(name) != "" {
+			return name
+		}
+	}
+	return "FORGEJO_TOKEN"
+}
+
+// ForgeToken returns the configured token for Forgejo/Gitea-compatible remotes.
+func ForgeToken() string {
+	return os.Getenv(ForgeTokenEnv())
 }

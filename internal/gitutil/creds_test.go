@@ -14,10 +14,13 @@ func TestTokenForRemote(t *testing.T) {
 	}{
 		{"github https", "https://github.com/org/repo.git", "GITHUB_TOKEN", "gh-tok", "gh-tok"},
 		{"forgejo https", "https://git.guion.io/org/repo.git", "FORGEJO_TOKEN", "fg-tok", "fg-tok"},
+		{"forgejo access token", "https://git.guion.io/org/repo.git", "FORGEJO_ACCESS_TOKEN", "fg-access", "fg-access"},
+		{"gitea token", "https://git.guion.io/org/repo.git", "GITEA_TOKEN", "gitea-tok", "gitea-tok"},
 		{"github ssh-style", "git@github.com:org/repo.git", "GITHUB_TOKEN", "gh-tok2", "gh-tok2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			clearTokenEnv(t)
 			t.Setenv(tt.envKey, tt.envVal)
 			got := tokenForRemote(tt.remoteURL, "")
 			if got != tt.wantToken {
@@ -29,6 +32,7 @@ func TestTokenForRemote(t *testing.T) {
 
 func TestGitCredEnv(t *testing.T) {
 	t.Run("with token includes all 7 env vars", func(t *testing.T) {
+		clearTokenEnv(t)
 		t.Setenv("GITHUB_TOKEN", "test-token-123")
 		env := GitCredEnv("https://github.com/org/repo", "")
 		if len(env) != 7 {
@@ -47,8 +51,7 @@ func TestGitCredEnv(t *testing.T) {
 	})
 
 	t.Run("without token still returns GIT_TERMINAL_PROMPT=0", func(t *testing.T) {
-		t.Setenv("GITHUB_TOKEN", "")
-		t.Setenv("FORGEJO_TOKEN", "")
+		clearTokenEnv(t)
 		env := GitCredEnv("https://github.com/org/repo", "")
 		if len(env) != 1 {
 			t.Fatalf("expected 1 env var, got %d: %v", len(env), env)
@@ -59,7 +62,7 @@ func TestGitCredEnv(t *testing.T) {
 	})
 
 	t.Run("forgejo without token returns prompt suppression only", func(t *testing.T) {
-		t.Setenv("FORGEJO_TOKEN", "")
+		clearTokenEnv(t)
 		env := GitCredEnv("https://git.guion.io/org/repo", "")
 		if len(env) != 1 {
 			t.Fatalf("expected 1 env var, got %d", len(env))
@@ -69,6 +72,7 @@ func TestGitCredEnv(t *testing.T) {
 
 func TestGitCredEnvHasToken(t *testing.T) {
 	t.Run("returns true when token available", func(t *testing.T) {
+		clearTokenEnv(t)
 		t.Setenv("GITHUB_TOKEN", "mytoken")
 		if !GitCredEnvHasToken("https://github.com/org/repo", "") {
 			t.Error("expected true, got false")
@@ -76,10 +80,16 @@ func TestGitCredEnvHasToken(t *testing.T) {
 	})
 
 	t.Run("returns false when no token", func(t *testing.T) {
-		t.Setenv("GITHUB_TOKEN", "")
-		t.Setenv("FORGEJO_TOKEN", "")
+		clearTokenEnv(t)
 		if GitCredEnvHasToken("https://github.com/org/repo", "") {
 			t.Error("expected false, got true")
 		}
 	})
+}
+
+func clearTokenEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
+		t.Setenv(name, "")
+	}
 }
