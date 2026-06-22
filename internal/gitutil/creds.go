@@ -24,12 +24,18 @@ import (
 //
 // Use GitCredEnvHasToken to check whether credentials were injected.
 func GitCredEnv(remoteURL, projectAlias string) []string {
+	return GitCredEnvWithToken(tokenForRemote(remoteURL, projectAlias))
+}
+
+// GitCredEnvWithToken returns environment variables for git network operations
+// using an already-resolved token. Use this when a caller has a single
+// credential source of truth and must not re-resolve from ambient env vars.
+func GitCredEnvWithToken(token string) []string {
 	// Always suppress interactive prompts; this prevents the hang bug
 	// even when no token is configured.
 	env := make([]string, 0, 7)
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
 
-	token := tokenForRemote(remoteURL, projectAlias)
 	if token == "" {
 		return env
 	}

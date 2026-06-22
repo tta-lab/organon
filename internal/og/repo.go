@@ -147,12 +147,16 @@ func runGitWithCredsImpl(ctxInfo *repoContext, args ...string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, gitutil.GitCredEnv(ctxInfo.RemoteURL, ctxInfo.ProjectAlias)...)
+	cmd.Env = append(cmd.Env, gitCredentialEnv(ctxInfo)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func gitCredentialEnv(ctxInfo *repoContext) []string {
+	return gitutil.GitCredEnvWithToken(ctxInfo.Token)
 }
 
 func defaultBranch(workDir string) string {

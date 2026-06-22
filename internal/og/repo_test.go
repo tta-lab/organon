@@ -99,6 +99,21 @@ func TestGitPushAllowsMainAndMasterToReachRemote(t *testing.T) {
 	}
 }
 
+func TestGitCredentialEnvUsesResolvedContextToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ambient-token")
+
+	env := gitCredentialEnv(&repoContext{
+		RemoteURL: "https://github.com/tta-lab/example.git",
+		Token:     "resolved-token",
+	})
+	if len(env) != 7 {
+		t.Fatalf("expected 7 env vars, got %d: %v", len(env), env)
+	}
+	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
+		t.Fatalf("env[6] = %q, want resolved token from repoContext", env[6])
+	}
+}
+
 func testGitRepoWithMissingRemoteFeature(t *testing.T) string {
 	t.Helper()
 

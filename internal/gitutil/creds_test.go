@@ -70,6 +70,19 @@ func TestGitCredEnv(t *testing.T) {
 	})
 }
 
+func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
+	clearTokenEnv(t)
+	t.Setenv("GITHUB_TOKEN", "ambient-token")
+
+	env := GitCredEnvWithToken("resolved-token")
+	if len(env) != 7 {
+		t.Fatalf("expected 7 env vars, got %d: %v", len(env), env)
+	}
+	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
+		t.Fatalf("env[6] = %q, want explicit resolved token", env[6])
+	}
+}
+
 func TestGitCredEnvHasToken(t *testing.T) {
 	t.Run("returns true when token available", func(t *testing.T) {
 		clearTokenEnv(t)
