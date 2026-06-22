@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,5 +29,22 @@ func TestHTTPHandlerRejectsTokenFields(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), "token fields are not accepted") {
 		t.Fatalf("body = %q", resp.Body.String())
+	}
+}
+
+func TestListenAndServeUnixCreatesOwnerOnlySocket(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "og.sock")
+	listener, err := listenUnix(socketPath)
+	if err != nil {
+		t.Fatalf("listenUnix: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("socket mode = %o, want 0600", got)
 	}
 }

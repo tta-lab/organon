@@ -1,6 +1,9 @@
 package og
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func (s Service) GitPush(req Request) (Response, error) {
 	ctx, err := resolveRepoContextFor(req.WorkDir)
@@ -30,6 +33,9 @@ func (s Service) GitPull(req Request) (Response, error) {
 	}
 
 	pr, err := findPR(ctx, stateAll)
+	if err != nil && !isNoPRFound(err) {
+		return Response{}, err
+	}
 	if err == nil && pr.Merged {
 		if err := cleanupMergedBranch(ctx); err != nil {
 			return Response{}, err
@@ -75,4 +81,15 @@ func (s Service) GitTag(req Request) (Response, error) {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}), nil
+}
+
+func isNoPRFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return (strings.HasPrefix(msg, "no ") && strings.Contains(msg, " pr found")) ||
+		strings.Contains(msg, "no pr found") ||
+		strings.Contains(msg, "no pull request found") ||
+		strings.Contains(msg, "pull request not found")
 }

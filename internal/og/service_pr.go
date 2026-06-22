@@ -2,7 +2,6 @@ package og
 
 import (
 	"fmt"
-	"strings"
 )
 
 func (s Service) PRCreate(req Request) (Response, error) {
@@ -115,19 +114,20 @@ func (s Service) PRChecks(req Request) (Response, error) {
 }
 
 func (s Service) PRFailures(req Request) (Response, error) {
-	resp, err := s.PRChecks(req)
+	ctx, err := resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
-	var failures []string
-	for _, line := range resp.Lines {
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "failure") || strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
-			failures = append(failures, line)
-		}
+	pr, err := findPR(ctx, stateAll)
+	if err != nil {
+		return Response{}, err
 	}
-	if len(failures) == 0 {
-		failures = []string{"No failing checks found."}
+	lines, err := getCIFailures(ctx, pr, req.Tail)
+	if err != nil {
+		return Response{}, err
 	}
-	return success(Response{Lines: failures}), nil
+	if len(lines) == 0 {
+		lines = []string{"No failing checks found."}
+	}
+	return success(Response{Lines: lines}), nil
 }

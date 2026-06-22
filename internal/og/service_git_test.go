@@ -3,6 +3,7 @@ package og
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tta-lab/organon/internal/gitprovider"
@@ -11,6 +12,7 @@ import (
 func TestGitPushPassesForceWithLease(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	var got []string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
@@ -31,6 +33,7 @@ func TestGitPushPassesForceWithLease(t *testing.T) {
 func TestGitPullDefaultBranch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, branchMain)
 	var calls [][]string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
@@ -51,6 +54,7 @@ func TestGitPullDefaultBranch(t *testing.T) {
 func TestGitPullFeatureBranchFallsBackToBranchPullWhenNoPR(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	var calls [][]string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
@@ -61,7 +65,7 @@ func TestGitPullFeatureBranchFallsBackToBranchPullWhenNoPR(t *testing.T) {
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
 			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-				return nil, fmt.Errorf("no PR found")
+				return nil, fmt.Errorf("no all PR found for %s -> %s", head, base)
 			},
 		}, nil
 	})
@@ -76,9 +80,38 @@ func TestGitPullFeatureBranchFallsBackToBranchPullWhenNoPR(t *testing.T) {
 	}
 }
 
+func TestGitPullFeatureBranchReturnsPRLookupError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		t.Fatalf("git should not run after PR lookup auth failure: %v", args)
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return nil, fmt.Errorf("401 unauthorized")
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	_, err := (Service{}).GitPull(Request{WorkDir: repo})
+	if err == nil {
+		t.Fatal("expected PR lookup error")
+	}
+	if !strings.Contains(err.Error(), "401 unauthorized") {
+		t.Fatalf("error = %v, want provider error", err)
+	}
+}
+
 func TestGitPullMergedBranchCleanup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	var calls [][]string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {

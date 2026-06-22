@@ -59,14 +59,26 @@ func HTTPHandler(fn HandlerFunc) http.HandlerFunc {
 }
 
 func ListenAndServeUnix(socketPath string, handler http.Handler) error {
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
-		return err
-	}
-	_ = os.Remove(socketPath)
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := listenUnix(socketPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
 	return http.Serve(listener, handler)
+}
+
+func listenUnix(socketPath string) (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	return listener, nil
 }

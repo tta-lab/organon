@@ -3,6 +3,7 @@ package og
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tta-lab/organon/internal/gitprovider"
@@ -11,6 +12,7 @@ import (
 func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	var calls []string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		calls = append(calls, "git:"+joinArgs(args))
@@ -44,9 +46,10 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 func TestFindPRUsesCommitLookupForGitHub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "feature")
-	head := gitOut(t, repo, "rev-parse", "HEAD")
+	expectedSHA := gitOut(t, repo, "rev-parse", "HEAD")
 
 	var gotSHA string
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
@@ -83,8 +86,8 @@ func TestFindPRUsesCommitLookupForGitHub(t *testing.T) {
 	if pr.Index != 9 {
 		t.Fatalf("PR index = %d, want 9", pr.Index)
 	}
-	if gotSHA != head {
-		t.Fatalf("commit lookup SHA = %q, want %q", gotSHA, head)
+	if gotSHA != expectedSHA {
+		t.Fatalf("commit lookup SHA = %q, want %q", gotSHA, expectedSHA)
 	}
 }
 
@@ -167,6 +170,56 @@ func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMismatches(t *testin
 	}
 }
 
+func TestPRFailuresFetchesFailureDetails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "commit", "--allow-empty", "-m", "feature")
+	expectedSHA := gitOut(t, repo, "rev-parse", "HEAD")
+	var gotTail int
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index:   7,
+					Head:    "feature/x",
+					Base:    branchMain,
+					State:   stateAll,
+					HeadSHA: expectedSHA,
+				}, nil
+			},
+			getCIFailureDetails: func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
+				gotTail = tailLines
+				if sha != expectedSHA {
+					t.Fatalf("sha = %q, want %q", sha, expectedSHA)
+				}
+				return []*gitprovider.JobFailure{{
+					WorkflowName: "check",
+					JobName:      "test",
+					LogTail:      "panic: bad\nexit status 1",
+					HTMLURL:      "https://ci/job/1",
+				}}, nil
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	resp, err := (Service{}).PRFailures(Request{WorkDir: repo, Tail: 12})
+	if err != nil {
+		t.Fatalf("PRFailures: %v", err)
+	}
+	if gotTail != 12 {
+		t.Fatalf("tail = %d, want 12", gotTail)
+	}
+	got := strings.Join(resp.Lines, "\n")
+	for _, want := range []string{"check / test", "https://ci/job/1", "panic: bad", "exit status 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("failure lines = %q, want substring %q", got, want)
+		}
+	}
+}
+
 func joinArgs(args []string) string {
 	out := ""
 	for i, arg := range args {
@@ -186,8 +239,9 @@ func stubNewProvider(t *testing.T, fn func(*repoContext) (gitprovider.Provider, 
 }
 
 type fakeProvider struct {
-	createPR      func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error)
-	findPRByState func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
+	createPR            func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error)
+	findPRByState       func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
+	getCIFailureDetails func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error)
 }
 
 func (p fakeProvider) Name() string { return "fake" }
@@ -229,6 +283,9 @@ func (p fakeProvider) GetCombinedStatus(owner, repo, ref string) (*gitprovider.C
 }
 
 func (p fakeProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
+	if p.getCIFailureDetails != nil {
+		return p.getCIFailureDetails(owner, repo, sha, tailLines)
+	}
 	panic("not implemented")
 }
 

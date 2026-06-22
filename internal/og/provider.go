@@ -99,7 +99,7 @@ func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
 	}
 	sha := pr.SHA
 	if sha == "" {
-		sha = "HEAD"
+		sha = headRefName
 	}
 	status, err := provider.GetCombinedStatus(ctx.Owner, ctx.Repo, sha)
 	if err != nil {
@@ -108,6 +108,36 @@ func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
 	lines := []string{"combined: " + status.State}
 	for _, s := range status.Statuses {
 		lines = append(lines, fmt.Sprintf("%s: %s - %s", s.Context, s.State, s.Description))
+	}
+	return lines, nil
+}
+
+func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, error) {
+	provider, err := newProvider(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sha := pr.SHA
+	if sha == "" {
+		sha = headRefName
+	}
+	failures, err := provider.GetCIFailureDetails(ctx.Owner, ctx.Repo, sha, tailLines)
+	if err != nil {
+		return nil, err
+	}
+	lines := make([]string, 0, len(failures)*4)
+	for _, failure := range failures {
+		title := failure.JobName
+		if failure.WorkflowName != "" {
+			title = failure.WorkflowName + " / " + title
+		}
+		lines = append(lines, title)
+		if failure.HTMLURL != "" {
+			lines = append(lines, failure.HTMLURL)
+		}
+		if failure.LogTail != "" {
+			lines = append(lines, failure.LogTail)
+		}
 	}
 	return lines, nil
 }

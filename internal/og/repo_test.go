@@ -114,6 +114,35 @@ func TestGitCredentialEnvUsesResolvedContextToken(t *testing.T) {
 	}
 }
 
+func TestRunGitWithCredsFailsFastWithoutToken(t *testing.T) {
+	err := runGitWithCreds(&repoContext{
+		WorkDir:   t.TempDir(),
+		TokenEnv:  "GITHUB_TOKEN",
+		RemoteURL: "https://github.com/tta-lab/example.git",
+	}, "ls-remote", remoteOrigin)
+	if err == nil {
+		t.Fatal("expected missing token error")
+	}
+	if !strings.Contains(err.Error(), "missing token: set GITHUB_TOKEN") {
+		t.Fatalf("error = %v, want missing token message", err)
+	}
+}
+
+func TestResolveRepoContextRejectsRemoteMismatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepoWithRemote(t, home, "feature/x", "https://github.com/tta-lab/expected.git")
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://github.com/tta-lab/actual.git")
+
+	_, err := resolveRepoContextFor(repo)
+	if err == nil {
+		t.Fatal("expected remote mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match registered project remote") {
+		t.Fatalf("error = %v, want remote mismatch message", err)
+	}
+}
+
 func testGitRepoWithMissingRemoteFeature(t *testing.T) string {
 	t.Helper()
 
@@ -152,6 +181,10 @@ func testGitRepoWithRemote(t *testing.T) string {
 }
 
 func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
+	return testRegisteredHTTPRepoWithRemote(t, home, branch, "")
+}
+
+func testRegisteredHTTPRepoWithRemote(t *testing.T, home, branch, registeredRemote string) string {
 	t.Helper()
 
 	repo := filepath.Join(t.TempDir(), "repo")
@@ -167,6 +200,9 @@ func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
 		t.Fatalf("mkdir config: %v", err)
 	}
 	content := "[test]\npath = " + quoteTOMLString(repo) + "\n"
+	if registeredRemote != "" {
+		content += "remote = " + quoteTOMLString(registeredRemote) + "\n"
+	}
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
 	}
