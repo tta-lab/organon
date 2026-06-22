@@ -44,9 +44,15 @@ func TestPRHelpListsV1CommandsWithoutMerge(t *testing.T) {
 	for _, want := range []string{
 		"create",
 		"view",
+		"list",
+		"find",
+		"get",
 		"modify",
 		"comment",
 		"checks",
+		"status",
+		"failures",
+		"log",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("pr help missing %q:\n%s", want, stdout)
@@ -101,6 +107,66 @@ func TestGitStubsAcceptTtalReplacementShapes(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "not implemented yet") {
 			t.Fatalf("runOG(%v) error = %v, want not implemented", args, err)
+		}
+	}
+}
+
+func TestPRStubsAcceptTtalReplacementShapes(t *testing.T) {
+	tests := [][]string{
+		{"pr", "create", "feat: add forge CLI"},
+		{"pr", "view", "--json"},
+		{"pr", "list", "--json"},
+		{"pr", "find", "--state", "all"},
+		{"pr", "get", "38", "--json"},
+		{"pr", "modify", "--title", "new title", "--pr-id", "38"},
+		{"pr", "log", "--tail", "200"},
+		{"pr", "checks"},
+		{"pr", "status"},
+		{"pr", "failures", "--tail", "200"},
+		{"pr", "comment"},
+	}
+
+	for _, args := range tests {
+		_, err := runOG(t, args...)
+		if err == nil {
+			t.Fatalf("runOG(%v) expected not implemented error", args)
+		}
+		if !strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("runOG(%v) error = %v, want not implemented", args, err)
+		}
+	}
+}
+
+func TestDaemonHelpListsLifecycleCommands(t *testing.T) {
+	stdout, err := runOG(t, "daemon", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{
+		"run",
+		"install",
+		"uninstall",
+		"start",
+		"stop",
+		"restart",
+		"status",
+		"health",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("daemon help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestDaemonLifecycleStubsAreAvailable(t *testing.T) {
+	for _, subcmd := range []string{"run", "install", "uninstall", "start", "stop", "restart", "status", "health"} {
+		_, err := runOG(t, "daemon", subcmd)
+		if err == nil {
+			t.Fatalf("og daemon %s expected not implemented error", subcmd)
+		}
+		if !strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("og daemon %s error = %v, want not implemented", subcmd, err)
 		}
 	}
 }

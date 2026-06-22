@@ -41,11 +41,56 @@ func newPRCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
-	cmd.AddCommand(newStubCmd("create", "Create a pull request"))
-	cmd.AddCommand(newStubCmd("view", "View or find a pull request"))
-	cmd.AddCommand(newStubCmd("modify", "Modify a pull request"))
+	cmd.AddCommand(newPRCreateCmd())
+	cmd.AddCommand(newPRViewCmd("view"))
+	cmd.AddCommand(newPRViewCmd("list"))
+	cmd.AddCommand(newPRFindCmd())
+	cmd.AddCommand(newPRGetCmd())
+	cmd.AddCommand(newPRModifyCmd())
 	cmd.AddCommand(newStubCmd("comment", "Comment on a pull request"))
 	cmd.AddCommand(newStubCmd("checks", "Show pull request checks"))
+	cmd.AddCommand(newStubCmd("status", "Show pull request status"))
+	cmd.AddCommand(newPRFailuresCmd("failures"))
+	cmd.AddCommand(newPRLogCmd())
+	return cmd
+}
+
+func newPRCreateCmd() *cobra.Command {
+	return newStubCmdWithArgs("create <title>", "Create a pull request", cobra.MinimumNArgs(1))
+}
+
+func newPRViewCmd(use string) *cobra.Command {
+	cmd := newStubCmd(use, "View or find a pull request")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func newPRFindCmd() *cobra.Command {
+	cmd := newStubCmd("find", "Find a pull request for the current branch")
+	cmd.Flags().String("state", "open", "PR state to search: open, closed, or all")
+	return cmd
+}
+
+func newPRGetCmd() *cobra.Command {
+	cmd := newStubCmdWithArgs("get <index>", "Get a pull request by index", cobra.ExactArgs(1))
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func newPRModifyCmd() *cobra.Command {
+	cmd := newStubCmd("modify", "Modify a pull request")
+	cmd.Flags().String("title", "", "New PR title")
+	cmd.Flags().String("pr-id", "", "PR number override")
+	return cmd
+}
+
+func newPRLogCmd() *cobra.Command {
+	return newPRFailuresCmd("log")
+}
+
+func newPRFailuresCmd(use string) *cobra.Command {
+	cmd := newStubCmd(use, "Show CI failure logs for the current PR")
+	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
 	return cmd
 }
 
@@ -102,18 +147,30 @@ func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Inspect or run the og daemon",
+		Long:  helpDaemon,
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
-	cmd.AddCommand(newStubCmd("status", "Show daemon health"))
+	cmd.AddCommand(newStubCmd("run", "Run the daemon in the foreground"))
+	cmd.AddCommand(newStubCmd("install", "Install the daemon user service"))
+	cmd.AddCommand(newStubCmd("uninstall", "Remove the daemon user service"))
+	cmd.AddCommand(newStubCmd("start", "Start the daemon user service"))
+	cmd.AddCommand(newStubCmd("stop", "Stop the daemon user service"))
+	cmd.AddCommand(newStubCmd("restart", "Restart the daemon user service"))
+	cmd.AddCommand(newStubCmd("status", "Show daemon status"))
+	cmd.AddCommand(newStubCmd("health", "Show daemon health"))
 	return cmd
 }
 
 func newStubCmd(use, short string) *cobra.Command {
+	return newStubCmdWithArgs(use, short, cobra.NoArgs)
+}
+
+func newStubCmdWithArgs(use, short string, args cobra.PositionalArgs) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
 		Short: short,
-		Args:  cobra.NoArgs,
+		Args:  args,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("%s is not implemented yet", cmd.CommandPath())
 		},
