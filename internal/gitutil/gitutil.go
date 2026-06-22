@@ -1,0 +1,182 @@
+package gitutil
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/tta-lab/organon/internal/config"
+)
+
+const cmdTimeout = 10 * time.Second
+
+// DumpWorkerState captures git state for debugging.
+// Returns the path to the dump file.
+func DumpWorkerState(sessionName, workDir, workerName string) (string, error) {
+	dumpDir := filepath.Join(config.ResolveDataDir(), "dumps")
+	if err := os.MkdirAll(dumpDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create dump directory: %w", err)
+	}
+
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	dumpFile := filepath.Join(dumpDir, fmt.Sprintf("%s_%s.txt", workerName, timestamp))
+
+	var sections []string
+	sections = append(sections, fmt.Sprintf("Worker State Dump: %s", workerName))
+	sections = append(sections, fmt.Sprintf("Timestamp: %s", timestamp))
+	sections = append(sections, fmt.Sprintf("Session: %s", sessionName))
+	sections = append(sections, fmt.Sprintf("Work dir: %s", workDir))
+	sections = append(sections, "")
+
+	if out, err := runGit(workDir, "log", "--oneline", "-20"); err == nil {
+		sections = append(sections, "=== Recent commits ===", out)
+	}
+
+	if out, err := runGit(workDir, "status", "--short"); err == nil {
+		sections = append(sections, "=== Git status ===", out)
+	}
+
+	if out, err := runGit(workDir, "log", "--oneline", "main..HEAD"); err == nil && strings.TrimSpace(out) != "" {
+		sections = append(sections, "=== Commits not in main ===", out)
+	}
+
+	content := strings.Join(sections, "\n")
+	if err := os.WriteFile(dumpFile, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write dump file: %w", err)
+	}
+
+	return dumpFile, nil
+}
+
+// isPorcelainStatusChar returns true if the byte is a valid git porcelain status indicator.
+func isPorcelainStatusChar(b byte) bool {
+	return b == ' ' || b == 'M' || b == 'A' || b == 'D' || b == 'R' ||
+		b == 'C' || b == 'U' || b == '?' || b == '!'
+}
+
+// IsWorktreeClean checks whether the worktree has uncommitted changes.
+// Returns (true, nil) if clean, (false, nil) if dirty, or (false, err) if
+// the git command itself failed (e.g. missing directory, timeout).
+func IsWorktreeClean(workDir string) (bool, error) {
+	out, err := runGit(workDir, "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("git status failed in %s: %w", workDir, err)
+	}
+
+	// Filter to only actual porcelain status lines.
+	// Git may output warnings to stderr that get captured in combined output.
+	// Porcelain format is "XY filepath" where X and Y are status indicators.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		// Need at least 3 chars: X, Y, and space (e.g., " M file")
+		if len(line) < 3 {
+			continue
+		}
+		// Check if first two chars are valid porcelain status codes
+		if isPorcelainStatusChar(line[0]) && isPorcelainStatusChar(line[1]) {
+			// This is a real status line
+			// ? = untracked, ! = ignored - these don't count as "changes" for our purposes
+			if line[0] == '?' || line[0] == '!' {
+				continue
+			}
+			// Actual staged/modified changes
+			return false, nil
+		}
+		// Otherwise it's likely a warning/error message from git, ignore it
+	}
+
+	// No valid status lines found = clean (or no changes)
+	return true, nil
+}
+
+// RemoveWorktree removes a git worktree and its branch.
+// Uses os.RemoveAll + git worktree prune instead of git worktree remove
+// for faster cleanup without subprocess timeout risks.
+func RemoveWorktree(projectDir, workDir, branch string) error {
+	// Remove worktree directory directly (faster than git worktree remove)
+	if err := os.RemoveAll(workDir); err != nil {
+		return fmt.Errorf("failed to remove worktree directory %s: %w", workDir, err)
+	}
+
+	// Prune stale worktree metadata so git knows it's gone
+	if _, err := runGit(projectDir, "worktree", "prune"); err != nil {
+		return fmt.Errorf("failed to prune worktrees: %w", err)
+	}
+
+	// Delete the worker branch
+	if branch != "" {
+		if _, err := runGit(projectDir, "branch", "-D", branch); err != nil {
+			// Non-fatal: branch may already be deleted
+			fmt.Fprintf(os.Stderr, "warning: failed to delete branch %s: %v\n", branch, err)
+		}
+	}
+
+	return nil
+}
+
+// BranchName returns the current git branch for dir.
+// Returns "" if in detached HEAD state or on any error.
+func BranchName(dir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "branch", "--show-current")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// LinkedWorktreeCommonDir returns the shared .git directory if dir is a linked
+// git worktree. Returns "" if dir is the main repo or on any error.
+// Uses a single `git rev-parse --git-dir --git-common-dir` call to avoid
+// redundant subprocesses.
+func LinkedWorktreeCommonDir(dir string) string {
+	out, err := runGit(dir, "rev-parse", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	lines := strings.SplitN(strings.TrimSpace(out), "\n", 2)
+	if len(lines) < 2 {
+		return ""
+	}
+	gitDir := resolveGitPath(dir, lines[0])
+	commonDir := resolveGitPath(dir, lines[1])
+	if gitDir == "" || commonDir == "" || gitDir == commonDir {
+		return ""
+	}
+	return commonDir
+}
+
+// resolveGitPath cleans a git rev-parse output path, making it absolute relative to dir.
+func resolveGitPath(dir, raw string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return ""
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	return filepath.Clean(p)
+}
+
+func runGit(dir string, args ...string) (string, error) {
+	return runGitWithTimeout(cmdTimeout, dir, args...)
+}
+
+func runGitWithTimeout(timeout time.Duration, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	fullArgs := append([]string{"-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}

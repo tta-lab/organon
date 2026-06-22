@@ -22,6 +22,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/gitutil"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -34,6 +36,7 @@ const (
 	osDarwin        = "darwin"
 	osLinux         = "linux"
 	stateAll        = "all"
+	remoteOrigin    = "origin"
 )
 
 var (
@@ -506,25 +509,12 @@ func runGitWithCreds(ctxInfo *repoContext, args ...string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	cmd.Env = os.Environ()
-	if ctxInfo.Token != "" {
-		cmd.Env = append(cmd.Env, gitCredentialEnv(ctxInfo)...)
-	}
+	cmd.Env = append(cmd.Env, gitutil.GitCredEnv(ctxInfo.RemoteURL, ctxInfo.ProjectAlias)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-func gitCredentialEnv(ctx *repoContext) []string {
-	prefix := "https://" + ctx.Host + "/"
-	return []string{
-		"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=url.https://x-access-token:" + ctx.Token + "@" + ctx.Host + "/.insteadOf",
-		"GIT_CONFIG_VALUE_0=" + prefix,
-		"GIT_CONFIG_KEY_1=url.https://oauth2:" + ctx.Token + "@" + ctx.Host + "/.insteadOf",
-		"GIT_CONFIG_VALUE_1=" + prefix,
-	}
 }
 
 func defaultBranch(workDir string) string {
@@ -597,6 +587,37 @@ func localTagExists(workDir, tag string) bool {
 	return err == nil
 }
 
+func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
+	out, err := gitOutput(ctxInfo.WorkDir, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("refusing merged-branch cleanup: cannot verify worktree is clean: %w", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("refusing merged-branch cleanup: worktree has uncommitted changes")
+	}
+	if err := runGitWithCreds(ctxInfo, "fetch", "--prune", "origin"); err != nil {
+		return fmt.Errorf("refusing merged-branch cleanup: cannot refresh origin: %w", err)
+	}
+	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
+	if err := runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
+		return nil
+	}
+	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
+	ahead, err := gitOutput(ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
+	if err != nil {
+		return fmt.Errorf("refusing merged-branch cleanup: cannot check local commits: %w", err)
+	}
+	if strings.TrimSpace(ahead) != "0" {
+		return fmt.Errorf(
+			"refusing merged-branch cleanup: %s has %s local commit(s) not on origin/%s",
+			ctxInfo.Branch,
+			strings.TrimSpace(ahead),
+			ctxInfo.Branch,
+		)
+	}
+	return nil
+}
+
 func daemonGitPush(req daemonRequest) (daemonResponse, error) {
 	ctx, err := resolveRepoContextFor(req.WorkDir)
 	if err != nil {
@@ -605,7 +626,7 @@ func daemonGitPush(req daemonRequest) (daemonResponse, error) {
 	if ctx.Branch == branchMain || ctx.Branch == branchMaster {
 		return daemonResponse{}, fmt.Errorf("refusing to push protected branch %q", ctx.Branch)
 	}
-	gitArgs := []string{"push", "-u", "origin", ctx.Branch}
+	gitArgs := []string{"push", "-u", remoteOrigin, ctx.Branch}
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")
 	}
@@ -620,14 +641,38 @@ func daemonGitPull(req daemonRequest) (daemonResponse, error) {
 	if err != nil {
 		return daemonResponse{}, err
 	}
-	target := ctx.Branch
 	if ctx.Branch == ctx.DefaultBase {
-		target = ctx.DefaultBase
+		if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase); err != nil {
+			return daemonResponse{}, err
+		}
+		return daemonResponse{OK: true, Message: "Pulled " + ctx.DefaultBase}, nil
 	}
-	if err := runGitWithCreds(ctx, "pull", "--ff-only", "origin", target); err != nil {
+
+	pr, err := findPR(ctx, stateAll)
+	if err == nil && pr.Merged {
+		if err := ensureCleanBranchForCleanup(ctx); err != nil {
+			return daemonResponse{}, err
+		}
+		for _, args := range [][]string{
+			{"switch", ctx.DefaultBase},
+			{"pull", "--ff-only", remoteOrigin, ctx.DefaultBase},
+			{"branch", "-D", ctx.Branch},
+			{"push", remoteOrigin, "--delete", ctx.Branch},
+		} {
+			if err := runGitWithCreds(ctx, args...); err != nil {
+				return daemonResponse{}, err
+			}
+		}
+		return daemonResponse{
+			OK:      true,
+			Message: fmt.Sprintf("Pulled %s. Deleted %s locally and remotely", ctx.DefaultBase, ctx.Branch),
+		}, nil
+	}
+
+	if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
 		return daemonResponse{}, err
 	}
-	return daemonResponse{OK: true, Message: "Pulled " + target}, nil
+	return daemonResponse{OK: true, Message: "Pulled " + ctx.Branch}, nil
 }
 
 func daemonGitTag(req daemonRequest) (daemonResponse, error) {
@@ -656,7 +701,7 @@ func daemonGitTag(req daemonRequest) (daemonResponse, error) {
 			return daemonResponse{}, err
 		}
 	}
-	if err := runGitWithCreds(ctx, "push", "origin", "--", tag); err != nil {
+	if err := runGitWithCreds(ctx, "push", remoteOrigin, "--", tag); err != nil {
 		return daemonResponse{}, err
 	}
 	return daemonResponse{OK: true, Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}, nil
@@ -814,178 +859,112 @@ func daemonPolicyExplain(req daemonRequest) (daemonResponse, error) {
 }
 
 func createPR(ctx *repoContext, title, body string) (*pullRequest, error) {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
-	payload := map[string]string{"title": title, "body": body, "head": ctx.Branch, "base": ctx.DefaultBase}
-	var out map[string]any
-	if err := forgeJSON(ctx, http.MethodPost, prAPIBase(ctx), payload, &out); err != nil {
+	pr, err := provider.CreatePR(ctx.Owner, ctx.Repo, ctx.Branch, ctx.DefaultBase, title, body)
+	if err != nil {
 		return nil, err
 	}
-	return mapPR(out), nil
+	return fromProviderPR(pr), nil
 }
 
 func findPR(ctx *repoContext, state string) (*pullRequest, error) {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if state == "" {
 		state = "open"
 	}
-	query := url.Values{}
-	query.Set("state", state)
-	query.Set("head", prHead(ctx))
-	query.Set("base", ctx.DefaultBase)
-	endpoint := prAPIBase(ctx) + "?" + query.Encode()
-	var list []map[string]any
-	if err := forgeJSON(ctx, http.MethodGet, endpoint, nil, &list); err != nil {
+	pr, err := provider.FindPRByState(ctx.Owner, ctx.Repo, ctx.Branch, ctx.DefaultBase, state)
+	if err != nil {
 		return nil, err
 	}
-	if len(list) == 0 {
-		return nil, fmt.Errorf("no PR found for branch %s", ctx.Branch)
-	}
-	return mapPR(list[0]), nil
+	return fromProviderPR(pr), nil
 }
 
 func getPR(ctx *repoContext, index int64) (*pullRequest, error) {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
-	var out map[string]any
-	if err := forgeJSON(ctx, http.MethodGet, prAPIBase(ctx)+"/"+strconv.FormatInt(index, 10), nil, &out); err != nil {
+	pr, err := provider.GetPR(ctx.Owner, ctx.Repo, index)
+	if err != nil {
 		return nil, err
 	}
-	return mapPR(out), nil
+	return fromProviderPR(pr), nil
 }
 
 func updatePR(ctx *repoContext, index int64, title, body string) (*pullRequest, error) {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
-	payload := map[string]string{}
-	if title != "" {
-		payload["title"] = title
-	}
-	if body != "" {
-		payload["body"] = body
-	}
-	var out map[string]any
-	method := http.MethodPatch
-	if ctx.Provider == providerForgejo {
-		method = http.MethodPatch
-	}
-	if err := forgeJSON(ctx, method, prAPIBase(ctx)+"/"+strconv.FormatInt(index, 10), payload, &out); err != nil {
+	pr, err := provider.EditPR(ctx.Owner, ctx.Repo, index, title, body)
+	if err != nil {
 		return nil, err
 	}
-	return mapPR(out), nil
+	return fromProviderPR(pr), nil
 }
 
 func commentPR(ctx *repoContext, index int64, body string) error {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return err
 	}
-	endpoint := fmt.Sprintf("https://%s/api/v1/repos/%s/%s/issues/%d/comments", ctx.Host, ctx.Owner, ctx.Repo, index)
-	if ctx.Provider == providerGitHub {
-		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", ctx.Owner, ctx.Repo, index)
-	}
-	var out map[string]any
-	return forgeJSON(ctx, http.MethodPost, endpoint, map[string]string{"body": body}, &out)
+	_, err = provider.CreateComment(ctx.Owner, ctx.Repo, index, body)
+	return err
 }
 
 func getChecks(ctx *repoContext, pr *pullRequest) ([]string, error) {
-	if err := requireToken(ctx); err != nil {
+	provider, err := newProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
 	sha := pr.SHA
 	if sha == "" {
 		sha = "HEAD"
 	}
-	if ctx.Provider == providerGitHub {
-		var out map[string]any
-		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s/status", ctx.Owner, ctx.Repo, sha)
-		if err := forgeJSON(ctx, http.MethodGet, endpoint, nil, &out); err != nil {
-			return nil, err
-		}
-		var lines []string
-		lines = append(lines, fmt.Sprintf("combined: %v", out["state"]))
-		if statuses, ok := out["statuses"].([]any); ok {
-			for _, item := range statuses {
-				if m, ok := item.(map[string]any); ok {
-					lines = append(lines, fmt.Sprintf("%v: %v - %v", m["context"], m["state"], m["description"]))
-				}
-			}
-		}
-		return lines, nil
-	}
-	var statuses []map[string]any
-	endpoint := fmt.Sprintf("https://%s/api/v1/repos/%s/%s/statuses/%s", ctx.Host, ctx.Owner, ctx.Repo, sha)
-	if err := forgeJSON(ctx, http.MethodGet, endpoint, nil, &statuses); err != nil {
+	status, err := provider.GetCombinedStatus(ctx.Owner, ctx.Repo, sha)
+	if err != nil {
 		return nil, err
 	}
-	lines := make([]string, 0, len(statuses))
-	for _, status := range statuses {
-		lines = append(lines, fmt.Sprintf("%v: %v - %v", status["context"], status["state"], status["description"]))
+	lines := []string{"combined: " + status.State}
+	for _, s := range status.Statuses {
+		lines = append(lines, fmt.Sprintf("%s: %s - %s", s.Context, s.State, s.Description))
 	}
 	return lines, nil
 }
 
-func forgeJSON(ctxInfo *repoContext, method, endpoint string, payload any, out any) error {
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(data)
+func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
+	if err := requireToken(ctx); err != nil {
+		return nil, err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, endpoint, body)
-	if err != nil {
-		return err
+	if ctx.Provider == providerGitHub {
+		return gitprovider.NewGitHubProviderWithToken(ctx.Token)
 	}
-	req.Header.Set("Accept", "application/json")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if ctxInfo.Provider == providerGitHub {
-		req.Header.Set("Authorization", "Bearer "+ctxInfo.Token)
-		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	} else {
-		req.Header.Set("Authorization", "token "+ctxInfo.Token)
-	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s %s failed: %s: %s", method, endpoint, resp.Status, strings.TrimSpace(string(data)))
-	}
-	if out == nil {
+	return gitprovider.NewForgejoProviderWithToken(ctx.Host, ctx.Token)
+}
+
+func fromProviderPR(pr *gitprovider.PullRequest) *pullRequest {
+	if pr == nil {
 		return nil
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	return &pullRequest{
+		Index:   pr.Index,
+		Number:  pr.Index,
+		Title:   pr.Title,
+		State:   pr.State,
+		Merged:  pr.Merged,
+		URL:     pr.HTMLURL,
+		HTMLURL: pr.HTMLURL,
+		Head:    pr.Head,
+		Base:    pr.Base,
+		Body:    pr.Body,
+		SHA:     pr.HeadSHA,
 	}
-	return nil
-}
-
-func prAPIBase(ctx *repoContext) string {
-	if ctx.Provider == providerGitHub {
-		return fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls", ctx.Owner, ctx.Repo)
-	}
-	return fmt.Sprintf("https://%s/api/v1/repos/%s/%s/pulls", ctx.Host, ctx.Owner, ctx.Repo)
-}
-
-func prHead(ctx *repoContext) string {
-	if ctx.Provider == providerGitHub {
-		return ctx.Owner + ":" + ctx.Branch
-	}
-	return ctx.Branch
 }
 
 func requireToken(ctx *repoContext) error {
@@ -993,26 +972,6 @@ func requireToken(ctx *repoContext) error {
 		return fmt.Errorf("missing token: set %s", ctx.TokenEnv)
 	}
 	return nil
-}
-
-func mapPR(raw map[string]any) *pullRequest {
-	pr := &pullRequest{}
-	pr.Index = intField(raw, "number", "index")
-	pr.Number = pr.Index
-	pr.Title = stringField(raw, "title")
-	pr.State = stringField(raw, "state")
-	pr.Merged = boolField(raw, "merged")
-	pr.HTMLURL = stringField(raw, "html_url", "url")
-	pr.URL = pr.HTMLURL
-	pr.Body = stringField(raw, "body")
-	if head, ok := raw["head"].(map[string]any); ok {
-		pr.Head = stringField(head, "ref")
-		pr.SHA = stringField(head, "sha")
-	}
-	if base, ok := raw["base"].(map[string]any); ok {
-		pr.Base = stringField(base, "ref")
-	}
-	return pr
 }
 
 func printPR(cmd *cobra.Command, pr *pullRequest) error {
@@ -1037,32 +996,6 @@ func displayPRURL(pr *pullRequest) string {
 		return pr.HTMLURL
 	}
 	return pr.URL
-}
-
-func stringField(m map[string]any, names ...string) string {
-	for _, name := range names {
-		if v, ok := m[name].(string); ok {
-			return v
-		}
-	}
-	return ""
-}
-
-func intField(m map[string]any, names ...string) int64 {
-	for _, name := range names {
-		switch v := m[name].(type) {
-		case float64:
-			return int64(v)
-		case int64:
-			return v
-		}
-	}
-	return 0
-}
-
-func boolField(m map[string]any, name string) bool {
-	v, _ := m[name].(bool)
-	return v
 }
 
 func runDaemonRun(cmd *cobra.Command, args []string) error {

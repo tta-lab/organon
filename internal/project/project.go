@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/org"
 )
 
@@ -165,6 +166,20 @@ func Resolve(path, alias string) (*Entry, error) {
 	}
 
 	return nil, nil
+}
+
+// ResolveGitHubToken returns the GitHub token for a project alias.
+func ResolveGitHubToken(alias string) string {
+	if alias != "" {
+		e, err := Resolve(config.ProjectsPath(), alias)
+		if err == nil && e != nil && e.GitHubTokenEnv != "" {
+			return os.Getenv(e.GitHubTokenEnv)
+		}
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	return os.Getenv("GH_TOKEN")
 }
 
 // ListFiltered returns all projects, optionally filtered by org derived from path.

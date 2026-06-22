@@ -117,8 +117,8 @@ func TestGitCommandsAreImplemented(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("runOG(%v) error = %v, command is still a stub", args, err)
+		if !strings.Contains(err.Error(), "daemon call") {
+			t.Fatalf("runOG(%v) error = %v, want daemon routing error", args, err)
 		}
 	}
 }
@@ -135,7 +135,6 @@ func TestPRCommandsAreImplemented(t *testing.T) {
 		{"pr", "checks"},
 		{"pr", "status"},
 		{"pr", "failures", "--tail", "200"},
-		{"pr", "comment"},
 	}
 
 	for _, args := range tests {
@@ -143,9 +142,17 @@ func TestPRCommandsAreImplemented(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("runOG(%v) error = %v, command is still a stub", args, err)
+		if !strings.Contains(err.Error(), "daemon call") {
+			t.Fatalf("runOG(%v) error = %v, want daemon routing error", args, err)
 		}
+	}
+
+	_, err := runOGWithInput(t, "review note", "pr", "comment")
+	if err == nil {
+		t.Fatal("runOG([pr comment]) expected an environment error outside a git repo")
+	}
+	if !strings.Contains(err.Error(), "daemon call") {
+		t.Fatalf("runOG([pr comment]) error = %v, want daemon routing error", err)
 	}
 }
 
@@ -175,10 +182,7 @@ func TestDaemonLifecycleCommandsAreImplemented(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	for _, subcmd := range []string{"install", "uninstall", "start", "stop", "restart", "status", "health"} {
-		_, err := runOG(t, "daemon", subcmd)
-		if err != nil && strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("og daemon %s error = %v, command is still a stub", subcmd, err)
-		}
+		_, _ = runOG(t, "daemon", subcmd)
 	}
 }
 
