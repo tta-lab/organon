@@ -1,0 +1,7 @@
+# og
+
+Organon forge operations.
+
+`og` is the local entrypoint for typed repository and forge workflows. V1
+contains pull request, git, auth, and daemon operations. Merge is
+intentionally out of scope.
