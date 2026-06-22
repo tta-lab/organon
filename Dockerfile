@@ -5,8 +5,9 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/src ./cmd/src && \
     CGO_ENABLED=0 go build -o /out/web ./cmd/web && \
-    CGO_ENABLED=0 go build -o /out/skill ./cmd/skill
+    CGO_ENABLED=0 go build -o /out/skill ./cmd/skill && \
+    CGO_ENABLED=0 go build -o /out/og ./cmd/og
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /out/src /out/web /out/skill /usr/local/bin/
+COPY --from=builder /out/src /out/web /out/skill /out/og /usr/local/bin/
