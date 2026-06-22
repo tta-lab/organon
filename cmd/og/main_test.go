@@ -92,7 +92,7 @@ func TestGitHelpListsTtalReplacementCommands(t *testing.T) {
 	}
 }
 
-func TestGitStubsAcceptTtalReplacementShapes(t *testing.T) {
+func TestGitCommandsAreImplemented(t *testing.T) {
 	tests := [][]string{
 		{"git", "push", "--force"},
 		{"git", "pull"},
@@ -103,15 +103,15 @@ func TestGitStubsAcceptTtalReplacementShapes(t *testing.T) {
 	for _, args := range tests {
 		_, err := runOG(t, args...)
 		if err == nil {
-			t.Fatalf("runOG(%v) expected not implemented error", args)
+			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if !strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("runOG(%v) error = %v, want not implemented", args, err)
+		if strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("runOG(%v) error = %v, command is still a stub", args, err)
 		}
 	}
 }
 
-func TestPRStubsAcceptTtalReplacementShapes(t *testing.T) {
+func TestPRCommandsAreImplemented(t *testing.T) {
 	tests := [][]string{
 		{"pr", "create", "feat: add forge CLI"},
 		{"pr", "view", "--json"},
@@ -129,10 +129,10 @@ func TestPRStubsAcceptTtalReplacementShapes(t *testing.T) {
 	for _, args := range tests {
 		_, err := runOG(t, args...)
 		if err == nil {
-			t.Fatalf("runOG(%v) expected not implemented error", args)
+			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if !strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("runOG(%v) error = %v, want not implemented", args, err)
+		if strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("runOG(%v) error = %v, command is still a stub", args, err)
 		}
 	}
 }
@@ -159,14 +159,13 @@ func TestDaemonHelpListsLifecycleCommands(t *testing.T) {
 	}
 }
 
-func TestDaemonLifecycleStubsAreAvailable(t *testing.T) {
-	for _, subcmd := range []string{"run", "install", "uninstall", "start", "stop", "restart", "status", "health"} {
+func TestDaemonLifecycleCommandsAreImplemented(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	for _, subcmd := range []string{"install", "uninstall", "start", "stop", "restart", "status", "health"} {
 		_, err := runOG(t, "daemon", subcmd)
-		if err == nil {
-			t.Fatalf("og daemon %s expected not implemented error", subcmd)
-		}
-		if !strings.Contains(err.Error(), "not implemented yet") {
-			t.Fatalf("og daemon %s error = %v, want not implemented", subcmd, err)
+		if err != nil && strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("og daemon %s error = %v, command is still a stub", subcmd, err)
 		}
 	}
 }

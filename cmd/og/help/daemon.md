@@ -2,7 +2,7 @@
 
 Run and manage the `og` daemon.
 
-Planned V1 behavior:
+V1 behavior:
 
 - `og daemon run` runs the daemon in the foreground.
 - `og daemon install` installs the user service.
@@ -11,5 +11,5 @@ Planned V1 behavior:
 - `og daemon status` checks local process/socket state.
 - `og daemon health` checks daemon readiness.
 
-The macOS implementation should use launchd/launchctl, matching the current
-`ttal daemon` lifecycle. Linux should use `systemd --user`.
+The macOS implementation writes a launchd plist for launchctl. Linux writes a
+systemd user service.
