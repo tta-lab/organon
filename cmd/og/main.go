@@ -53,12 +53,26 @@ func newGitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "git",
 		Short: "Run guarded git operations",
+		Long:  helpGit,
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
-	cmd.AddCommand(newStubCmd("push", "Push the current branch"))
+	cmd.AddCommand(newGitPushCmd())
 	cmd.AddCommand(newStubCmd("pull", "Pull from the tracked branch"))
-	cmd.AddCommand(newStubCmd("tag", "Create or push tags"))
+	cmd.AddCommand(newGitTagCmd())
+	return cmd
+}
+
+func newGitPushCmd() *cobra.Command {
+	cmd := newStubCmd("push", "Push the current branch")
+	cmd.Flags().Bool("force", false, "Force push with --force-with-lease")
+	return cmd
+}
+
+func newGitTagCmd() *cobra.Command {
+	cmd := newStubCmd("tag [<version> | --bump <major|minor|patch>]", "Create and push a tag")
+	cmd.Args = cobra.MaximumNArgs(1)
+	cmd.Flags().String("bump", "", "Bump version: major, minor, or patch")
 	return cmd
 }
 

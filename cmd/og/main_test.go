@@ -66,3 +66,41 @@ func TestPRMergeIsNotAvailableInV1(t *testing.T) {
 		t.Fatalf("error = %v, want unknown command", err)
 	}
 }
+
+func TestGitHelpListsTtalReplacementCommands(t *testing.T) {
+	stdout, err := runOG(t, "git", "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, want := range []string{
+		"push",
+		"pull",
+		"tag",
+		"--force",
+		"--bump",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("git help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestGitStubsAcceptTtalReplacementShapes(t *testing.T) {
+	tests := [][]string{
+		{"git", "push", "--force"},
+		{"git", "pull"},
+		{"git", "tag", "v1.2.3"},
+		{"git", "tag", "--bump", "patch"},
+	}
+
+	for _, args := range tests {
+		_, err := runOG(t, args...)
+		if err == nil {
+			t.Fatalf("runOG(%v) expected not implemented error", args)
+		}
+		if !strings.Contains(err.Error(), "not implemented yet") {
+			t.Fatalf("runOG(%v) error = %v, want not implemented", args, err)
+		}
+	}
+}
