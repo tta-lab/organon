@@ -94,7 +94,9 @@ func newPRModifyCmd() *cobra.Command {
 }
 
 func newPRLogCmd() *cobra.Command {
-	return newPRFailuresCmd("log")
+	cmd := newRunnableCmd("log", "Show CI status and failure logs for the current PR", runPRLog)
+	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	return cmd
 }
 
 func newPRFailuresCmd(use string) *cobra.Command {

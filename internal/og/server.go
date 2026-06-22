@@ -25,6 +25,7 @@ func NewMux(service Service) *http.ServeMux {
 	mux.HandleFunc("/pr/modify", HTTPHandler(service.PRModify))
 	mux.HandleFunc("/pr/comment", HTTPHandler(service.PRComment))
 	mux.HandleFunc("/pr/checks", HTTPHandler(service.PRChecks))
+	mux.HandleFunc("/pr/log", HTTPHandler(service.PRLog))
 	mux.HandleFunc("/pr/failures", HTTPHandler(service.PRFailures))
 	mux.HandleFunc("/auth/status", HTTPHandler(service.AuthStatus))
 	return mux

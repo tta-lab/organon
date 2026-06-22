@@ -107,6 +107,11 @@ func runPRChecks(cmd *cobra.Command, args []string) error {
 	return runLinesDaemon(cmd, "/pr/checks", og.Request{State: stateAll})
 }
 
+func runPRLog(cmd *cobra.Command, args []string) error {
+	tail, _ := cmd.Flags().GetInt("tail")
+	return runLinesDaemon(cmd, "/pr/log", og.Request{State: stateAll, Tail: tail})
+}
+
 func runPRFailures(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	return runLinesDaemon(cmd, "/pr/failures", og.Request{State: stateAll, Tail: tail})

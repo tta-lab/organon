@@ -297,6 +297,35 @@ func TestPRViewJSONPrintsCISummary(t *testing.T) {
 	}
 }
 
+func TestPRLogRoutesToLogEndpoint(t *testing.T) {
+	var got og.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/pr/log" {
+			t.Fatalf("path = %s, want /pr/log", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(og.Response{
+			OK:    true,
+			Lines: []string{"CI Status for abc12345: failed", "Failure Details:"},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("OG_DAEMON_URL", server.URL)
+
+	stdout, err := runOG(t, "pr", "log", "--tail", "12")
+	if err != nil {
+		t.Fatalf("runOG: %v", err)
+	}
+	if got.Tail != 12 {
+		t.Fatalf("tail = %d, want 12", got.Tail)
+	}
+	if !strings.Contains(stdout, "CI Status") || !strings.Contains(stdout, "Failure Details:") {
+		t.Fatalf("stdout = %q, want status and details", stdout)
+	}
+}
+
 func TestDaemonRejectsUnregisteredProject(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

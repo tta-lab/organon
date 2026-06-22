@@ -130,6 +130,14 @@ func getCIStatus(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, error) {
 }
 
 func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, error) {
+	failures, err := getCIFailureDetails(ctx, pr, tailLines)
+	if err != nil {
+		return nil, err
+	}
+	return formatCIFailureDetails(failures), nil
+}
+
+func getCIFailureDetails(ctx *repoContext, pr *PullRequest, tailLines int) ([]*gitprovider.JobFailure, error) {
 	provider, err := newProvider(ctx)
 	if err != nil {
 		return nil, err
@@ -138,10 +146,10 @@ func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, 
 	if sha == "" {
 		sha = headRefName
 	}
-	failures, err := provider.GetCIFailureDetails(ctx.Owner, ctx.Repo, sha, tailLines)
-	if err != nil {
-		return nil, err
-	}
+	return provider.GetCIFailureDetails(ctx.Owner, ctx.Repo, sha, tailLines)
+}
+
+func formatCIFailureDetails(failures []*gitprovider.JobFailure) []string {
 	lines := make([]string, 0, len(failures)*4)
 	for _, failure := range failures {
 		title := failure.JobName
@@ -156,7 +164,7 @@ func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, 
 			lines = append(lines, failure.LogTail)
 		}
 	}
-	return lines, nil
+	return lines
 }
 
 var newProviderFunc = newProviderImpl
