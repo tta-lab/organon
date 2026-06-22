@@ -28,17 +28,35 @@ type Response struct {
 
 // PullRequest is the stable PR shape returned to the CLI.
 type PullRequest struct {
-	Index   int64  `json:"index"`
-	Number  int64  `json:"number,omitempty"`
-	Title   string `json:"title"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
-	URL     string `json:"url"`
-	HTMLURL string `json:"html_url,omitempty"`
-	Head    string `json:"head"`
-	Base    string `json:"base"`
-	Body    string `json:"body"`
-	SHA     string `json:"head_sha,omitempty"`
+	Index        int64             `json:"index"`
+	Number       int64             `json:"number,omitempty"`
+	Title        string            `json:"title"`
+	State        string            `json:"state"`
+	Merged       bool              `json:"merged"`
+	URL          string            `json:"url"`
+	HTMLURL      string            `json:"html_url,omitempty"`
+	Head         string            `json:"head"`
+	Base         string            `json:"base"`
+	Body         string            `json:"body"`
+	SHA          string            `json:"head_sha,omitempty"`
+	CI           *CIStatusResponse `json:"ci,omitempty"`
+	CIFetchError string            `json:"ci_fetch_error,omitempty"`
+}
+
+// CIStatusResponse is the stable CI summary shape returned with PR JSON.
+type CIStatusResponse struct {
+	OK       bool       `json:"ok"`
+	Error    string     `json:"error,omitempty"`
+	State    string     `json:"state,omitempty"`
+	Statuses []CIStatus `json:"statuses,omitempty"`
+}
+
+// CIStatus is a single CI check status.
+type CIStatus struct {
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Description string `json:"description"`
+	TargetURL   string `json:"target_url"`
 }
 
 func success(resp Response) Response {

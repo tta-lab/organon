@@ -32,6 +32,7 @@ func (s Service) PRView(req Request) (Response, error) {
 	if err == nil {
 		pr = full
 	}
+	attachCIStatus(ctx, pr)
 	return success(Response{PR: pr}), nil
 }
 
@@ -111,6 +112,18 @@ func (s Service) PRChecks(req Request) (Response, error) {
 		lines = []string{"No checks found."}
 	}
 	return success(Response{Lines: lines}), nil
+}
+
+func attachCIStatus(ctx *repoContext, pr *PullRequest) {
+	if pr == nil || pr.SHA == "" {
+		return
+	}
+	ci, err := getCIStatus(ctx, pr)
+	if err != nil {
+		pr.CIFetchError = err.Error()
+		return
+	}
+	pr.CI = ci
 }
 
 func (s Service) PRFailures(req Request) (Response, error) {

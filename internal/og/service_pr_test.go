@@ -220,6 +220,65 @@ func TestPRFailuresFetchesFailureDetails(t *testing.T) {
 	}
 }
 
+func TestPRViewIncludesCISummary(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index:   9,
+					Head:    "feature/x",
+					Base:    branchMain,
+					State:   stateAll,
+					HeadSHA: "abc123",
+				}, nil
+			},
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index:   index,
+					Title:   "title",
+					Head:    "feature/x",
+					Base:    branchMain,
+					State:   "open",
+					HeadSHA: "abc123",
+				}, nil
+			},
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				if ref != "abc123" {
+					t.Fatalf("ref = %q, want abc123", ref)
+				}
+				return &gitprovider.CombinedStatus{
+					State: gitprovider.StateSuccess,
+					Statuses: []*gitprovider.CommitStatus{{
+						Context:     "check",
+						State:       gitprovider.StateSuccess,
+						Description: "passed",
+						TargetURL:   "https://ci/job/1",
+					}},
+				}, nil
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	resp, err := (Service{}).PRView(Request{WorkDir: repo})
+	if err != nil {
+		t.Fatalf("PRView: %v", err)
+	}
+	if resp.PR == nil || resp.PR.CI == nil {
+		t.Fatalf("PR CI = nil, response = %+v", resp.PR)
+	}
+	if resp.PR.CI.State != gitprovider.StateSuccess {
+		t.Fatalf("CI state = %q, want success", resp.PR.CI.State)
+	}
+	if len(resp.PR.CI.Statuses) != 1 || resp.PR.CI.Statuses[0].Context != "check" {
+		t.Fatalf("CI statuses = %+v, want check", resp.PR.CI.Statuses)
+	}
+}
+
 func joinArgs(args []string) string {
 	out := ""
 	for i, arg := range args {
@@ -241,6 +300,8 @@ func stubNewProvider(t *testing.T, fn func(*repoContext) (gitprovider.Provider, 
 type fakeProvider struct {
 	createPR            func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error)
 	findPRByState       func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
+	getPR               func(owner, repo string, index int64) (*gitprovider.PullRequest, error)
+	getCombinedStatus   func(owner, repo, ref string) (*gitprovider.CombinedStatus, error)
 	getCIFailureDetails func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error)
 }
 
@@ -263,6 +324,9 @@ func (p fakeProvider) EditPR(owner, repo string, index int64, title, body string
 }
 
 func (p fakeProvider) GetPR(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+	if p.getPR != nil {
+		return p.getPR(owner, repo, index)
+	}
 	panic("not implemented")
 }
 
@@ -279,6 +343,9 @@ func (p fakeProvider) ListComments(owner, repo string, index int64) ([]*gitprovi
 }
 
 func (p fakeProvider) GetCombinedStatus(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+	if p.getCombinedStatus != nil {
+		return p.getCombinedStatus(owner, repo, ref)
+	}
 	panic("not implemented")
 }
 

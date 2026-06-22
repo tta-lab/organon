@@ -252,6 +252,51 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 	}
 }
 
+func TestPRViewJSONPrintsCISummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/pr/view" {
+			t.Fatalf("path = %s, want /pr/view", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(og.Response{
+			OK: true,
+			PR: &og.PullRequest{
+				Index: 9,
+				Title: "title",
+				State: "open",
+				Head:  "feature/x",
+				Base:  "main",
+				CI: &og.CIStatusResponse{
+					OK:    true,
+					State: "success",
+					Statuses: []og.CIStatus{{
+						Context:     "check",
+						State:       "success",
+						Description: "passed",
+						TargetURL:   "https://ci/job/1",
+					}},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("OG_DAEMON_URL", server.URL)
+
+	stdout, err := runOG(t, "pr", "view", "--json")
+	if err != nil {
+		t.Fatalf("runOG: %v", err)
+	}
+	var got og.PullRequest
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode stdout: %v\n%s", err, stdout)
+	}
+	if got.CI == nil || got.CI.State != "success" {
+		t.Fatalf("CI = %+v, want success summary", got.CI)
+	}
+	if len(got.CI.Statuses) != 1 || got.CI.Statuses[0].Context != "check" {
+		t.Fatalf("statuses = %+v, want check", got.CI.Statuses)
+	}
+}
+
 func TestDaemonRejectsUnregisteredProject(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

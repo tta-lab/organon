@@ -93,6 +93,18 @@ func commentPR(ctx *repoContext, index int64, body string) error {
 }
 
 func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
+	status, err := getCIStatus(ctx, pr)
+	if err != nil {
+		return nil, err
+	}
+	lines := []string{"combined: " + status.State}
+	for _, s := range status.Statuses {
+		lines = append(lines, fmt.Sprintf("%s: %s - %s", s.Context, s.State, s.Description))
+	}
+	return lines, nil
+}
+
+func getCIStatus(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, error) {
 	provider, err := newProvider(ctx)
 	if err != nil {
 		return nil, err
@@ -105,11 +117,16 @@ func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines := []string{"combined: " + status.State}
+	statuses := make([]CIStatus, 0, len(status.Statuses))
 	for _, s := range status.Statuses {
-		lines = append(lines, fmt.Sprintf("%s: %s - %s", s.Context, s.State, s.Description))
+		statuses = append(statuses, CIStatus{
+			Context:     s.Context,
+			State:       s.State,
+			Description: s.Description,
+			TargetURL:   s.TargetURL,
+		})
 	}
-	return lines, nil
+	return &CIStatusResponse{OK: true, State: status.State, Statuses: statuses}, nil
 }
 
 func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, error) {
