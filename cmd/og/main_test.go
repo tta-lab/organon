@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tta-lab/organon/internal/og"
 )
 
 func runOG(t *testing.T, args ...string) (stdout string, err error) {
@@ -188,7 +190,7 @@ func TestDaemonLifecycleCommandsAreImplemented(t *testing.T) {
 
 func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "worker-token-must-not-be-read")
-	var got daemonRequest
+	var got og.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/git/push" {
 			t.Fatalf("path = %s, want /git/push", r.URL.Path)
@@ -196,7 +198,7 @@ func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode(daemonResponse{OK: true, Message: "pushed from daemon"})
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "pushed from daemon"})
 	}))
 	defer server.Close()
 	t.Setenv("OG_DAEMON_URL", server.URL)
@@ -220,7 +222,7 @@ func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 }
 
 func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
-	var got daemonRequest
+	var got og.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/pr/create" {
 			t.Fatalf("path = %s, want /pr/create", r.URL.Path)
@@ -228,7 +230,7 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode(daemonResponse{OK: true, Message: "PR #12 created"})
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "PR #12 created"})
 	}))
 	defer server.Close()
 	t.Setenv("OG_DAEMON_URL", server.URL)
@@ -254,7 +256,7 @@ func TestDaemonRejectsUnregisteredProject(t *testing.T) {
 	repo := t.TempDir()
 	initGitRepo(t, repo)
 
-	_, err := daemonGitPush(daemonRequest{WorkDir: repo})
+	_, err := og.Service{}.GitPush(og.Request{WorkDir: repo})
 	if err == nil {
 		t.Fatal("expected unregistered project to be rejected")
 	}
@@ -275,12 +277,12 @@ func TestDaemonCallUsesUnixSocketByDefault(t *testing.T) {
 		if r.URL.Path != "/git/pull" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(daemonResponse{OK: true, Message: "unix ok"})
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "unix ok"})
 	})}
 	defer func() { _ = server.Close() }()
 	go func() { _ = server.Serve(listener) }()
 
-	resp, err := daemonCall("/git/pull", daemonRequest{WorkDir: "/tmp/repo"})
+	resp, err := daemonCall("/git/pull", og.Request{WorkDir: "/tmp/repo"})
 	if err != nil {
 		t.Fatalf("daemonCall: %v", err)
 	}
