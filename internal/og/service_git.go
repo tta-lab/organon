@@ -7,9 +7,6 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	if ctx.Branch == branchMain || ctx.Branch == branchMaster {
-		return Response{}, fmt.Errorf("refusing to push protected branch %q", ctx.Branch)
-	}
 	gitArgs := []string{"push", "-u", remoteOrigin, ctx.Branch}
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")

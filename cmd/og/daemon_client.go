@@ -23,19 +23,6 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runPolicyExplain(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
-	}
-	resp, err := daemonCall("/policy/explain", og.Request{WorkDir: workDir})
-	if err != nil {
-		return err
-	}
-	printDaemonResponse(cmd, resp)
-	return nil
-}
-
 func runPRDaemonWithOutput(cmd *cobra.Command, path string, req og.Request) error {
 	workDir, err := os.Getwd()
 	if err != nil {

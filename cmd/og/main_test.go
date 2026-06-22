@@ -40,12 +40,14 @@ func TestRootHelpListsV1CommandGroups(t *testing.T) {
 		"pr",
 		"git",
 		"auth",
-		"policy",
 		"daemon",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, "policy") {
+		t.Fatalf("root help should not list policy in V1:\n%s", stdout)
 	}
 }
 

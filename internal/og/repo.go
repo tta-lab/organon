@@ -2,6 +2,7 @@ package og
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -189,6 +190,13 @@ func computeBumpedTag(workDir, level string) (string, error) {
 			return "", fmt.Errorf("invalid --bump value %q", level)
 		}
 	}
+	shouldBump, err := shouldBumpLatestTag(workDir, latest)
+	if err != nil {
+		return "", err
+	}
+	if !shouldBump {
+		return latest, nil
+	}
 	m := semverTagBaseRe.FindStringSubmatch(latest)
 	if m == nil {
 		return "", fmt.Errorf("latest tag %q is not a plain semver tag", latest)
@@ -211,6 +219,28 @@ func computeBumpedTag(workDir, level string) (string, error) {
 		return "", fmt.Errorf("invalid --bump value %q", level)
 	}
 	return fmt.Sprintf("v%d.%d.%d%s", maj, min, pat, suffix), nil
+}
+
+func shouldBumpLatestTag(workDir, tag string) (bool, error) {
+	if err := runGit(workDir, "remote", "get-url", remoteOrigin); err != nil {
+		return true, nil
+	}
+	ref := "refs/tags/" + tag
+	if err := runGit(workDir, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref); err != nil {
+		if exitCode(err) == 2 {
+			return false, nil
+		}
+		return false, fmt.Errorf("check remote tag %q: %w", tag, err)
+	}
+	return true, nil
+}
+
+func exitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func localTagExists(workDir, tag string) bool {

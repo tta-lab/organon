@@ -27,7 +27,6 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newPRCmd())
 	cmd.AddCommand(newGitCmd())
 	cmd.AddCommand(newAuthCmd())
-	cmd.AddCommand(newPolicyCmd())
 	cmd.AddCommand(newDaemonCmd())
 
 	return cmd
@@ -143,17 +142,6 @@ func newAuthCmd() *cobra.Command {
 		RunE:  showHelp,
 	}
 	cmd.AddCommand(newRunnableCmd(cmdStatus, "Show authentication status", runAuthStatus))
-	return cmd
-}
-
-func newPolicyCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "policy",
-		Short: "Explain repository policy decisions",
-		Args:  cobra.NoArgs,
-		RunE:  showHelp,
-	}
-	cmd.AddCommand(newRunnableCmd("explain", "Explain policy for the current repository", runPolicyExplain))
 	return cmd
 }
 

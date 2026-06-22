@@ -27,7 +27,6 @@ func NewMux(service Service) *http.ServeMux {
 	mux.HandleFunc("/pr/checks", HTTPHandler(service.PRChecks))
 	mux.HandleFunc("/pr/failures", HTTPHandler(service.PRFailures))
 	mux.HandleFunc("/auth/status", HTTPHandler(service.AuthStatus))
-	mux.HandleFunc("/policy/explain", HTTPHandler(service.PolicyExplain))
 	return mux
 }
 
