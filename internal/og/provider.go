@@ -36,19 +36,9 @@ func findPR(ctx *repoContext, state string) (*PullRequest, error) {
 				return nil, fmt.Errorf("get current HEAD SHA: empty result")
 			}
 			pr, err := finder.FindPRByCommit(ctx.Owner, ctx.Repo, sha)
-			if err != nil {
-				return nil, err
+			if err == nil && pr != nil && pr.Head == ctx.Branch && prMatches(pr, ctx.DefaultBase, state) {
+				return fromProviderPR(pr), nil
 			}
-			if pr == nil {
-				return nil, fmt.Errorf("no PR found for commit %s", sha)
-			}
-			if pr.Head != ctx.Branch {
-				return nil, fmt.Errorf("PR for commit %s has head %s, want %s", sha, pr.Head, ctx.Branch)
-			}
-			if !prMatches(pr, ctx.DefaultBase, state) {
-				return nil, fmt.Errorf("PR for commit %s does not match base %s and state %s", sha, ctx.DefaultBase, state)
-			}
-			return fromProviderPR(pr), nil
 		}
 	}
 	pr, err := provider.FindPRByState(ctx.Owner, ctx.Repo, ctx.Branch, ctx.DefaultBase, state)

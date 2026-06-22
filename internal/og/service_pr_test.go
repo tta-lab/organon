@@ -1,6 +1,7 @@
 package og
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestFindPRUsesCommitLookupForGitHub(t *testing.T) {
 	}
 }
 
-func TestFindPRRejectsGitHubCommitLookupMismatch(t *testing.T) {
+func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMisses(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
@@ -96,8 +97,49 @@ func TestFindPRRejectsGitHubCommitLookupMismatch(t *testing.T) {
 		return fakeCommitProvider{
 			fakeProvider: fakeProvider{
 				findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-					t.Fatal("FindPRByState should not be called when GitHub commit lookup returns mismatched PR")
-					return nil, nil
+					return &gitprovider.PullRequest{
+						Index: 22,
+						Head:  "feature/x",
+						Base:  branchMain,
+						State: stateAll,
+					}, nil
+				},
+			},
+			findPRByCommit: func(owner, repo, sha string) (*gitprovider.PullRequest, error) {
+				return nil, fmt.Errorf("no PR found for commit %s", sha)
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	ctx, err := resolveRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRepoContextFor: %v", err)
+	}
+	pr, err := findPR(ctx, stateAll)
+	if err != nil {
+		t.Fatalf("findPR: %v", err)
+	}
+	if pr.Index != 22 {
+		t.Fatalf("PR index = %d, want branch fallback PR #22", pr.Index)
+	}
+}
+
+func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMismatches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeCommitProvider{
+			fakeProvider: fakeProvider{
+				findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+					return &gitprovider.PullRequest{
+						Index: 23,
+						Head:  "feature/x",
+						Base:  branchMain,
+						State: stateAll,
+					}, nil
 				},
 			},
 			findPRByCommit: func(owner, repo, sha string) (*gitprovider.PullRequest, error) {
@@ -116,9 +158,12 @@ func TestFindPRRejectsGitHubCommitLookupMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRepoContextFor: %v", err)
 	}
-	_, err = findPR(ctx, stateAll)
-	if err == nil {
-		t.Fatal("findPR should reject commit PR with mismatched head")
+	pr, err := findPR(ctx, stateAll)
+	if err != nil {
+		t.Fatalf("findPR: %v", err)
+	}
+	if pr.Index != 23 {
+		t.Fatalf("PR index = %d, want branch fallback PR #23", pr.Index)
 	}
 }
 
