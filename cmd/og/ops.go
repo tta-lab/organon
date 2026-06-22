@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,6 +33,7 @@ const (
 	branchMaster    = "master"
 	osDarwin        = "darwin"
 	osLinux         = "linux"
+	stateAll        = "all"
 )
 
 var (
@@ -68,146 +70,121 @@ type pullRequest struct {
 	SHA     string `json:"head_sha,omitempty"`
 }
 
+type daemonRequest struct {
+	WorkDir string `json:"work_dir"`
+	Force   bool   `json:"force,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+	Bump    string `json:"bump,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Body    string `json:"body,omitempty"`
+	Index   int64  `json:"index,omitempty"`
+	State   string `json:"state,omitempty"`
+	Tail    int    `json:"tail,omitempty"`
+
+	// These fields intentionally remain unused by the CLI; tests assert they are not populated there.
+	Token    string `json:"token,omitempty"`
+	TokenEnv string `json:"token_env,omitempty"`
+}
+
+type daemonResponse struct {
+	OK      bool         `json:"ok"`
+	Error   string       `json:"error,omitempty"`
+	Message string       `json:"message,omitempty"`
+	PR      *pullRequest `json:"pr,omitempty"`
+	Lines   []string     `json:"lines,omitempty"`
+}
+
 func runGitPush(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	force, _ := cmd.Flags().GetBool("force")
+	resp, err := daemonCall("/git/push", daemonRequest{WorkDir: workDir, Force: force})
 	if err != nil {
 		return err
 	}
-	if ctx.Branch == branchMain || ctx.Branch == branchMaster {
-		return fmt.Errorf("refusing to push protected branch %q", ctx.Branch)
-	}
-	force, _ := cmd.Flags().GetBool("force")
-	gitArgs := []string{"push", "-u", "origin", ctx.Branch}
-	if force {
-		gitArgs = append(gitArgs, "--force-with-lease")
-	}
-	if err := runGitWithCreds(ctx, gitArgs...); err != nil {
-		return err
-	}
-	cmd.Printf("Pushed %s -> origin/%s\n", ctx.Branch, ctx.Branch)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runGitPull(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	resp, err := daemonCall("/git/pull", daemonRequest{WorkDir: workDir})
 	if err != nil {
 		return err
 	}
-	target := ctx.Branch
-	if ctx.Branch == ctx.DefaultBase {
-		target = ctx.DefaultBase
-	}
-	if err := runGitWithCreds(ctx, "pull", "--ff-only", "origin", target); err != nil {
-		return err
-	}
-	cmd.Printf("Pulled %s\n", target)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runGitTag(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("get working directory: %w", err)
 	}
 	bump, _ := cmd.Flags().GetString("bump")
 	if bump != "" && len(args) > 0 {
 		return fmt.Errorf("--bump and a positional version are mutually exclusive")
 	}
-	var tag string
-	if bump != "" {
-		tag, err = computeBumpedTag(ctx.WorkDir, bump)
-		if err != nil {
-			return err
-		}
-	} else {
-		if len(args) == 0 {
-			return fmt.Errorf("either a version argument or --bump is required")
-		}
+	tag := ""
+	if len(args) > 0 {
 		tag = args[0]
-		if !semverTagRe.MatchString(tag) {
-			return fmt.Errorf("invalid semver tag %q", tag)
-		}
 	}
-	if !localTagExists(ctx.WorkDir, tag) {
-		if err := runGit(ctx.WorkDir, "tag", "--", tag); err != nil {
-			return err
-		}
-	}
-	if err := runGitWithCreds(ctx, "push", "origin", "--", tag); err != nil {
+	resp, err := daemonCall("/git/tag", daemonRequest{WorkDir: workDir, Tag: tag, Bump: bump})
+	if err != nil {
 		return err
 	}
-	cmd.Printf("Tagged %s -> pushed to origin\n", tag)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRCreate(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("get working directory: %w", err)
 	}
 	body, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("read PR body: %w", err)
 	}
 	title := strings.Join(args, " ")
-	pr, err := createPR(ctx, title, strings.TrimRight(string(body), "\n"))
+	resp, err := daemonCall("/pr/create", daemonRequest{
+		WorkDir: workDir,
+		Title:   title,
+		Body:    strings.TrimRight(string(body), "\n"),
+	})
 	if err != nil {
 		return err
 	}
-	cmd.Printf("PR #%d created: %s\n", pr.Index, displayPRURL(pr))
-	cmd.Printf("  %s -> %s\n", ctx.Branch, ctx.DefaultBase)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRView(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
-	if err != nil {
-		return err
-	}
-	pr, err := findPR(ctx, "all")
-	if err != nil {
-		return err
-	}
-	full, err := getPR(ctx, pr.Index)
-	if err == nil {
-		pr = full
-	}
-	return printPR(cmd, pr)
+	return runPRDaemonWithOutput(cmd, "/pr/view", daemonRequest{State: stateAll})
 }
 
 func runPRFind(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
-	if err != nil {
-		return err
-	}
 	state, _ := cmd.Flags().GetString("state")
-	pr, err := findPR(ctx, state)
-	if err != nil {
-		return err
-	}
-	return printPR(cmd, pr)
+	return runPRDaemonWithOutput(cmd, "/pr/find", daemonRequest{State: state})
 }
 
 func runPRGet(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
-	if err != nil {
-		return err
-	}
 	index, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid PR index %q: %w", args[0], err)
 	}
-	pr, err := getPR(ctx, index)
-	if err != nil {
-		return err
-	}
-	return printPR(cmd, pr)
+	return runPRDaemonWithOutput(cmd, "/pr/get", daemonRequest{Index: index})
 }
 
 func runPRModify(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("get working directory: %w", err)
 	}
 	title, _ := cmd.Flags().GetString("title")
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
@@ -225,25 +202,19 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid --pr-id %q: %w", prID, err)
 		}
-	} else {
-		pr, err := findPR(ctx, "all")
-		if err != nil {
-			return err
-		}
-		index = pr.Index
 	}
-	pr, err := updatePR(ctx, index, title, body)
+	resp, err := daemonCall("/pr/modify", daemonRequest{WorkDir: workDir, Index: index, Title: title, Body: body})
 	if err != nil {
 		return err
 	}
-	cmd.Printf("PR #%d updated: %s\n", pr.Index, displayPRURL(pr))
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRComment(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("get working directory: %w", err)
 	}
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
@@ -253,110 +224,172 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	if body == "" {
 		return fmt.Errorf("comment body is required on stdin")
 	}
-	pr, err := findPR(ctx, "all")
+	resp, err := daemonCall("/pr/comment", daemonRequest{WorkDir: workDir, Body: body})
 	if err != nil {
 		return err
 	}
-	if err := commentPR(ctx, pr.Index, body); err != nil {
-		return err
-	}
-	cmd.Printf("Commented on PR #%d\n", pr.Index)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRChecks(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
-	if err != nil {
-		return err
-	}
-	pr, err := findPR(ctx, "all")
-	if err != nil {
-		return err
-	}
-	statuses, err := getChecks(ctx, pr)
-	if err != nil {
-		return err
-	}
-	if len(statuses) == 0 {
-		cmd.Println("No checks found.")
-		return nil
-	}
-	for _, s := range statuses {
-		cmd.Println(s)
-	}
-	return nil
+	return runLinesDaemon(cmd, "/pr/checks", daemonRequest{State: stateAll})
 }
 
 func runPRFailures(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
-	if err != nil {
-		return err
-	}
-	pr, err := findPR(ctx, "all")
-	if err != nil {
-		return err
-	}
-	statuses, err := getChecks(ctx, pr)
-	if err != nil {
-		return err
-	}
-	found := false
-	for _, s := range statuses {
-		lower := strings.ToLower(s)
-		if strings.Contains(lower, "failure") || strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
-			cmd.Println(s)
-			found = true
-		}
-	}
-	if !found {
-		cmd.Println("No failing checks found.")
-	}
-	return nil
+	tail, _ := cmd.Flags().GetInt("tail")
+	return runLinesDaemon(cmd, "/pr/failures", daemonRequest{State: stateAll, Tail: tail})
 }
 
 func runAuthStatus(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	resp, err := daemonCall("/auth/status", daemonRequest{WorkDir: workDir})
 	if err != nil {
 		return err
 	}
-	cmd.Printf("provider: %s\n", ctx.Provider)
-	cmd.Printf("host: %s\n", ctx.Host)
-	cmd.Printf("repo: %s/%s\n", ctx.Owner, ctx.Repo)
-	cmd.Printf("project: %s\n", ctx.ProjectAlias)
-	if ctx.TokenEnv == "" {
-		cmd.Println("token_env: none")
-		return nil
-	}
-	if ctx.Token == "" {
-		cmd.Printf("token_env: %s (unset)\n", ctx.TokenEnv)
-		return nil
-	}
-	cmd.Printf("token_env: %s (set)\n", ctx.TokenEnv)
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPolicyExplain(cmd *cobra.Command, args []string) error {
-	ctx, err := resolveRepoContext()
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	resp, err := daemonCall("/policy/explain", daemonRequest{WorkDir: workDir})
 	if err != nil {
 		return err
 	}
-	cmd.Printf("repo: %s/%s\n", ctx.Owner, ctx.Repo)
-	cmd.Printf("workdir: %s\n", ctx.WorkDir)
-	cmd.Printf("registered_project: %t\n", ctx.ProjectAlias != "")
-	cmd.Printf("protected_branch: %t\n", ctx.Branch == branchMain || ctx.Branch == branchMaster)
-	cmd.Println("arbitrary_git_args: false")
-	cmd.Println("arbitrary_api_paths: false")
+	printDaemonResponse(cmd, resp)
 	return nil
 }
 
-func resolveRepoContext() (*repoContext, error) {
-	wd, err := os.Getwd()
+func runPRDaemonWithOutput(cmd *cobra.Command, path string, req daemonRequest) error {
+	workDir, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("get working directory: %w", err)
+		return fmt.Errorf("get working directory: %w", err)
 	}
-	root, err := gitOutput(wd, "rev-parse", "--show-toplevel")
+	req.WorkDir = workDir
+	resp, err := daemonCall(path, req)
+	if err != nil {
+		return err
+	}
+	if resp.PR != nil {
+		return printPR(cmd, resp.PR)
+	}
+	printDaemonResponse(cmd, resp)
+	return nil
+}
+
+func runLinesDaemon(cmd *cobra.Command, path string, req daemonRequest) error {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	req.WorkDir = workDir
+	resp, err := daemonCall(path, req)
+	if err != nil {
+		return err
+	}
+	if len(resp.Lines) == 0 {
+		printDaemonResponse(cmd, resp)
+		return nil
+	}
+	for _, line := range resp.Lines {
+		cmd.Println(line)
+	}
+	return nil
+}
+
+func daemonCall(path string, req daemonRequest) (daemonResponse, error) {
+	base, client := daemonHTTPClient()
+	data, err := json.Marshal(req)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		strings.TrimRight(base, "/")+path,
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		return daemonResponse{}, fmt.Errorf("daemon call %s: %w", path, err)
+	}
+	defer httpResp.Body.Close()
+	var resp daemonResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return daemonResponse{}, fmt.Errorf("decode daemon response: %w", err)
+	}
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 || !resp.OK {
+		if resp.Error == "" {
+			resp.Error = httpResp.Status
+		}
+		return resp, errors.New(resp.Error)
+	}
+	return resp, nil
+}
+
+func daemonHTTPClient() (string, *http.Client) {
+	if base := os.Getenv("OG_DAEMON_URL"); base != "" {
+		return strings.TrimRight(base, "/"), &http.Client{Timeout: 60 * time.Second}
+	}
+	socketPath := daemonSocketPath()
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+		},
+	}
+	return "http://og", &http.Client{Timeout: 60 * time.Second, Transport: transport}
+}
+
+func daemonSocketPath() string {
+	if path := os.Getenv("OG_DAEMON_SOCKET"); path != "" {
+		return path
+	}
+	return filepath.Join(config.DefaultConfigDir(), "og.sock")
+}
+
+func printDaemonResponse(cmd *cobra.Command, resp daemonResponse) {
+	if resp.Message != "" {
+		cmd.Println(resp.Message)
+		return
+	}
+	if resp.PR != nil {
+		_ = printPR(cmd, resp.PR)
+		return
+	}
+	for _, line := range resp.Lines {
+		cmd.Println(line)
+	}
+}
+
+func resolveRepoContextFor(workDir string) (*repoContext, error) {
+	if workDir == "" {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("not in a git repository: %w", err)
+	}
+	e, err := project.GetByPath(config.ProjectsPath(), root)
+	if err != nil {
+		return nil, err
+	}
+	if e == nil {
+		return nil, fmt.Errorf("workdir %q is not inside a registered project", root)
 	}
 	remote, err := gitOutput(root, "remote", "get-url", "origin")
 	if err != nil {
@@ -374,22 +407,14 @@ func resolveRepoContext() (*repoContext, error) {
 		return nil, fmt.Errorf("not on a named branch")
 	}
 	base := defaultBranch(root)
-	e, err := project.GetByPath(config.ProjectsPath(), root)
-	if err != nil {
-		return nil, err
-	}
 	tokenEnv := tokenEnvFor(provider, e)
 	token := ""
 	if tokenEnv != "" {
 		token = os.Getenv(tokenEnv)
 	}
-	alias := ""
-	if e != nil {
-		alias = e.Alias
-	}
 	return &repoContext{
 		WorkDir:      root,
-		ProjectAlias: alias,
+		ProjectAlias: e.Alias,
 		Provider:     provider,
 		Host:         host,
 		Owner:        owner,
@@ -570,6 +595,222 @@ func computeBumpedTag(workDir, level string) (string, error) {
 func localTagExists(workDir, tag string) bool {
 	err := runGit(workDir, "show-ref", "--verify", "--quiet", "refs/tags/"+tag)
 	return err == nil
+}
+
+func daemonGitPush(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	if ctx.Branch == branchMain || ctx.Branch == branchMaster {
+		return daemonResponse{}, fmt.Errorf("refusing to push protected branch %q", ctx.Branch)
+	}
+	gitArgs := []string{"push", "-u", "origin", ctx.Branch}
+	if req.Force {
+		gitArgs = append(gitArgs, "--force-with-lease")
+	}
+	if err := runGitWithCreds(ctx, gitArgs...); err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf("Pushed %s -> origin/%s", ctx.Branch, ctx.Branch)}, nil
+}
+
+func daemonGitPull(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	target := ctx.Branch
+	if ctx.Branch == ctx.DefaultBase {
+		target = ctx.DefaultBase
+	}
+	if err := runGitWithCreds(ctx, "pull", "--ff-only", "origin", target); err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: "Pulled " + target}, nil
+}
+
+func daemonGitTag(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	if req.Bump != "" && req.Tag != "" {
+		return daemonResponse{}, fmt.Errorf("--bump and a positional version are mutually exclusive")
+	}
+	tag := req.Tag
+	if req.Bump != "" {
+		tag, err = computeBumpedTag(ctx.WorkDir, req.Bump)
+		if err != nil {
+			return daemonResponse{}, err
+		}
+	}
+	if tag == "" {
+		return daemonResponse{}, fmt.Errorf("either a version argument or --bump is required")
+	}
+	if !semverTagRe.MatchString(tag) {
+		return daemonResponse{}, fmt.Errorf("invalid semver tag %q", tag)
+	}
+	if !localTagExists(ctx.WorkDir, tag) {
+		if err := runGit(ctx.WorkDir, "tag", "--", tag); err != nil {
+			return daemonResponse{}, err
+		}
+	}
+	if err := runGitWithCreds(ctx, "push", "origin", "--", tag); err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}, nil
+}
+
+func daemonPRCreate(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := createPR(ctx, req.Title, req.Body)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf("PR #%d created: %s", pr.Index, displayPRURL(pr)), PR: pr}, nil
+}
+
+func daemonPRView(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := findPR(ctx, "all")
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	full, err := getPR(ctx, pr.Index)
+	if err == nil {
+		pr = full
+	}
+	return daemonResponse{OK: true, PR: pr}, nil
+}
+
+func daemonPRFind(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := findPR(ctx, req.State)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, PR: pr}, nil
+}
+
+func daemonPRGet(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := getPR(ctx, req.Index)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, PR: pr}, nil
+}
+
+func daemonPRModify(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	index := req.Index
+	if index == 0 {
+		pr, err := findPR(ctx, "all")
+		if err != nil {
+			return daemonResponse{}, err
+		}
+		index = pr.Index
+	}
+	pr, err := updatePR(ctx, index, req.Title, req.Body)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf("PR #%d updated: %s", pr.Index, displayPRURL(pr)), PR: pr}, nil
+}
+
+func daemonPRComment(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := findPR(ctx, "all")
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	if err := commentPR(ctx, pr.Index, req.Body); err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf("Commented on PR #%d", pr.Index)}, nil
+}
+
+func daemonPRChecks(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	pr, err := findPR(ctx, "all")
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	lines, err := getChecks(ctx, pr)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	if len(lines) == 0 {
+		lines = []string{"No checks found."}
+	}
+	return daemonResponse{OK: true, Lines: lines}, nil
+}
+
+func daemonPRFailures(req daemonRequest) (daemonResponse, error) {
+	resp, err := daemonPRChecks(req)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	var failures []string
+	for _, line := range resp.Lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "failure") || strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
+			failures = append(failures, line)
+		}
+	}
+	if len(failures) == 0 {
+		failures = []string{"No failing checks found."}
+	}
+	return daemonResponse{OK: true, Lines: failures}, nil
+}
+
+func daemonAuthStatus(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	status := "unset"
+	if ctx.Token != "" {
+		status = "set"
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf(
+		"provider: %s\nhost: %s\nrepo: %s/%s\nproject: %s\ntoken_env: %s (%s)",
+		ctx.Provider, ctx.Host, ctx.Owner, ctx.Repo, ctx.ProjectAlias, ctx.TokenEnv, status,
+	)}, nil
+}
+
+func daemonPolicyExplain(req daemonRequest) (daemonResponse, error) {
+	ctx, err := resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return daemonResponse{}, err
+	}
+	return daemonResponse{OK: true, Message: fmt.Sprintf(
+		"repo: %s/%s\nworkdir: %s\nregistered_project: true\n"+
+			"protected_branch: %t\narbitrary_git_args: false\narbitrary_api_paths: false",
+		ctx.Owner, ctx.Repo, ctx.WorkDir, ctx.Branch == branchMain || ctx.Branch == branchMaster,
+	)}, nil
 }
 
 func createPR(ctx *repoContext, title, body string) (*pullRequest, error) {
@@ -829,9 +1070,55 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	addr := "127.0.0.1:8765"
-	cmd.Printf("og daemon listening on http://%s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	mux.HandleFunc("/git/push", daemonHTTPHandler(daemonGitPush))
+	mux.HandleFunc("/git/pull", daemonHTTPHandler(daemonGitPull))
+	mux.HandleFunc("/git/tag", daemonHTTPHandler(daemonGitTag))
+	mux.HandleFunc("/pr/create", daemonHTTPHandler(daemonPRCreate))
+	mux.HandleFunc("/pr/view", daemonHTTPHandler(daemonPRView))
+	mux.HandleFunc("/pr/find", daemonHTTPHandler(daemonPRFind))
+	mux.HandleFunc("/pr/get", daemonHTTPHandler(daemonPRGet))
+	mux.HandleFunc("/pr/modify", daemonHTTPHandler(daemonPRModify))
+	mux.HandleFunc("/pr/comment", daemonHTTPHandler(daemonPRComment))
+	mux.HandleFunc("/pr/checks", daemonHTTPHandler(daemonPRChecks))
+	mux.HandleFunc("/pr/failures", daemonHTTPHandler(daemonPRFailures))
+	mux.HandleFunc("/auth/status", daemonHTTPHandler(daemonAuthStatus))
+	mux.HandleFunc("/policy/explain", daemonHTTPHandler(daemonPolicyExplain))
+	socketPath := daemonSocketPath()
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+		return err
+	}
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
+	cmd.Printf("og daemon listening on unix://%s\n", socketPath)
+	return http.Serve(listener, mux)
+}
+
+func daemonHTTPHandler(fn func(daemonRequest) (daemonResponse, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_ = json.NewEncoder(w).Encode(daemonResponse{Error: "method not allowed"})
+			return
+		}
+		var req daemonRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(daemonResponse{Error: "decode request: " + err.Error()})
+			return
+		}
+		resp, err := fn(req)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(daemonResponse{Error: err.Error()})
+			return
+		}
+		resp.OK = true
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }
 
 func runDaemonInstall(cmd *cobra.Command, args []string) error {
@@ -882,12 +1169,11 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 }
 
 func runDaemonStatus(cmd *cobra.Command, args []string) error {
-	resp, err := http.Get("http://127.0.0.1:8765/health") //nolint:gosec // local daemon health check
+	resp, err := daemonHealth()
 	if err != nil {
 		cmd.Println("Daemon: not running")
 		return nil
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		cmd.Println("Daemon: running")
 		return nil
@@ -897,16 +1183,29 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runDaemonHealth(cmd *cobra.Command, args []string) error {
-	resp, err := http.Get("http://127.0.0.1:8765/health") //nolint:gosec // local daemon health check
+	resp, err := daemonHealth()
 	if err != nil {
 		return fmt.Errorf("daemon health: %w", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("daemon health: %s", resp.Status)
 	}
 	cmd.Println("ok")
 	return nil
+}
+
+func daemonHealth() (*http.Response, error) {
+	base, client := daemonHTTPClient()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, base+"/health", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	_ = resp.Body.Close()
+	return resp, nil
 }
 
 func writeLaunchdPlist() (string, error) {
