@@ -72,9 +72,6 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRegisteredRemote(remote, e.Remote); err != nil {
-		return nil, err
-	}
 	branch, err := gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("get current branch: %w", err)
@@ -116,27 +113,6 @@ func tokenEnvFor(provider gitprovider.ProviderType, e *project.Entry) string {
 		return "GITHUB_TOKEN"
 	}
 	return gitutil.ForgeTokenEnv()
-}
-
-func validateRegisteredRemote(current, registered string) error {
-	if registered == "" {
-		return nil
-	}
-	currentInfo, err := gitprovider.ParseRemoteURL(current)
-	if err != nil {
-		return err
-	}
-	registeredInfo, err := gitprovider.ParseRemoteURL(registered)
-	if err != nil {
-		return fmt.Errorf("parse registered project remote: %w", err)
-	}
-	if currentInfo.Provider == registeredInfo.Provider &&
-		currentInfo.Host == registeredInfo.Host &&
-		currentInfo.Owner == registeredInfo.Owner &&
-		currentInfo.Repo == registeredInfo.Repo {
-		return nil
-	}
-	return fmt.Errorf("origin remote %q does not match registered project remote %q", current, registered)
 }
 
 func gitOutput(workDir string, args ...string) (string, error) {

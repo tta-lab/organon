@@ -18,7 +18,6 @@ type Entry struct {
 	Alias          string `toml:"-"                json:"alias,omitempty"`
 	Name           string `toml:"name"             json:"name,omitempty"`
 	Path           string `toml:"path"             json:"path,omitempty"`
-	Remote         string `toml:"remote"           json:"remote,omitempty"`
 	GitHubTokenEnv string `toml:"github_token_env" json:"github_token_env,omitempty"`
 	K8sApp         string `toml:"k8s_app"          json:"k8s_app,omitempty"`
 	K8sNamespace   string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
@@ -77,9 +76,6 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 			}
 			if p, ok := sub["path"].(string); ok {
 				e.Path = p
-			}
-			if r, ok := sub["remote"].(string); ok {
-				e.Remote = r
 			}
 			if g, ok := sub["github_token_env"].(string); ok {
 				e.GitHubTokenEnv = g
