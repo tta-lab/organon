@@ -26,11 +26,47 @@ func findPR(ctx *repoContext, state string) (*PullRequest, error) {
 	if state == "" {
 		state = "open"
 	}
+	if ctx.Provider == gitprovider.ProviderGitHub {
+		if finder, ok := provider.(commitPRFinder); ok {
+			sha, err := gitOutput(ctx.WorkDir, "rev-parse", "HEAD")
+			if err != nil {
+				return nil, fmt.Errorf("get current HEAD SHA: %w", err)
+			}
+			if sha == "" {
+				return nil, fmt.Errorf("get current HEAD SHA: empty result")
+			}
+			pr, err := finder.FindPRByCommit(ctx.Owner, ctx.Repo, sha)
+			if err != nil {
+				return nil, err
+			}
+			if pr == nil {
+				return nil, fmt.Errorf("no PR found for commit %s", sha)
+			}
+			if pr.Head != ctx.Branch {
+				return nil, fmt.Errorf("PR for commit %s has head %s, want %s", sha, pr.Head, ctx.Branch)
+			}
+			if !prMatches(pr, ctx.DefaultBase, state) {
+				return nil, fmt.Errorf("PR for commit %s does not match base %s and state %s", sha, ctx.DefaultBase, state)
+			}
+			return fromProviderPR(pr), nil
+		}
+	}
 	pr, err := provider.FindPRByState(ctx.Owner, ctx.Repo, ctx.Branch, ctx.DefaultBase, state)
 	if err != nil {
 		return nil, err
 	}
 	return fromProviderPR(pr), nil
+}
+
+type commitPRFinder interface {
+	FindPRByCommit(owner, repo, sha string) (*gitprovider.PullRequest, error)
+}
+
+func prMatches(pr *gitprovider.PullRequest, base, state string) bool {
+	if pr.Base != base {
+		return false
+	}
+	return state == "" || state == "all" || pr.State == state
 }
 
 func getPR(ctx *repoContext, index int64) (*PullRequest, error) {
@@ -86,7 +122,13 @@ func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
 	return lines, nil
 }
 
+var newProviderFunc = newProviderImpl
+
 func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
+	return newProviderFunc(ctx)
+}
+
+func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 	if err := requireToken(ctx); err != nil {
 		return nil, err
 	}

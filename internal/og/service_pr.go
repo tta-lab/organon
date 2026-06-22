@@ -10,6 +10,9 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if err := runGitWithCreds(ctx, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
+		return Response{}, err
+	}
 	pr, err := createPR(ctx, req.Title, req.Body)
 	if err != nil {
 		return Response{}, err
