@@ -1,6 +1,7 @@
 package og
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -157,6 +158,7 @@ func installLaunchdDaemon() (string, error) {
 	}
 
 	_ = stopLaunchdDaemon()
+	_ = removeDaemonSocket()
 
 	path := launchdPlistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -190,9 +192,12 @@ func startLaunchdDaemon() error {
 	}
 	err := runCommand("launchctl", "bootstrap", "gui/"+userIDString(), path)
 	if err != nil && isLaunchdAlreadyBootstrappedError(err) {
-		err = runCommand("launchctl", "kickstart", "-k", launchdServiceTarget())
+		err = nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := runCommand("launchctl", "kickstart", "-k", launchdServiceTarget()); err != nil {
 		return err
 	}
 	return waitForDaemonReady(osDarwin)
@@ -276,7 +281,12 @@ func waitForDaemonReady(goos string) error {
 		time.Sleep(daemonReadyInterval)
 	}
 	if goos == osDarwin {
-		return fmt.Errorf("daemon did not become healthy after launch; check %s: %w", launchdLogPath(), lastErr)
+		return fmt.Errorf(
+			"daemon did not become healthy after launch; check %s: %w%s",
+			launchdLogPath(),
+			lastErr,
+			launchdLogTailForError(),
+		)
 	}
 	return fmt.Errorf("daemon did not become healthy after launch: %w", lastErr)
 }
@@ -294,6 +304,40 @@ func daemonHealthCheck() error {
 
 func launchdLogPath() string {
 	return filepath.Join(config.ResolveDataDir(), "og-daemon.log")
+}
+
+func launchdLogTailForError() string {
+	tail, err := readTailLines(launchdLogPath(), 20, 8192)
+	if err != nil || strings.TrimSpace(tail) == "" {
+		return ""
+	}
+	return "\nrecent daemon log:\n" + tail
+}
+
+func readTailLines(path string, maxLines, maxBytes int) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
+			data = data[idx+1:]
+		}
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func removeDaemonSocket() error {
+	err := os.Remove(SocketPath())
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func writeSystemdService() (string, error) {

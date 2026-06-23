@@ -18,8 +18,13 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 		cmd.PrintErrf("warning: could not load .env: %v\n", err)
 	}
 	socketPath := og.SocketPath()
-	cmd.Printf("og daemon listening on unix://%s\n", socketPath)
-	return og.ListenAndServeUnix(socketPath, og.NewMux(og.Service{}))
+	err := og.ListenAndServeUnixReady(socketPath, og.NewMux(og.Service{}), func() {
+		cmd.Printf("og daemon listening on unix://%s\n", socketPath)
+	})
+	if err != nil {
+		return fmt.Errorf("serve daemon unix://%s: %w", socketPath, err)
+	}
+	return nil
 }
 
 func runDaemonInstall(cmd *cobra.Command, args []string) error {

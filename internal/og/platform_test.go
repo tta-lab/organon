@@ -73,10 +73,38 @@ func TestStartDaemonKicksAlreadyBootstrappedLaunchdService(t *testing.T) {
 	}
 }
 
+func TestStartDaemonKickstartsAfterBootstrap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestLaunchdPlist(t)
+	withDaemonHealth(t, func() error {
+		return nil
+	})
+
+	var calls [][]string
+	withRunCommand(t, func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	})
+
+	if err := startLaunchdDaemon(); err != nil {
+		t.Fatalf("startLaunchdDaemon() error = %v", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "bootstrap", "gui/" + userIDString(), launchdPlistPath()},
+		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
+	}
+}
+
 func TestStartDaemonReturnsHealthErrorAfterLaunchdStart(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	writeTestLaunchdPlist(t)
+	writeTestLaunchdLog(t, "first line\nfatal: bad startup\n")
 	withDaemonReadyTiming(t, 1, 1)
 	withRunCommand(t, func(name string, args ...string) error {
 		return nil
@@ -94,6 +122,9 @@ func TestStartDaemonReturnsHealthErrorAfterLaunchdStart(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "og-daemon.log") {
 		t.Fatalf("error = %q, want log path", err.Error())
+	}
+	if !strings.Contains(err.Error(), "fatal: bad startup") {
+		t.Fatalf("error = %q, want log tail", err.Error())
 	}
 }
 
@@ -129,9 +160,35 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	want := [][]string{
 		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
 		{"launchctl", "bootstrap", "gui/" + userIDString(), wantPath},
+		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestInstallDaemonRemovesStaleSocketAfterBootout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	socketPath := SocketPath()
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("mkdir socket dir: %v", err)
+	}
+	if err := os.WriteFile(socketPath, []byte("stale"), 0o600); err != nil {
+		t.Fatalf("write stale socket: %v", err)
+	}
+	withDaemonHealth(t, func() error {
+		if _, err := os.Stat(socketPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale socket still exists: %v", err)
+		}
+		return nil
+	})
+	withRunCommand(t, func(name string, args ...string) error {
+		return nil
+	})
+
+	if _, err := installDaemonForOS(osDarwin); err != nil {
+		t.Fatalf("installDaemonForOS() error = %v", err)
 	}
 }
 
@@ -200,5 +257,16 @@ func writeTestLaunchdPlist(t *testing.T) {
 	}
 	if err := os.WriteFile(path, []byte("<plist/>"), 0o600); err != nil {
 		t.Fatalf("write plist: %v", err)
+	}
+}
+
+func writeTestLaunchdLog(t *testing.T, content string) {
+	t.Helper()
+	path := launchdLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
 	}
 }
