@@ -19,13 +19,24 @@ const (
 )
 
 func InstallDaemon() (string, error) {
-	switch runtime.GOOS {
+	return installDaemonForOS(runtime.GOOS)
+}
+
+func installDaemonForOS(goos string) (string, error) {
+	switch goos {
 	case osDarwin:
-		return writeLaunchdPlist()
+		path, err := writeLaunchdPlist()
+		if err != nil {
+			return "", err
+		}
+		if err := restartDaemonForOS(goos); err != nil {
+			return "", err
+		}
+		return path, nil
 	case osLinux:
 		return writeSystemdService()
 	default:
-		return "", fmt.Errorf("daemon install is unsupported on %s", runtime.GOOS)
+		return "", fmt.Errorf("daemon install is unsupported on %s", goos)
 	}
 }
 
@@ -49,10 +60,79 @@ func StopDaemon() error {
 }
 
 func RestartDaemon() error {
-	if err := runServiceCommand("stop"); err != nil {
-		return err
+	return restartDaemonForOS(runtime.GOOS)
+}
+
+func restartDaemonForOS(goos string) error {
+	if err := runServiceCommandForOS(goos, "stop"); err != nil {
+		if goos != osDarwin || !isLaunchdNotLoadedError(err) {
+			return err
+		}
 	}
-	return runServiceCommand("start")
+	return runServiceCommandForOS(goos, "start")
+}
+
+func isLaunchdNotLoadedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Boot-out failed: 5") ||
+		strings.Contains(msg, "No such process") ||
+		strings.Contains(msg, "Could not find service") ||
+		strings.Contains(msg, "service is not loaded")
+}
+
+func userIDString() string {
+	return strconv.Itoa(os.Getuid())
+}
+
+func runServiceCommand(action string) error {
+	return runServiceCommandForOS(runtime.GOOS, action)
+}
+
+func runServiceCommandForOS(goos, action string) error {
+	switch goos {
+	case osDarwin:
+		verb := map[string]string{"start": "bootstrap", "stop": "bootout"}[action]
+		if verb == "" {
+			return errors.New("unsupported launchd action")
+		}
+		target := "gui/" + userIDString()
+		args := []string{verb, target, launchdPlistPath()}
+		return runCommand("launchctl", args...)
+	case osLinux:
+		return runCommand("systemctl", "--user", action, "og.service")
+	default:
+		return fmt.Errorf("daemon %s is unsupported on %s", action, goos)
+	}
+}
+
+var runCommandFunc = runCommandImpl
+
+func runCommand(name string, args ...string) error {
+	return runCommandFunc(name, args...)
+}
+
+func runCommandImpl(name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func launchdPlistPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "LaunchAgents", "io.guion.og.daemon.plist")
+}
+
+func systemdServicePath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "systemd", "user", "og.service")
 }
 
 func writeLaunchdPlist() (string, error) {
@@ -96,42 +176,4 @@ Restart=always
 WantedBy=default.target
 `, exe)
 	return path, os.WriteFile(path, []byte(content), 0644)
-}
-
-func runServiceCommand(action string) error {
-	switch runtime.GOOS {
-	case osDarwin:
-		verb := map[string]string{"start": "bootstrap", "stop": "bootout"}[action]
-		if verb == "" {
-			return errors.New("unsupported launchd action")
-		}
-		target := "gui/" + strconv.Itoa(os.Getuid())
-		args := []string{verb, target, launchdPlistPath()}
-		return runCommand("launchctl", args...)
-	case osLinux:
-		return runCommand("systemctl", "--user", action, "og.service")
-	default:
-		return fmt.Errorf("daemon %s is unsupported on %s", action, runtime.GOOS)
-	}
-}
-
-func runCommand(name string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func launchdPlistPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", "io.guion.og.daemon.plist")
-}
-
-func systemdServicePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "systemd", "user", "og.service")
 }
