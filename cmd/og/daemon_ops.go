@@ -7,12 +7,16 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/og"
 )
 
 const cmdStatus = "status"
 
 func runDaemonRun(cmd *cobra.Command, args []string) error {
+	if err := config.InjectDotEnvFallback(); err != nil {
+		cmd.PrintErrf("warning: could not load .env: %v\n", err)
+	}
 	socketPath := og.SocketPath()
 	cmd.Printf("og daemon listening on unix://%s\n", socketPath)
 	return og.ListenAndServeUnix(socketPath, og.NewMux(og.Service{}))
