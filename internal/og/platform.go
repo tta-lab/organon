@@ -192,9 +192,12 @@ func startLaunchdDaemon() error {
 	}
 	err := runCommand("launchctl", "bootstrap", "gui/"+userIDString(), path)
 	if err != nil && isLaunchdAlreadyBootstrappedError(err) {
-		err = runCommand("launchctl", "kickstart", "-k", launchdServiceTarget())
+		err = nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := runCommand("launchctl", "kickstart", "-k", launchdServiceTarget()); err != nil {
 		return err
 	}
 	return waitForDaemonReady(osDarwin)

@@ -73,6 +73,33 @@ func TestStartDaemonKicksAlreadyBootstrappedLaunchdService(t *testing.T) {
 	}
 }
 
+func TestStartDaemonKickstartsAfterBootstrap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestLaunchdPlist(t)
+	withDaemonHealth(t, func() error {
+		return nil
+	})
+
+	var calls [][]string
+	withRunCommand(t, func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	})
+
+	if err := startLaunchdDaemon(); err != nil {
+		t.Fatalf("startLaunchdDaemon() error = %v", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "bootstrap", "gui/" + userIDString(), launchdPlistPath()},
+		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
+	}
+}
+
 func TestStartDaemonReturnsHealthErrorAfterLaunchdStart(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -133,6 +160,7 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	want := [][]string{
 		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
 		{"launchctl", "bootstrap", "gui/" + userIDString(), wantPath},
+		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
