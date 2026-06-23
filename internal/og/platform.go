@@ -11,11 +11,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tta-lab/organon/internal/config"
 )
 
 const (
 	osDarwin = "darwin"
 	osLinux  = "linux"
+
+	launchdLabel = "io.guion.og.daemon"
 )
 
 func InstallDaemon() (string, error) {
@@ -25,14 +29,7 @@ func InstallDaemon() (string, error) {
 func installDaemonForOS(goos string) (string, error) {
 	switch goos {
 	case osDarwin:
-		path, err := writeLaunchdPlist()
-		if err != nil {
-			return "", err
-		}
-		if err := restartDaemonForOS(goos); err != nil {
-			return "", err
-		}
-		return path, nil
+		return installLaunchdDaemon()
 	case osLinux:
 		return writeSystemdService()
 	default:
@@ -64,10 +61,11 @@ func RestartDaemon() error {
 }
 
 func restartDaemonForOS(goos string) error {
+	if goos == osDarwin {
+		return runCommand("launchctl", "kickstart", "-k", launchdServiceTarget())
+	}
 	if err := runServiceCommandForOS(goos, "stop"); err != nil {
-		if goos != osDarwin || !isLaunchdNotLoadedError(err) {
-			return err
-		}
+		return err
 	}
 	return runServiceCommandForOS(goos, "start")
 }
@@ -94,13 +92,14 @@ func runServiceCommand(action string) error {
 func runServiceCommandForOS(goos, action string) error {
 	switch goos {
 	case osDarwin:
-		verb := map[string]string{"start": "bootstrap", "stop": "bootout"}[action]
-		if verb == "" {
+		switch action {
+		case "start":
+			return startLaunchdDaemon()
+		case "stop":
+			return stopLaunchdDaemon()
+		default:
 			return errors.New("unsupported launchd action")
 		}
-		target := "gui/" + userIDString()
-		args := []string{verb, target, launchdPlistPath()}
-		return runCommand("launchctl", args...)
 	case osLinux:
 		return runCommand("systemctl", "--user", action, "og.service")
 	default:
@@ -135,25 +134,116 @@ func systemdServicePath() string {
 	return filepath.Join(home, ".config", "systemd", "user", "og.service")
 }
 
-func writeLaunchdPlist() (string, error) {
-	exe, err := os.Executable()
+func installLaunchdDaemon() (string, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
+	dataDir := config.ResolveDataDir()
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return "", err
+	}
+
+	_ = stopLaunchdDaemon()
+
 	path := launchdPlistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err
 	}
-	content := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	exe, err := daemonExecutable()
+	if err != nil {
+		return "", err
+	}
+	content := buildLaunchdPlist(launchdLabel, exe, dataDir, home)
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return "", err
+	}
+	if err := startLaunchdDaemon(); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func daemonExecutable() (string, error) {
+	if exe, err := exec.LookPath("og"); err == nil {
+		return exe, nil
+	}
+	return os.Executable()
+}
+
+func startLaunchdDaemon() error {
+	path := launchdPlistPath()
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("daemon not installed (run: og daemon install)")
+	}
+	err := runCommand("launchctl", "bootstrap", "gui/"+userIDString(), path)
+	if err != nil && isLaunchdAlreadyBootstrappedError(err) {
+		return nil
+	}
+	return err
+}
+
+func stopLaunchdDaemon() error {
+	err := runCommand("launchctl", "bootout", launchdServiceTarget())
+	if err != nil && isLaunchdNotLoadedError(err) {
+		return nil
+	}
+	return err
+}
+
+func launchdServiceTarget() string {
+	return "gui/" + userIDString() + "/" + launchdLabel
+}
+
+func isLaunchdAlreadyBootstrappedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "already bootstrapped") ||
+		strings.Contains(msg, "Bootstrap failed: 5") ||
+		strings.Contains(msg, "36:")
+}
+
+func buildLaunchdPlist(label, exe, dataDir, home string) string {
+	daemonPATH := "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:" +
+		home + "/.local/bin:" + home + "/go/bin:" +
+		home + "/.cargo/bin"
+	logPath := filepath.Join(dataDir, "og-daemon.log")
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>io.guion.og.daemon</string>
-<key>ProgramArguments</key><array><string>%s</string><string>daemon</string><string>run</string></array>
-<key>RunAtLoad</key><true/>
-<key>KeepAlive</key><true/>
-</dict></plist>
-`, exe)
-	return path, os.WriteFile(path, []byte(content), 0644)
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>daemon</string>
+        <string>run</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>%s</string>
+
+    <key>StandardErrorPath</key>
+    <string>%s</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>%s</string>
+    </dict>
+</dict>
+</plist>
+`, label, exe, logPath, logPath, daemonPATH)
 }
 
 func writeSystemdService() (string, error) {
