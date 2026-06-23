@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,12 +63,18 @@ func RestartDaemon() error {
 
 func restartDaemonForOS(goos string) error {
 	if goos == osDarwin {
-		return runCommand("launchctl", "kickstart", "-k", launchdServiceTarget())
+		if err := runCommand("launchctl", "kickstart", "-k", launchdServiceTarget()); err != nil {
+			return err
+		}
+		return waitForDaemonReady(goos)
 	}
 	if err := runServiceCommandForOS(goos, "stop"); err != nil {
 		return err
 	}
-	return runServiceCommandForOS(goos, "start")
+	if err := runServiceCommandForOS(goos, "start"); err != nil {
+		return err
+	}
+	return waitForDaemonReady(goos)
 }
 
 func isLaunchdNotLoadedError(err error) bool {
@@ -107,7 +114,12 @@ func runServiceCommandForOS(goos, action string) error {
 	}
 }
 
-var runCommandFunc = runCommandImpl
+var (
+	runCommandFunc        = runCommandImpl
+	daemonHealthCheckFunc = daemonHealthCheck
+	daemonReadyTimeout    = 5 * time.Second
+	daemonReadyInterval   = 100 * time.Millisecond
+)
 
 func runCommand(name string, args ...string) error {
 	return runCommandFunc(name, args...)
@@ -178,9 +190,12 @@ func startLaunchdDaemon() error {
 	}
 	err := runCommand("launchctl", "bootstrap", "gui/"+userIDString(), path)
 	if err != nil && isLaunchdAlreadyBootstrappedError(err) {
-		return nil
+		err = runCommand("launchctl", "kickstart", "-k", launchdServiceTarget())
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return waitForDaemonReady(osDarwin)
 }
 
 func stopLaunchdDaemon() error {
@@ -244,6 +259,41 @@ func buildLaunchdPlist(label, exe, dataDir, home string) string {
 </dict>
 </plist>
 `, label, exe, logPath, logPath, daemonPATH)
+}
+
+func waitForDaemonReady(goos string) error {
+	deadline := time.Now().Add(daemonReadyTimeout)
+	var lastErr error
+	for {
+		if err := daemonHealthCheckFunc(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(daemonReadyInterval)
+	}
+	if goos == osDarwin {
+		return fmt.Errorf("daemon did not become healthy after launch; check %s: %w", launchdLogPath(), lastErr)
+	}
+	return fmt.Errorf("daemon did not become healthy after launch: %w", lastErr)
+}
+
+func daemonHealthCheck() error {
+	resp, err := NewClientFromEnv().Health()
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health returned %s", resp.Status)
+	}
+	return nil
+}
+
+func launchdLogPath() string {
+	return filepath.Join(config.ResolveDataDir(), "og-daemon.log")
 }
 
 func writeSystemdService() (string, error) {
