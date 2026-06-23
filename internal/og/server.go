@@ -60,9 +60,16 @@ func HTTPHandler(fn HandlerFunc) http.HandlerFunc {
 }
 
 func ListenAndServeUnix(socketPath string, handler http.Handler) error {
+	return ListenAndServeUnixReady(socketPath, handler, nil)
+}
+
+func ListenAndServeUnixReady(socketPath string, handler http.Handler, ready func()) error {
 	listener, err := listenUnix(socketPath)
 	if err != nil {
 		return err
+	}
+	if ready != nil {
+		ready()
 	}
 	defer func() { _ = listener.Close() }()
 	return http.Serve(listener, handler)

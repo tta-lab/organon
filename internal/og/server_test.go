@@ -3,6 +3,7 @@ package og
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,5 +47,28 @@ func TestListenAndServeUnixCreatesOwnerOnlySocket(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0600 {
 		t.Fatalf("socket mode = %o, want 0600", got)
+	}
+}
+
+func TestListenAndServeUnixReadyRunsCallbackAfterSocketBound(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "og.sock")
+	ready := make(chan struct{}, 1)
+	errc := make(chan error, 1)
+
+	go func() {
+		errc <- ListenAndServeUnixReady(socketPath, http.NewServeMux(), func() {
+			if conn, err := net.Dial("unix", socketPath); err != nil {
+				t.Errorf("dial ready socket: %v", err)
+			} else {
+				_ = conn.Close()
+			}
+			ready <- struct{}{}
+		})
+	}()
+
+	select {
+	case <-ready:
+	case err := <-errc:
+		t.Fatalf("ListenAndServeUnixReady returned before ready: %v", err)
 	}
 }
