@@ -1,0 +1,8 @@
+name: Example Playlist
+comment: Example only. Replace this with an exported or hand-authored playlist.
+public: false
+tracks:
+  - id: song-id-from-navidrome
+    title: Example Song
+    artist: Example Artist
+    album: Example Album

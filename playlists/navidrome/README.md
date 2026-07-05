@@ -1,0 +1,21 @@
+# Navidrome Playlists
+
+This directory is the initial source-of-truth location for `nd-playlist` YAML
+specs.
+
+Bootstrap from the server:
+
+```bash
+nd-playlist export-all --owner ooneil --output playlists/navidrome
+nd-playlist apply --dry-run playlists/navidrome/*.yaml
+```
+
+Apply one playlist after review:
+
+```bash
+nd-playlist diff playlists/navidrome/example.yaml
+nd-playlist apply --yes playlists/navidrome/example.yaml
+```
+
+Keep secrets in `~/.config/nd-playlist/config.toml`, environment variables, or
+CLI flags. Do not store Navidrome passwords in playlist specs.
