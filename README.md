@@ -95,6 +95,7 @@ Create, update, diff, and export Navidrome playlists through the Subsonic/OpenSu
 
 ```bash
 nd-playlist ping
+nd-playlist search --json "小半 陈粒"
 nd-playlist resolve playlists/navidrome/night.yaml
 nd-playlist diff playlists/navidrome/night.yaml
 nd-playlist apply --dry-run playlists/navidrome/night.yaml
@@ -112,8 +113,9 @@ password = "..."
 ```
 
 `--server`, `--username`, `--password`, `NAVIDROME_URL`, `NAVIDROME_USER`, and
-`NAVIDROME_PASS` override local config. Playlist YAML exports include song IDs
-but never include secrets.
+`NAVIDROME_PASS` override local config. If no password source is configured and
+stdin is a terminal, `nd-playlist` prompts for the password. Playlist YAML
+exports include song IDs but never include secrets.
 
 ## Why
 

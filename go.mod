@@ -18,6 +18,7 @@ require (
 	go.woodpecker-ci.org/woodpecker/v3 v3.15.0
 	golang.org/x/net v0.55.0
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

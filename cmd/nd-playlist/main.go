@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/tta-lab/organon/internal/navidrome"
 )
@@ -48,6 +49,7 @@ func newRootCmd() *cobra.Command {
 		newPingCmd(&opts),
 		newListCmd(&opts),
 		newShowCmd(&opts),
+		newSearchCmd(&opts),
 		newResolveCmd(&opts),
 		newDiffCmd(&opts),
 		newApplyCmd(&opts),
@@ -55,6 +57,34 @@ func newRootCmd() *cobra.Command {
 		newExportAllCmd(&opts),
 	)
 	return root
+}
+
+func newSearchCmd(opts *rootOptions) *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search Navidrome songs",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := configuredClient(*opts)
+			if err != nil {
+				return err
+			}
+			songs, err := client.SearchSongs(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return writeJSON(cmd.OutOrStdout(), songs)
+			}
+			for _, song := range songs {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", song.ID, song.Artist, song.Title)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print JSON")
+	return cmd
 }
 
 func newPingCmd(opts *rootOptions) *cobra.Command {
@@ -306,17 +336,35 @@ func newExportAllCmd(opts *rootOptions) *cobra.Command {
 
 func configuredClient(opts rootOptions) (*navidrome.Client, navidrome.Config, error) {
 	cfg, err := navidrome.LoadConfig(navidrome.ConfigOptions{
-		Path:       opts.config,
-		Server:     opts.server,
-		Username:   opts.username,
-		Password:   opts.password,
-		Client:     opts.client,
-		APIVersion: opts.apiVersion,
+		Path:           opts.config,
+		Server:         opts.server,
+		Username:       opts.username,
+		Password:       opts.password,
+		Client:         opts.client,
+		APIVersion:     opts.apiVersion,
+		PromptPassword: promptPassword,
 	})
 	if err != nil {
 		return nil, navidrome.Config{}, err
 	}
 	return navidrome.NewClient(cfg), cfg, nil
+}
+
+func promptPassword() (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", nil
+	}
+	if _, err := fmt.Fprint(os.Stderr, "Navidrome password: "); err != nil {
+		return "", err
+	}
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return "", err
+	}
+	if _, err := fmt.Fprintln(os.Stderr); err != nil {
+		return "", err
+	}
+	return string(password), nil
 }
 
 func readSpecFile(path string) (navidrome.PlaylistSpec, error) {

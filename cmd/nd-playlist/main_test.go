@@ -96,6 +96,40 @@ func TestResolveJSONPrintsResolvedSongs(t *testing.T) {
 	}
 }
 
+func TestSearchJSONPrintsSongs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/search3.view" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("query") != "Song Artist" {
+			t.Fatalf("query = %q", r.URL.Query().Get("query"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"subsonic-response": map[string]any{
+				"status": "ok",
+				"searchResult3": map[string]any{
+					"song": []map[string]string{{
+						"id": "song-1", "title": "Song", "artist": "Artist",
+					}},
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	tmp := t.TempDir()
+	stdout, err := runNDPlaylist(t, []string{
+		"--config", writeConfig(t, tmp, server.URL),
+		"search", "--json", "Song Artist",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if !strings.Contains(stdout, `"id": "song-1"`) {
+		t.Fatalf("stdout = %s", stdout)
+	}
+}
+
 func TestApplyDryRunDoesNotMutate(t *testing.T) {
 	var mutateCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

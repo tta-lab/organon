@@ -104,3 +104,32 @@ password_env = "CONFIG_PASS"
 		t.Fatalf("Password = %q", cfg.Password)
 	}
 }
+
+func TestLoadConfigUsesPromptAfterPasswordEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`
+server = "https://music.example"
+username = "ooneil"
+password_env = "MISSING_CONFIG_PASS"
+`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	called := false
+	cfg, err := LoadConfig(ConfigOptions{
+		Path: path,
+		PromptPassword: func() (string, error) {
+			called = true
+			return "prompt-secret", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !called {
+		t.Fatal("PromptPassword was not called")
+	}
+	if cfg.Password != "prompt-secret" {
+		t.Fatalf("Password = %q", cfg.Password)
+	}
+}

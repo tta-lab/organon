@@ -30,12 +30,13 @@ type Config struct {
 
 // ConfigOptions holds explicit command-line config overrides.
 type ConfigOptions struct {
-	Path       string
-	Server     string
-	Username   string
-	Password   string
-	Client     string
-	APIVersion string
+	Path           string
+	Server         string
+	Username       string
+	Password       string
+	Client         string
+	APIVersion     string
+	PromptPassword func() (string, error)
 }
 
 // DefaultConfigPath returns ~/.config/nd-playlist/config.toml.
@@ -70,9 +71,17 @@ func LoadConfig(opts ConfigOptions) (Config, error) {
 
 	applyEnv(&cfg)
 	applyOptions(&cfg, opts)
+	if cfg.Password == "" && opts.PromptPassword != nil {
+		password, err := opts.PromptPassword()
+		if err != nil {
+			return Config{}, fmt.Errorf("%w: read password: %v", ErrConfig, err)
+		}
+		cfg.Password = password
+	}
 
 	cfg.Server = strings.TrimRight(strings.TrimSpace(cfg.Server), "/")
 	cfg.Username = strings.TrimSpace(cfg.Username)
+	cfg.Password = strings.TrimSpace(cfg.Password)
 	cfg.Client = strings.TrimSpace(cfg.Client)
 	cfg.APIVersion = strings.TrimSpace(cfg.APIVersion)
 

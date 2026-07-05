@@ -6,6 +6,7 @@ specs.
 Bootstrap from the server:
 
 ```bash
+nd-playlist ping
 nd-playlist export-all --owner ooneil --output playlists/navidrome
 nd-playlist apply --dry-run playlists/navidrome/*.yaml
 ```
@@ -13,6 +14,7 @@ nd-playlist apply --dry-run playlists/navidrome/*.yaml
 Apply one playlist after review:
 
 ```bash
+nd-playlist search --json "song title artist"
 nd-playlist diff playlists/navidrome/example.yaml
 nd-playlist apply --yes playlists/navidrome/example.yaml
 ```
