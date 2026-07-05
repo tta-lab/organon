@@ -1,8 +1,8 @@
 # organon
 
-Structure-aware tools for AI agents. Tree-sitter code editing, web page navigation, search, and skill discovery. No daemon, no JSON, just stdin.
+Structure-aware tools for AI agents, plus small workflow CLIs used in the tta-lab workspace.
 
-Organon provides three commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code and the web, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
+Organon provides commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code and the web, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
 
 ```
 $ src main.go --tree
@@ -89,6 +89,32 @@ skill find web
 skill get organon-web
 ```
 
+### `nd-playlist` — Navidrome playlists as code
+
+Create, update, diff, and export Navidrome playlists through the Subsonic/OpenSubsonic API.
+
+```bash
+nd-playlist ping
+nd-playlist resolve playlists/navidrome/night.yaml
+nd-playlist diff playlists/navidrome/night.yaml
+nd-playlist apply --dry-run playlists/navidrome/night.yaml
+nd-playlist apply --yes playlists/navidrome/night.yaml
+nd-playlist export "Mandopop: Soft Night" > playlists/navidrome/mandopop-soft-night.yaml
+nd-playlist export-all --output playlists/navidrome
+```
+
+Default config lives at `~/.config/nd-playlist/config.toml`:
+
+```toml
+server = "https://music.example"
+username = "ooneil"
+password = "..."
+```
+
+`--server`, `--username`, `--password`, `NAVIDROME_URL`, `NAVIDROME_USER`, and
+`NAVIDROME_PASS` override local config. Playlist YAML exports include song IDs
+but never include secrets.
+
 ## Why
 
 AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.
@@ -109,6 +135,7 @@ brew install tta-lab/ttal/organon
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/web@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/nd-playlist@latest
 ```
 
 ### From release
