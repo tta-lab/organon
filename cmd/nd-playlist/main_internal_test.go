@@ -3,6 +3,10 @@ package main
 import "testing"
 
 func TestIsCI(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("WOODPECKER", "")
+
 	if isCI() {
 		t.Fatal("isCI = true without CI env")
 	}
