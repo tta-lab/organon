@@ -15,8 +15,8 @@ Apply one playlist after review:
 
 ```bash
 nd-playlist search --json "song title artist"
-nd-playlist diff playlists/navidrome/example.yaml
-nd-playlist apply --yes playlists/navidrome/example.yaml
+nd-playlist diff playlists/navidrome/game-ost-story-tears.yaml
+nd-playlist apply --yes playlists/navidrome/game-ost-story-tears.yaml
 ```
 
 Keep secrets in `~/.config/nd-playlist/config.toml`, environment variables, or

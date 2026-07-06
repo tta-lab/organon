@@ -2,21 +2,30 @@ package navidrome
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestExamplePlaylistSpecParses(t *testing.T) {
-	file, err := os.Open("../../playlists/navidrome/example.yaml")
+func TestPlaylistSpecsParse(t *testing.T) {
+	paths, err := filepath.Glob("../../playlists/navidrome/*.yaml")
 	if err != nil {
-		t.Fatalf("open example: %v", err)
+		t.Fatalf("glob playlist specs: %v", err)
 	}
-	defer file.Close()
+	if len(paths) == 0 {
+		t.Fatal("no playlist specs found")
+	}
 
-	spec, err := ReadSpec(file)
-	if err != nil {
-		t.Fatalf("ReadSpec: %v", err)
-	}
-	if spec.Name != "Example Playlist" {
-		t.Fatalf("Name = %q", spec.Name)
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open spec: %v", err)
+			}
+			defer file.Close()
+
+			if _, err := ReadSpec(file); err != nil {
+				t.Fatalf("ReadSpec: %v", err)
+			}
+		})
 	}
 }
