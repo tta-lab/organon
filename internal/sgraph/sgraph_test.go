@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -194,6 +195,9 @@ func TestSearchHTTPError(t *testing.T) {
 func TestSearchLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live network test")
+	}
+	if os.Getenv("ORGANON_LIVE_TESTS") == "" {
+		t.Skip("set ORGANON_LIVE_TESTS=1 to run live network test")
 	}
 	defer resetHTTP()
 	out, err := Search(context.Background(), `repo:^github\.com/golang/go$ package main`, 3, 5, 30)
