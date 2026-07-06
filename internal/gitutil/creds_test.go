@@ -1,6 +1,9 @@
 package gitutil
 
 import (
+	"os/exec"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +75,7 @@ func TestGitCredEnv(t *testing.T) {
 
 func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
 	clearTokenEnv(t)
+	clearGitConfigEnv(t)
 	t.Setenv("GITHUB_TOKEN", "ambient-token")
 
 	env := GitCredEnvWithToken("resolved-token")
@@ -80,6 +84,35 @@ func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
 	}
 	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
 		t.Fatalf("env[6] = %q, want explicit resolved token", env[6])
+	}
+}
+
+func TestGitCredEnvWithTokenPreservesExistingGitConfigEnv(t *testing.T) {
+	clearTokenEnv(t)
+	clearGitConfigEnv(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "http.proxy")
+	t.Setenv("GIT_CONFIG_VALUE_0", "http://127.0.0.1:7890")
+
+	env := GitCredEnvWithToken("resolved-token")
+	if env[1] != "GIT_CONFIG_COUNT=3" {
+		t.Fatalf("env[1] = %q, want GIT_CONFIG_COUNT=3", env[1])
+	}
+	if env[2] != "GIT_CONFIG_KEY_1=credential.helper" {
+		t.Fatalf("env[2] = %q, want helper after existing config", env[2])
+	}
+	if env[4] != "GIT_CONFIG_KEY_2=credential.helper" {
+		t.Fatalf("env[4] = %q, want token helper after existing config", env[4])
+	}
+
+	cmd := exec.Command("git", "config", "--get", "http.proxy")
+	cmd.Env = append(cmd.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git config --get http.proxy: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if strings.TrimSpace(string(out)) != "http://127.0.0.1:7890" {
+		t.Fatalf("http.proxy = %q, want proxy from existing git config env", strings.TrimSpace(string(out)))
 	}
 }
 
@@ -104,5 +137,14 @@ func clearTokenEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
 		t.Setenv(name, "")
+	}
+}
+
+func clearGitConfigEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_COUNT", "")
+	for i := 0; i < 8; i++ {
+		t.Setenv("GIT_CONFIG_KEY_"+strconv.Itoa(i), "")
+		t.Setenv("GIT_CONFIG_VALUE_"+strconv.Itoa(i), "")
 	}
 }

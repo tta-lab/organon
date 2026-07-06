@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,14 +41,23 @@ func GitCredEnvWithToken(token string) []string {
 		return env
 	}
 
+	base := gitConfigCountFromEnv()
 	return append(env,
-		"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=credential.helper",
-		"GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=credential.helper",
-		"GIT_CONFIG_VALUE_1=!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
+		fmt.Sprintf("GIT_CONFIG_COUNT=%d", base+2),
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=credential.helper", base),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=", base),
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=credential.helper", base+1),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f", base+1),
 		"GIT_TOKEN_INJECT="+token,
 	)
+}
+
+func gitConfigCountFromEnv() int {
+	count, err := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	if err != nil || count < 0 {
+		return 0
+	}
+	return count
 }
 
 // GitCredEnvHasToken reports whether GitCredEnv would inject a token for the
