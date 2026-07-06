@@ -36,6 +36,7 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "nd-playlist [command]",
 		Short: "Manage Navidrome playlists from YAML specs",
+		Long:  helpRoot,
 	}
 	root.SilenceUsage = true
 	root.PersistentFlags().StringVar(&opts.config, "config", "", "Config file path")
@@ -64,6 +65,7 @@ func newSearchCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search Navidrome songs",
+		Long:  helpSearch,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, _, err := configuredClient(*opts)
@@ -91,6 +93,7 @@ func newPingCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ping",
 		Short: "Validate Navidrome auth",
+		Long:  helpPing,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, _, err := configuredClient(*opts)
@@ -111,6 +114,7 @@ func newListCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List server playlists",
+		Long:  helpList,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, _, err := configuredClient(*opts)
@@ -138,6 +142,7 @@ func newShowCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <playlist>",
 		Short: "Show a server playlist",
+		Long:  helpShow,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cfg, err := configuredClient(*opts)
@@ -163,6 +168,7 @@ func newResolveCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve <playlist.yaml>",
 		Short: "Resolve a YAML playlist to song IDs",
+		Long:  helpResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, _, err := configuredClient(*opts)
@@ -207,6 +213,7 @@ func newDiffCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff <playlist.yaml>",
 		Short: "Compare YAML playlist to server state",
+		Long:  helpDiff,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cfg, err := configuredClient(*opts)
@@ -245,6 +252,7 @@ func newApplyCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <playlist.yaml>...",
 		Short: "Create or replace server playlists from YAML",
+		Long:  helpApply,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cfg, err := configuredClient(*opts)
@@ -269,6 +277,7 @@ func newExportCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "export <playlist>",
 		Short: "Export a server playlist as YAML",
+		Long:  helpExport,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cfg, err := configuredClient(*opts)
@@ -290,6 +299,7 @@ func newExportAllCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export-all --output <dir>",
 		Short: "Export server playlists to YAML files",
+		Long:  helpExportAll,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, cfg, err := configuredClient(*opts)

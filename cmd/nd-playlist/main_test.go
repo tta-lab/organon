@@ -85,6 +85,41 @@ tracks:
 	return path
 }
 
+func TestHelpUsesEmbeddedMarkdown(t *testing.T) {
+	stdout, err := runNDPlaylist(t, []string{"--help"})
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	for _, want := range []string{
+		"Manage Navidrome playlists from YAML specs through the Subsonic/OpenSubsonic API.",
+		"nd-playlist export-all --owner ooneil --output playlists/navidrome",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("root help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestSubcommandHelpUsesEmbeddedMarkdown(t *testing.T) {
+	tests := map[string]string{
+		"apply":   "Use `--dry-run` before mutation.",
+		"resolve": "missing tracks and ambiguous candidates are printed clearly",
+		"export":  "Exports include `navidrome_id` and track IDs",
+	}
+
+	for subcmd, want := range tests {
+		t.Run(subcmd, func(t *testing.T) {
+			stdout, err := runNDPlaylist(t, []string{subcmd, "--help"})
+			if err != nil {
+				t.Fatalf("%s help: %v", subcmd, err)
+			}
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("%s help missing %q:\n%s", subcmd, want, stdout)
+			}
+		})
+	}
+}
+
 func TestResolveJSONPrintsResolvedSongs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/search3.view" {
