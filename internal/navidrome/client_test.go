@@ -120,3 +120,38 @@ func TestGetSongUsesGetSongEndpointForPinnedIDs(t *testing.T) {
 		t.Fatalf("query = %v", gotQuery)
 	}
 }
+
+func TestUpdatePlaylistMetadataSendsEmptyComment(t *testing.T) {
+	var gotForm url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/updatePlaylist.view" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		gotForm = r.PostForm
+		_ = json.NewEncoder(w).Encode(subsonicResponse{Subsonic: responseStatus{Status: "ok"}})
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(Config{
+		Server:     server.URL,
+		Username:   "u",
+		Password:   "p",
+		Client:     "nd-playlist",
+		APIVersion: "1.16.1",
+	})
+	client.salt = func() string { return "salt" }
+
+	comment := ""
+	if err := client.UpdatePlaylistMetadata(context.Background(), "playlist-1", nil, &comment); err != nil {
+		t.Fatalf("UpdatePlaylistMetadata: %v", err)
+	}
+	if _, ok := gotForm["comment"]; !ok {
+		t.Fatalf("comment field not sent: %v", gotForm)
+	}
+	if gotForm.Get("comment") != "" {
+		t.Fatalf("comment = %q", gotForm.Get("comment"))
+	}
+}

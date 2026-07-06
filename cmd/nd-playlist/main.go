@@ -175,6 +175,13 @@ func newResolveCmd(opts *rootOptions) *cobra.Command {
 			}
 			result, err := navidrome.ResolveTracks(cmd.Context(), client, spec, allowFuzzy)
 			if err != nil {
+				if jsonOut {
+					if writeErr := writeJSON(cmd.OutOrStdout(), unresolvedPayload(err)); writeErr != nil {
+						return writeErr
+					}
+				} else {
+					printUnresolved(cmd, err)
+				}
 				return err
 			}
 			if jsonOut {
@@ -208,6 +215,7 @@ func newDiffCmd(opts *rootOptions) *cobra.Command {
 			}
 			spec, desired, err := resolveSpecFile(cmd.Context(), client, args[0], allowFuzzy)
 			if err != nil {
+				printUnresolved(cmd, err)
 				return err
 			}
 			playlist, current, err := currentPlaylist(cmd.Context(), client, cfg.Username, spec)
@@ -502,7 +510,7 @@ func updateMetadata(
 	spec navidrome.PlaylistSpec,
 	playlistID string,
 ) error {
-	if spec.Public != nil || spec.Comment != "" {
+	if spec.Public != nil || spec.Comment != nil {
 		targetID := playlistID
 		if targetID == "" {
 			refreshed, err := client.GetPlaylists(ctx)
@@ -546,16 +554,97 @@ func printDiff(cmd *cobra.Command, playlist navidrome.Playlist, diff navidrome.T
 	fmt.Fprintf(cmd.OutOrStdout(), "added=%d removed=%d reordered=%d\n", diff.Added, diff.Removed, diff.Reordered)
 }
 
+type unresolvedJSON struct {
+	Missing   []navidrome.TrackSpec   `json:"missing,omitempty"`
+	Ambiguous []ambiguousTrackPayload `json:"ambiguous,omitempty"`
+}
+
+type ambiguousTrackPayload struct {
+	Track      navidrome.TrackSpec `json:"track"`
+	Candidates []navidrome.Song    `json:"candidates"`
+}
+
+func unresolvedPayload(err error) unresolvedJSON {
+	var payload unresolvedJSON
+	var missing navidrome.MissingTracksError
+	if errors.As(err, &missing) {
+		payload.Missing = missing.Tracks
+	}
+	var ambiguous navidrome.AmbiguousTracksError
+	if errors.As(err, &ambiguous) {
+		payload.Ambiguous = make([]ambiguousTrackPayload, 0, len(ambiguous.Tracks))
+		for track, candidates := range ambiguous.Tracks {
+			payload.Ambiguous = append(payload.Ambiguous, ambiguousTrackPayload{
+				Track:      track,
+				Candidates: candidates,
+			})
+		}
+	}
+	return payload
+}
+
+func printUnresolved(cmd *cobra.Command, err error) {
+	var missing navidrome.MissingTracksError
+	if errors.As(err, &missing) {
+		_, _ = fmt.Fprintln(cmd.OutOrStderr(), "missing tracks:")
+		for _, track := range missing.Tracks {
+			fmt.Fprintf(cmd.OutOrStderr(), "- %s\n", formatTrack(track))
+		}
+	}
+	var ambiguous navidrome.AmbiguousTracksError
+	if errors.As(err, &ambiguous) {
+		_, _ = fmt.Fprintln(cmd.OutOrStderr(), "ambiguous tracks:")
+		for track, candidates := range ambiguous.Tracks {
+			fmt.Fprintf(cmd.OutOrStderr(), "- %s\n", formatTrack(track))
+			for _, candidate := range candidates {
+				fmt.Fprintf(cmd.OutOrStderr(), "  candidate: %s\n", formatSong(candidate))
+			}
+		}
+	}
+}
+
+func formatTrack(track navidrome.TrackSpec) string {
+	parts := []string{}
+	if track.ID != "" {
+		parts = append(parts, "id="+track.ID)
+	}
+	if track.Title != "" {
+		parts = append(parts, "title="+track.Title)
+	}
+	if track.Artist != "" {
+		parts = append(parts, "artist="+track.Artist)
+	}
+	if track.Album != "" {
+		parts = append(parts, "album="+track.Album)
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatSong(song navidrome.Song) string {
+	parts := []string{"id=" + song.ID}
+	if song.Title != "" {
+		parts = append(parts, "title="+song.Title)
+	}
+	if song.Artist != "" {
+		parts = append(parts, "artist="+song.Artist)
+	}
+	if song.Album != "" {
+		parts = append(parts, "album="+song.Album)
+	}
+	return strings.Join(parts, " ")
+}
+
 func specFromPlaylist(playlist navidrome.Playlist, songs []navidrome.Song) navidrome.PlaylistSpec {
 	tracks := make([]navidrome.TrackSpec, 0, len(songs))
 	for _, song := range songs {
 		tracks = append(tracks, navidrome.TrackSpec(song))
 	}
 	public := playlist.Public
+	comment := playlist.Comment
 	return navidrome.PlaylistSpec{
 		Name:        playlist.Name,
 		NavidromeID: playlist.ID,
-		Comment:     playlist.Comment,
+		Comment:     &comment,
 		Public:      &public,
 		Tracks:      tracks,
 	}

@@ -8,7 +8,7 @@ import (
 type PlaylistSpec struct {
 	Name        string      `yaml:"name" json:"name"`
 	NavidromeID string      `yaml:"navidrome_id,omitempty" json:"navidrome_id,omitempty"`
-	Comment     string      `yaml:"comment,omitempty" json:"comment,omitempty"`
+	Comment     *string     `yaml:"comment,omitempty" json:"comment,omitempty"`
 	Public      *bool       `yaml:"public,omitempty" json:"public,omitempty"`
 	Tracks      []TrackSpec `yaml:"tracks" json:"tracks"`
 }

@@ -28,10 +28,11 @@ func TestReadSpecValidatesRequiredFields(t *testing.T) {
 
 func TestWriteSpecRoundTrips(t *testing.T) {
 	public := false
+	comment := "slow songs"
 	in := PlaylistSpec{
 		Name:        "Night",
 		NavidromeID: "playlist-1",
-		Comment:     "slow songs",
+		Comment:     &comment,
 		Public:      &public,
 		Tracks: []TrackSpec{{
 			ID:     "song-1",
@@ -49,8 +50,11 @@ func TestWriteSpecRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSpec: %v", err)
 	}
-	if out.Name != in.Name || out.NavidromeID != in.NavidromeID || out.Comment != in.Comment {
+	if out.Name != in.Name || out.NavidromeID != in.NavidromeID {
 		t.Fatalf("round trip = %+v", out)
+	}
+	if out.Comment == nil || *out.Comment != comment {
+		t.Fatalf("Comment = %v", out.Comment)
 	}
 	if out.Public == nil || *out.Public != false {
 		t.Fatalf("Public = %v", out.Public)

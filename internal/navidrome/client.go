@@ -168,13 +168,13 @@ func (c *Client) CreateOrReplacePlaylist(ctx context.Context, playlistID, name s
 }
 
 // UpdatePlaylistMetadata updates comment/public metadata after contents apply.
-func (c *Client) UpdatePlaylistMetadata(ctx context.Context, playlistID string, public *bool, comment string) error {
+func (c *Client) UpdatePlaylistMetadata(ctx context.Context, playlistID string, public *bool, comment *string) error {
 	form := url.Values{"playlistId": {playlistID}}
 	if public != nil {
 		form.Set("public", fmt.Sprintf("%t", *public))
 	}
-	if comment != "" {
-		form.Set("comment", comment)
+	if comment != nil {
+		form.Set("comment", *comment)
 	}
 	var out subsonicResponse
 	return c.post(ctx, "updatePlaylist.view", form, &out)
