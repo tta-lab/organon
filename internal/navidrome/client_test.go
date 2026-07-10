@@ -145,7 +145,7 @@ func TestUpdatePlaylistMetadataSendsEmptyComment(t *testing.T) {
 	client.salt = func() string { return "salt" }
 
 	comment := ""
-	if err := client.UpdatePlaylistMetadata(context.Background(), "playlist-1", nil, &comment); err != nil {
+	if err := client.UpdatePlaylistMetadata(context.Background(), "playlist-1", "", nil, &comment); err != nil {
 		t.Fatalf("UpdatePlaylistMetadata: %v", err)
 	}
 	if _, ok := gotForm["comment"]; !ok {

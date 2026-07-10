@@ -286,3 +286,65 @@ func TestApplyDryRunDoesNotMutate(t *testing.T) {
 		t.Fatalf("stdout = %s", stdout)
 	}
 }
+
+func TestApplyRenamesExistingPlaylistWithoutOtherMetadata(t *testing.T) {
+	var updatedName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/getSong.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"song":   map[string]string{"id": "song-1", "title": "Song", "artist": "Artist"},
+				},
+			})
+		case "/rest/getPlaylists.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"playlists": map[string]any{"playlist": []map[string]any{{
+						"id": "playlist-1", "name": "Old Name", "owner": "ooneil", "public": true,
+					}}},
+				},
+			})
+		case "/rest/getPlaylist.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"playlist": map[string]any{
+						"id": "playlist-1", "name": "Old Name", "owner": "ooneil", "public": true,
+						"entry": []map[string]string{{"id": "song-1", "title": "Song", "artist": "Artist"}},
+					},
+				},
+			})
+		case "/rest/createPlaylist.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{"subsonic-response": map[string]any{"status": "ok"}})
+		case "/rest/updatePlaylist.view":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse update form: %v", err)
+			}
+			updatedName = r.PostForm.Get("name")
+			_ = json.NewEncoder(w).Encode(map[string]any{"subsonic-response": map[string]any{"status": "ok"}})
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	tmp := t.TempDir()
+	spec := filepath.Join(tmp, "playlist.yaml")
+	content := "name: 新名字\nnavidrome_id: playlist-1\ntracks:\n  - id: song-1\n    title: Song\n    artist: Artist\n"
+	if err := os.WriteFile(spec, []byte(content), 0644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	if _, err := runNDPlaylist(t, []string{
+		"--config", writeConfig(t, tmp, server.URL),
+		"apply", "--yes", spec,
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if updatedName != "新名字" {
+		t.Fatalf("updated name = %q, want %q", updatedName, "新名字")
+	}
+}

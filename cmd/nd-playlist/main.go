@@ -520,22 +520,20 @@ func updateMetadata(
 	spec navidrome.PlaylistSpec,
 	playlistID string,
 ) error {
-	if spec.Public != nil || spec.Comment != nil {
-		targetID := playlistID
-		if targetID == "" {
-			refreshed, err := client.GetPlaylists(ctx)
-			if err != nil {
-				return err
-			}
-			created, err := navidrome.ChoosePlaylist(spec, refreshed, owner)
-			if err != nil {
-				return err
-			}
-			targetID = created.ID
+	targetID := playlistID
+	if targetID == "" {
+		refreshed, err := client.GetPlaylists(ctx)
+		if err != nil {
+			return err
 		}
-		if err := client.UpdatePlaylistMetadata(ctx, targetID, spec.Public, spec.Comment); err != nil {
-			return fmt.Errorf("%w: %v", navidrome.ErrMutationRejected, err)
+		created, err := navidrome.ChoosePlaylist(spec, refreshed, owner)
+		if err != nil {
+			return err
 		}
+		targetID = created.ID
+	}
+	if err := client.UpdatePlaylistMetadata(ctx, targetID, spec.Name, spec.Public, spec.Comment); err != nil {
+		return fmt.Errorf("%w: %v", navidrome.ErrMutationRejected, err)
 	}
 	return nil
 }

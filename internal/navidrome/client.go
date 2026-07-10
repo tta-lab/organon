@@ -167,9 +167,17 @@ func (c *Client) CreateOrReplacePlaylist(ctx context.Context, playlistID, name s
 	return c.post(ctx, "createPlaylist.view", form, &out)
 }
 
-// UpdatePlaylistMetadata updates comment/public metadata after contents apply.
-func (c *Client) UpdatePlaylistMetadata(ctx context.Context, playlistID string, public *bool, comment *string) error {
+// UpdatePlaylistMetadata updates name/comment/public metadata after contents apply.
+func (c *Client) UpdatePlaylistMetadata(
+	ctx context.Context,
+	playlistID, name string,
+	public *bool,
+	comment *string,
+) error {
 	form := url.Values{"playlistId": {playlistID}}
+	if name != "" {
+		form.Set("name", name)
+	}
 	if public != nil {
 		form.Set("public", fmt.Sprintf("%t", *public))
 	}
