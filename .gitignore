@@ -34,8 +34,8 @@ go.work.sum
 /url
 /web
 
-# Local Navidrome playlist specs are machine-owned.
-/playlists/navidrome/*.yaml
+# Local Navidrome playlists and maintenance scripts are machine-owned.
+/playlists/navidrome/
 
 # Editor/IDE
 # .idea/
