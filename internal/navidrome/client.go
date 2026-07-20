@@ -92,10 +92,10 @@ type radioStationsPayload struct {
 
 // RadioStation is an internet radio station configured in Navidrome.
 type RadioStation struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	StreamURL   string `json:"streamUrl"`
-	HomePageURL string `json:"homePageUrl"`
+	ID          string `json:"id" yaml:"id,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	StreamURL   string `json:"streamUrl" yaml:"stream_url"`
+	HomePageURL string `json:"homePageUrl" yaml:"homepage_url,omitempty"`
 }
 
 // Ping validates authentication and server reachability.

@@ -287,20 +287,18 @@ func TestApplyDryRunDoesNotMutate(t *testing.T) {
 	}
 }
 
-func TestRadioImportCliampDefaultsToDryRun(t *testing.T) {
-	var mutateCalled bool
+func TestRadioDiffReportsMissingAndExistingStations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/rest/getInternetRadioStations.view":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"subsonic-response": map[string]any{
-					"status":                "ok",
-					"internetRadioStations": map[string]any{"internetRadioStation": []any{}},
+					"status": "ok",
+					"internetRadioStations": map[string]any{"internetRadioStation": []map[string]string{{
+						"name": "Existing", "streamUrl": "https://radio.example/existing",
+					}}},
 				},
 			})
-		case "/rest/createInternetRadioStation.view":
-			mutateCalled = true
-			t.Fatal("radio import mutated without --yes")
 		default:
 			t.Fatalf("path = %s", r.URL.Path)
 		}
@@ -308,18 +306,26 @@ func TestRadioImportCliampDefaultsToDryRun(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	tmp := t.TempDir()
+	path := filepath.Join(tmp, "stations.yaml")
+	if err := os.WriteFile(path, []byte(`stations:
+  - name: Existing
+    stream_url: https://radio.example/existing
+  - name: New
+    stream_url: https://radio.example/new
+`), 0644); err != nil {
+		t.Fatalf("write stations: %v", err)
+	}
 	stdout, err := runNDPlaylist(t, []string{
 		"--config", writeConfig(t, tmp, server.URL),
-		"radio", "import-cliamp",
+		"radio", "diff", path,
 	})
 	if err != nil {
-		t.Fatalf("radio import: %v", err)
+		t.Fatalf("radio diff: %v", err)
 	}
-	if mutateCalled {
-		t.Fatal("radio import mutated without --yes")
-	}
-	if got := strings.Count(stdout, "would add\tCliamp "); got != 11 {
-		t.Fatalf("would add count = %d, output:\n%s", got, stdout)
+	for _, want := range []string{"exists\tExisting", "would add\tNew"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("output missing %q:\n%s", want, stdout)
+		}
 	}
 }
 

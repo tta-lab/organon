@@ -1,73 +1,65 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/navidrome"
 )
 
-const cliampHomePageURL = "https://www.cliamp.stream/"
-
-var cliampStations = []navidrome.RadioStation{
-	{
-		Name: "Cliamp Lofi", StreamURL: "http://radio.cliamp.stream/lofi/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp Synthwave", StreamURL: "http://radio.cliamp.stream/synthwave/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp EDM", StreamURL: "http://radio.cliamp.stream/edm/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS", StreamURL: "http://radio.cliamp.stream/ncs/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS House", StreamURL: "http://radio.cliamp.stream/ncs-house/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name:        "Cliamp NCS Dubstep",
-		StreamURL:   "http://radio.cliamp.stream/ncs-dubstep/stream",
-		HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name:        "Cliamp NCS Drum & Bass",
-		StreamURL:   "http://radio.cliamp.stream/ncs-dnb/stream",
-		HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS Trap", StreamURL: "http://radio.cliamp.stream/ncs-trap/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS Phonk", StreamURL: "http://radio.cliamp.stream/ncs-phonk/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS Pop", StreamURL: "http://radio.cliamp.stream/ncs-pop/stream", HomePageURL: cliampHomePageURL,
-	},
-	{
-		Name: "Cliamp NCS Chill", StreamURL: "http://radio.cliamp.stream/ncs-chill/stream", HomePageURL: cliampHomePageURL,
-	},
-}
-
 func newRadioCmd(opts *rootOptions) *cobra.Command {
 	radio := &cobra.Command{
 		Use:   "radio",
 		Short: "Manage Navidrome internet radio stations",
 	}
-	radio.AddCommand(newImportCliampCmd(opts))
+	radio.AddCommand(
+		newRadioListCmd(opts),
+		newRadioDiffCmd(opts),
+		newRadioApplyCmd(opts),
+		newRadioExportCmd(opts),
+	)
 	return radio
 }
 
-func newImportCliampCmd(opts *rootOptions) *cobra.Command {
-	var yes bool
-	cmd := &cobra.Command{
-		Use:   "import-cliamp",
-		Short: "Import Cliamp's built-in radio stations",
-		Long:  helpRadioImportCliamp,
+func newRadioListCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List Navidrome internet radio stations",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, _, err := configuredClient(*opts)
+			if err != nil {
+				return err
+			}
+			stations, err := client.GetInternetRadioStations(cmd.Context())
+			if err != nil {
+				return err
+			}
+			for _, station := range stations {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", station.Name, station.StreamURL); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func newRadioDiffCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "diff <stations.yaml>",
+		Short: "Compare a radio YAML spec with Navidrome",
+		Long:  helpRadioDiff,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := configuredClient(*opts)
+			if err != nil {
+				return err
+			}
+			spec, err := readRadioSpecFile(args[0])
 			if err != nil {
 				return err
 			}
@@ -75,23 +67,41 @@ func newImportCliampCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			byURL := make(map[string]struct{}, len(existing))
-			for _, station := range existing {
-				byURL[station.StreamURL] = struct{}{}
+			_, err = printRadioDiff(cmd, spec.Stations, existing)
+			return err
+		},
+	}
+}
+
+func newRadioApplyCmd(opts *rootOptions) *cobra.Command {
+	var dryRun bool
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "apply <stations.yaml>",
+		Short: "Create missing radio stations from YAML",
+		Long:  helpRadioApply,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := configuredClient(*opts)
+			if err != nil {
+				return err
 			}
-			for _, station := range cliampStations {
-				if _, found := byURL[station.StreamURL]; found {
-					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "exists\t%s\n", station.Name); err != nil {
-						return err
-					}
-					continue
-				}
-				if !yes {
-					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "would add\t%s\n", station.Name); err != nil {
-						return err
-					}
-					continue
-				}
+			spec, err := readRadioSpecFile(args[0])
+			if err != nil {
+				return err
+			}
+			existing, err := client.GetInternetRadioStations(cmd.Context())
+			if err != nil {
+				return err
+			}
+			missing, err := printRadioDiff(cmd, spec.Stations, existing)
+			if err != nil || dryRun || len(missing) == 0 {
+				return err
+			}
+			if !yes && !isCI() {
+				return errors.New("refusing to create radio stations without --yes")
+			}
+			for _, station := range missing {
 				if err := client.CreateInternetRadioStation(cmd.Context(), station); err != nil {
 					return fmt.Errorf("add %s: %w", station.Name, err)
 				}
@@ -102,6 +112,60 @@ func newImportCliampCmd(opts *rootOptions) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without mutation")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Create missing stations")
 	return cmd
+}
+
+func newRadioExportCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "export",
+		Short: "Export Navidrome internet radio stations as YAML",
+		Long:  helpRadioExport,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, _, err := configuredClient(*opts)
+			if err != nil {
+				return err
+			}
+			stations, err := client.GetInternetRadioStations(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return navidrome.WriteRadioSpec(cmd.OutOrStdout(), navidrome.RadioSpec{Stations: stations})
+		},
+	}
+}
+
+func readRadioSpecFile(path string) (navidrome.RadioSpec, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return navidrome.RadioSpec{}, err
+	}
+	defer file.Close()
+	return navidrome.ReadRadioSpec(file)
+}
+
+func printRadioDiff(
+	cmd *cobra.Command,
+	desired, existing []navidrome.RadioStation,
+) ([]navidrome.RadioStation, error) {
+	known := make(map[string]struct{}, len(existing))
+	for _, station := range existing {
+		known[station.StreamURL] = struct{}{}
+	}
+	missing := make([]navidrome.RadioStation, 0, len(desired))
+	for _, station := range desired {
+		if _, found := known[station.StreamURL]; found {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "exists\t%s\n", station.Name); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		missing = append(missing, station)
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "would add\t%s\n", station.Name); err != nil {
+			return nil, err
+		}
+	}
+	return missing, nil
 }
