@@ -510,6 +510,9 @@ func applyResolved(
 	if err := client.CreateOrReplacePlaylist(ctx, playlistID, spec.Name, ids); err != nil {
 		return fmt.Errorf("%w: %v", navidrome.ErrMutationRejected, err)
 	}
+	if spec.Public == nil && spec.Comment == nil && (missing || playlist.Name == spec.Name) {
+		return nil
+	}
 	return updateMetadata(ctx, client, owner, spec, playlistID)
 }
 
