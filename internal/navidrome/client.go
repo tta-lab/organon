@@ -55,12 +55,13 @@ type subsonicResponse struct {
 }
 
 type responseStatus struct {
-	Status   string            `json:"status"`
-	Error    *subsonicError    `json:"error,omitempty"`
-	Search   *searchResponse   `json:"searchResult3,omitempty"`
-	Playlist *playlistPayload  `json:"playlist,omitempty"`
-	List     *playlistsPayload `json:"playlists,omitempty"`
-	Song     *Song             `json:"song,omitempty"`
+	Status        string                `json:"status"`
+	Error         *subsonicError        `json:"error,omitempty"`
+	Search        *searchResponse       `json:"searchResult3,omitempty"`
+	Playlist      *playlistPayload      `json:"playlist,omitempty"`
+	List          *playlistsPayload     `json:"playlists,omitempty"`
+	Song          *Song                 `json:"song,omitempty"`
+	RadioStations *radioStationsPayload `json:"internetRadioStations,omitempty"`
 }
 
 type subsonicError struct {
@@ -83,6 +84,18 @@ type playlistPayload struct {
 	Public  bool   `json:"public"`
 	Comment string `json:"comment"`
 	Songs   []Song `json:"entry"`
+}
+
+type radioStationsPayload struct {
+	Stations []RadioStation `json:"internetRadioStation"`
+}
+
+// RadioStation is an internet radio station configured in Navidrome.
+type RadioStation struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	StreamURL   string `json:"streamUrl"`
+	HomePageURL string `json:"homePageUrl"`
 }
 
 // Ping validates authentication and server reachability.
@@ -152,6 +165,31 @@ func (c *Client) GetPlaylist(ctx context.Context, id string) (Playlist, []Song, 
 		Public:  payload.Public,
 		Comment: payload.Comment,
 	}, payload.Songs, nil
+}
+
+// GetInternetRadioStations returns the internet radio stations visible to the user.
+func (c *Client) GetInternetRadioStations(ctx context.Context) ([]RadioStation, error) {
+	var out subsonicResponse
+	if err := c.get(ctx, "getInternetRadioStations.view", nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Subsonic.RadioStations == nil {
+		return nil, nil
+	}
+	return out.Subsonic.RadioStations.Stations, nil
+}
+
+// CreateInternetRadioStation adds an internet radio station. The user must be an admin.
+func (c *Client) CreateInternetRadioStation(ctx context.Context, station RadioStation) error {
+	form := url.Values{
+		"name":      {station.Name},
+		"streamUrl": {station.StreamURL},
+	}
+	if station.HomePageURL != "" {
+		form.Set("homepageUrl", station.HomePageURL)
+	}
+	var out subsonicResponse
+	return c.post(ctx, "createInternetRadioStation.view", form, &out)
 }
 
 // CreateOrReplacePlaylist creates a playlist or replaces all entries when id is set.

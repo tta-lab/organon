@@ -102,6 +102,8 @@ nd-playlist apply --dry-run playlists/navidrome/night.yaml
 nd-playlist apply --yes playlists/navidrome/night.yaml
 nd-playlist export "Mandopop: Soft Night" > playlists/navidrome/mandopop-soft-night.yaml
 nd-playlist export-all --output playlists/navidrome
+nd-playlist radio import-cliamp
+nd-playlist radio import-cliamp --yes
 ```
 
 Default config lives at `~/.config/nd-playlist/config.toml`:
@@ -116,6 +118,10 @@ password = "..."
 `NAVIDROME_PASS` override local config. If no password source is configured and
 stdin is a terminal, `nd-playlist` prompts for the password. Playlist YAML
 exports include song IDs but never include secrets.
+
+`nd-playlist radio import-cliamp` compares Navidrome's current radio list with
+Cliamp's built-in stations and previews the missing stations. Add `--yes` to
+create them; Navidrome requires an admin account for this global change.
 
 ## Why
 

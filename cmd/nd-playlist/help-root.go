@@ -31,3 +31,6 @@ var helpExport string
 
 //go:embed help/export-all.md
 var helpExportAll string
+
+//go:embed help/radio-import-cliamp.md
+var helpRadioImportCliamp string

@@ -287,6 +287,42 @@ func TestApplyDryRunDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestRadioImportCliampDefaultsToDryRun(t *testing.T) {
+	var mutateCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/getInternetRadioStations.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status":                "ok",
+					"internetRadioStations": map[string]any{"internetRadioStation": []any{}},
+				},
+			})
+		case "/rest/createInternetRadioStation.view":
+			mutateCalled = true
+			t.Fatal("radio import mutated without --yes")
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	tmp := t.TempDir()
+	stdout, err := runNDPlaylist(t, []string{
+		"--config", writeConfig(t, tmp, server.URL),
+		"radio", "import-cliamp",
+	})
+	if err != nil {
+		t.Fatalf("radio import: %v", err)
+	}
+	if mutateCalled {
+		t.Fatal("radio import mutated without --yes")
+	}
+	if got := strings.Count(stdout, "would add\tCliamp "); got != 11 {
+		t.Fatalf("would add count = %d, output:\n%s", got, stdout)
+	}
+}
+
 func TestApplyRenamesExistingPlaylistWithoutOtherMetadata(t *testing.T) {
 	var updatedName string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

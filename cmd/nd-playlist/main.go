@@ -56,6 +56,7 @@ func newRootCmd() *cobra.Command {
 		newApplyCmd(&opts),
 		newExportCmd(&opts),
 		newExportAllCmd(&opts),
+		newRadioCmd(&opts),
 	)
 	return root
 }
