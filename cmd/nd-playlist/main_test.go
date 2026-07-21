@@ -287,6 +287,48 @@ func TestApplyDryRunDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestRadioDiffReportsMissingAndExistingStations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/getInternetRadioStations.view":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"internetRadioStations": map[string]any{"internetRadioStation": []map[string]string{{
+						"name": "Existing", "streamUrl": "https://radio.example/existing",
+					}}},
+				},
+			})
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "stations.yaml")
+	if err := os.WriteFile(path, []byte(`stations:
+  - name: Existing
+    stream_url: https://radio.example/existing
+  - name: New
+    stream_url: https://radio.example/new
+`), 0644); err != nil {
+		t.Fatalf("write stations: %v", err)
+	}
+	stdout, err := runNDPlaylist(t, []string{
+		"--config", writeConfig(t, tmp, server.URL),
+		"radio", "diff", path,
+	})
+	if err != nil {
+		t.Fatalf("radio diff: %v", err)
+	}
+	for _, want := range []string{"exists\tExisting", "would add\tNew"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestApplyRenamesExistingPlaylistWithoutOtherMetadata(t *testing.T) {
 	var updatedName string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
