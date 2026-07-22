@@ -46,7 +46,7 @@ func newPRCmd() *cobra.Command {
 	cmd.AddCommand(newPRFindCmd())
 	cmd.AddCommand(newPRGetCmd())
 	cmd.AddCommand(newPRModifyCmd())
-	cmd.AddCommand(newRunnableCmd("comment", "Comment on a pull request", runPRComment))
+	cmd.AddCommand(newPRCommentCmd())
 	cmd.AddCommand(newRunnableCmd("checks", "Show pull request checks", runPRChecks))
 	cmd.AddCommand(newRunnableCmd(cmdStatus, "Show pull request status", runPRChecks))
 	cmd.AddCommand(newPRFailuresCmd("failures"))
@@ -58,8 +58,14 @@ func newPRCreateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <title>",
 		Short: "Create a pull request",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  runPRCreate,
+		Long:  "Create a pull request. The PR body is read from stdin.",
+		Example: `cat <<'EOF' | og pr create "feat(scope): add feature"
+## Summary
+
+Describe the change here.
+EOF`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runPRCreate,
 	}
 }
 
@@ -88,8 +94,23 @@ func newPRGetCmd() *cobra.Command {
 
 func newPRModifyCmd() *cobra.Command {
 	cmd := newRunnableCmd("modify", "Modify a pull request", runPRModify)
+	cmd.Long = "Modify a pull request title and/or body. The new body is read from stdin."
+	cmd.Example = `cat <<'EOF' | og pr modify --pr-id 123 --title "fix(scope): clearer title"
+## Summary
+
+Replace the PR body with this text.
+EOF`
 	cmd.Flags().String("title", "", "New PR title")
 	cmd.Flags().String("pr-id", "", "PR number override")
+	return cmd
+}
+
+func newPRCommentCmd() *cobra.Command {
+	cmd := newRunnableCmd("comment", "Comment on a pull request", runPRComment)
+	cmd.Long = "Comment on the pull request for the current branch. The comment is read from stdin."
+	cmd.Example = `cat <<'EOF' | og pr comment
+Tests now pass. Please review again.
+EOF`
 	return cmd
 }
 

@@ -79,6 +79,39 @@ func TestPRHelpListsV1CommandsWithoutMerge(t *testing.T) {
 	}
 }
 
+func TestPRStdinCommandHelpShowsHeredocExamples(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "create", want: `cat <<'EOF' | og pr create`},
+		{command: "modify", want: `cat <<'EOF' | og pr modify`},
+		{command: "comment", want: `cat <<'EOF' | og pr comment`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			stdout, err := runOG(t, "pr", tt.command, "--help")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("pr %s help missing heredoc example %q:\n%s", tt.command, tt.want, stdout)
+			}
+			if strings.Contains(stdout, "\n  EOF") {
+				t.Fatalf(
+					"pr %s help indents the heredoc terminator, so the example cannot be pasted into a shell:\n%s",
+					tt.command,
+					stdout,
+				)
+			}
+			if strings.Contains(stdout, "\t") {
+				t.Fatalf("pr %s help contains a tab that would alter pasted body text:\n%s", tt.command, stdout)
+			}
+		})
+	}
+}
+
 func TestPRMergeIsNotAvailableInV1(t *testing.T) {
 	_, err := runOG(t, "pr", "merge")
 	if err == nil {
