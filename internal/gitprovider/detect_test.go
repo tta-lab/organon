@@ -191,6 +191,11 @@ func TestWebURL(t *testing.T) {
 			repo:    mustParseRemoteURL(t, "http://forgejo.localhost:17480/GuionAI/flick-backend.git"),
 			wantURL: "http://forgejo.localhost:17480/GuionAI/flick-backend",
 		},
+		{
+			name:    "Forgejo SSH remote",
+			repo:    mustParseRemoteURL(t, "ssh://git@git.example.com:2222/owner/repo.git"),
+			wantURL: "https://git.example.com/owner/repo",
+		},
 	}
 
 	for _, tt := range baseCases {

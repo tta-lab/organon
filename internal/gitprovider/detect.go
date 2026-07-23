@@ -131,12 +131,16 @@ func parseURL(raw string) (*RepoInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	baseURL := ""
+	if u.Scheme == "http" || u.Scheme == "https" {
+		baseURL = u.Scheme + "://" + u.Host
+	}
 	return &RepoInfo{
 		Owner:    owner,
 		Repo:     repo,
 		Provider: detectProviderFromHost(host),
 		Host:     host,
-		BaseURL:  u.Scheme + "://" + u.Host,
+		BaseURL:  baseURL,
 	}, nil
 }
 
