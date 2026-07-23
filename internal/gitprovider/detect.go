@@ -17,6 +17,7 @@ type RepoInfo struct {
 	Repo          string
 	Provider      ProviderType
 	Host          string
+	BaseURL       string
 	DefaultBranch string
 }
 
@@ -24,6 +25,9 @@ type RepoInfo struct {
 func (r *RepoInfo) baseWebURL() string {
 	if r.Provider == ProviderGitHub {
 		return "https://github.com"
+	}
+	if r.BaseURL != "" {
+		return r.BaseURL
 	}
 	return "https://" + r.Host
 }
@@ -127,11 +131,16 @@ func parseURL(raw string) (*RepoInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	baseURL := ""
+	if u.Scheme == "http" || u.Scheme == "https" {
+		baseURL = u.Scheme + "://" + u.Host
+	}
 	return &RepoInfo{
 		Owner:    owner,
 		Repo:     repo,
 		Provider: detectProviderFromHost(host),
 		Host:     host,
+		BaseURL:  baseURL,
 	}, nil
 }
 
@@ -172,7 +181,7 @@ func NewProviderWithToken(info *RepoInfo, githubToken string) (Provider, error) 
 	case ProviderGitHub:
 		return NewGitHubProviderWithToken(githubToken)
 	case ProviderForgejo:
-		return NewForgejoProvider(info.Host)
+		return NewForgejoProvider(info.baseWebURL())
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", info.Provider)
 	}

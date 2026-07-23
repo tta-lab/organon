@@ -1,6 +1,8 @@
 package gitprovider
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -184,6 +186,16 @@ func TestWebURL(t *testing.T) {
 			repo:    &RepoInfo{Owner: "clawteam", Repo: "myproject", Provider: ProviderForgejo, Host: "git.guion.io"},
 			wantURL: "https://git.guion.io/clawteam/myproject",
 		},
+		{
+			name:    "Forgejo HTTP remote with port",
+			repo:    mustParseRemoteURL(t, "http://forgejo.localhost:17480/GuionAI/flick-backend.git"),
+			wantURL: "http://forgejo.localhost:17480/GuionAI/flick-backend",
+		},
+		{
+			name:    "Forgejo SSH remote",
+			repo:    mustParseRemoteURL(t, "ssh://git@git.example.com:2222/owner/repo.git"),
+			wantURL: "https://git.example.com/owner/repo",
+		},
 	}
 
 	for _, tt := range baseCases {
@@ -194,4 +206,33 @@ func TestWebURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewProviderWithTokenUsesRemoteBaseURL(t *testing.T) {
+	t.Setenv("FORGEJO_TOKEN", "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/version" {
+			t.Fatalf("request path = %q, want /api/v1/version", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"version":"11.0.0"}`))
+	}))
+	defer server.Close()
+
+	repo := mustParseRemoteURL(t, server.URL+"/GuionAI/flick-backend.git")
+	provider, err := NewProviderWithToken(repo, "unused")
+	if err != nil {
+		t.Fatalf("NewProviderWithToken(): %v", err)
+	}
+	if provider.Name() != string(ProviderForgejo) {
+		t.Fatalf("provider.Name() = %q, want %q", provider.Name(), ProviderForgejo)
+	}
+}
+
+func mustParseRemoteURL(t *testing.T, remote string) *RepoInfo {
+	t.Helper()
+	repo, err := ParseRemoteURL(remote)
+	if err != nil {
+		t.Fatalf("ParseRemoteURL(%q): %v", remote, err)
+	}
+	return repo
 }
