@@ -180,7 +180,11 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		return gitprovider.NewGitHubProviderWithToken(ctx.Token)
 	}
-	return gitprovider.NewForgejoProviderWithToken(ctx.Host, ctx.Token)
+	baseURL := ctx.BaseURL
+	if baseURL == "" {
+		baseURL = ctx.Host
+	}
+	return gitprovider.NewForgejoProviderWithToken(baseURL, ctx.Token)
 }
 
 func fromProviderPR(pr *gitprovider.PullRequest) *PullRequest {

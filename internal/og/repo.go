@@ -36,6 +36,7 @@ type repoContext struct {
 	ProjectAlias string
 	Provider     gitprovider.ProviderType
 	Host         string
+	BaseURL      string
 	Owner        string
 	Repo         string
 	RemoteURL    string
@@ -90,6 +91,7 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 		ProjectAlias: e.Alias,
 		Provider:     info.Provider,
 		Host:         info.Host,
+		BaseURL:      info.BaseURL,
 		Owner:        info.Owner,
 		Repo:         info.Repo,
 		RemoteURL:    remote,
