@@ -36,6 +36,11 @@ func OrgsPath() string {
 	return filepath.Join(DefaultConfigDir(), "orgs.toml")
 }
 
+// WebConfigPath returns the path to web.toml.
+func WebConfigPath() string {
+	return filepath.Join(DefaultConfigDir(), "web.toml")
+}
+
 // DefaultReferencesPath returns ~/code/references.
 func DefaultReferencesPath() string {
 	home, err := os.UserHomeDir()

@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/docs"
 	"github.com/tta-lab/organon/internal/fetch"
 	"github.com/tta-lab/organon/internal/markdown"
@@ -69,7 +70,11 @@ func newSearchCmd() *cobra.Command {
 		Long:  helpSearch,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := search.Search(context.Background(), args[0])
+			cfg, err := search.LoadConfig(config.WebConfigPath())
+			if err != nil {
+				return err
+			}
+			result, err := search.SearchWithConfig(context.Background(), args[0], cfg)
 			if err != nil {
 				return err
 			}

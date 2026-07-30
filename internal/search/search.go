@@ -29,11 +29,17 @@ const (
 // Search performs a web search using the best available backend.
 // Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
 func Search(ctx context.Context, query string) (string, error) {
+	return SearchWithConfig(ctx, query, Config{})
+}
+
+// SearchWithConfig performs a search using the configured provider. An empty
+// provider preserves automatic selection based on available API keys.
+func SearchWithConfig(ctx context.Context, query string, cfg Config) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
-	provider, searcher, err := resolveSearchProvider()
+	provider, searcher, err := resolveConfiguredSearchProvider(cfg.Search.Provider)
 	if err != nil {
 		return "", err
 	}
@@ -79,6 +85,29 @@ func resolveSearchProvider() (string, WebSearcher, error) {
 	}
 
 	return providerDDG, NewDDGSearcher(), nil
+}
+
+func resolveConfiguredSearchProvider(configured string) (string, WebSearcher, error) {
+	switch configured {
+	case "":
+		return resolveSearchProvider()
+	case "exa":
+		key := os.Getenv("EXA_API_KEY")
+		if key == "" {
+			return "", nil, fmt.Errorf("EXA_API_KEY is required when search.provider is exa")
+		}
+		return providerExa, NewExaSearcher(key), nil
+	case "brave":
+		key := os.Getenv("BRAVE_API_KEY")
+		if key == "" {
+			return "", nil, fmt.Errorf("BRAVE_API_KEY is required when search.provider is brave")
+		}
+		return providerBrave, NewBraveSearcher(key), nil
+	case "duckduckgo":
+		return providerDDG, NewDDGSearcher(), nil
+	default:
+		return "", nil, fmt.Errorf("unsupported search provider %q", configured)
+	}
 }
 
 func formatSearchResults(results []SearchResult) string {
