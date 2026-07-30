@@ -12,6 +12,8 @@ make test         # CGO_ENABLED=0 go test -v ./...
 make build        # CGO_ENABLED=0 go build ./cmd/...
 make install      # CGO_ENABLED=0 go install ./cmd/...
 make ci           # fmt, vet, lint, test, build
+make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./internal/config'
+                  # scoped format check, vet, lint, test, and binary build
 ```
 
 ## Architecture
@@ -44,8 +46,19 @@ make ci           # fmt, vet, lint, test, build
 
 Fixture files live in `testdata/`. Tests include both unit tests and CLI integration tests.
 
+For a change confined to one CLI, do not run the full repository test suite locally. Run
+`make ci-scope` with that binary and every directly changed or behaviorally affected Go
+package. This avoids unrelated CLI tests and external integrations while retaining the
+relevant format, vet, lint, test, and build gates.
+
+Use full `make ci` only when the change spans multiple CLIs, changes shared behavior used
+by multiple CLIs, changes repository-wide build/module tooling, or the user explicitly
+requests it. Remote PR CI may still run the full suite.
+
 ```bash
 make test                            # gotestsum with go test fallback
+make ci-scope SCOPE_CMD=web \
+  SCOPE_PACKAGES='./cmd/web ./internal/search ./internal/config'
 CGO_ENABLED=0 go test ./internal/id/...
 CGO_ENABLED=0 go test -v -run TestSymbols ./internal/treesitter/...
 ```

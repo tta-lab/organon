@@ -155,6 +155,34 @@ func TestResolveSearcher_NoKey(t *testing.T) {
 	assert.True(t, ok, "expected DDGSearcher when no API keys are set")
 }
 
+func TestResolveConfiguredSearchProviderUsesExactProvider(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "exa-key-123")
+	t.Setenv("BRAVE_API_KEY", "brave-key-456")
+
+	provider, searcher, err := resolveConfiguredSearchProvider("brave")
+	require.NoError(t, err)
+	assert.Equal(t, providerBrave, provider)
+	assert.IsType(t, &BraveSearcher{}, searcher)
+}
+
+func TestResolveConfiguredSearchProviderDuckDuckGoNeedsNoKey(t *testing.T) {
+	t.Setenv("EXA_API_KEY", "exa-key-123")
+	t.Setenv("BRAVE_API_KEY", "brave-key-456")
+
+	provider, searcher, err := resolveConfiguredSearchProvider("duckduckgo")
+	require.NoError(t, err)
+	assert.Equal(t, providerDDG, provider)
+	assert.IsType(t, &DDGSearcher{}, searcher)
+}
+
+func TestResolveConfiguredSearchProviderRequiresSelectedKey(t *testing.T) {
+	unsetEnv(t, "EXA_API_KEY")
+
+	_, _, err := resolveConfiguredSearchProvider("exa")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "EXA_API_KEY")
+}
+
 func TestSearchWithProvider_IncludesProviderNameOnFailure(t *testing.T) {
 	_, err := searchWithProvider(context.Background(), "test", "DuckDuckGo", failingSearcher{})
 	require.Error(t, err)
