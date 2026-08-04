@@ -3,10 +3,12 @@ package og
 import (
 	"fmt"
 	"strings"
+
+	"github.com/tta-lab/organon/internal/githubapp"
 )
 
 func (s Service) GitPush(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -14,19 +16,21 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")
 	}
-	if err := runGitWithCreds(ctx, gitArgs...); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, gitArgs...); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Pushed %s -> origin/%s", ctx.Branch, ctx.Branch)}), nil
 }
 
 func (s Service) GitPull(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
 	if ctx.Branch == ctx.DefaultBase {
-		if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase); err != nil {
+		if err := runGitWithCreds(
+			ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase,
+		); err != nil {
 			return Response{}, err
 		}
 		return success(Response{Message: "Pulled " + ctx.DefaultBase}), nil
@@ -45,14 +49,14 @@ func (s Service) GitPull(req Request) (Response, error) {
 		}), nil
 	}
 
-	if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: "Pulled " + ctx.Branch}), nil
 }
 
 func (s Service) GitTag(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -77,7 +81,7 @@ func (s Service) GitTag(req Request) (Response, error) {
 			return Response{}, err
 		}
 	}
-	if err := runGitWithCreds(ctx, "push", remoteOrigin, "--", tag); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", remoteOrigin, "--", tag); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}), nil

@@ -10,15 +10,12 @@ import (
 
 // Entry represents a single org from orgs.toml.
 type Entry struct {
-	Name           string `toml:"-"`
-	GitHubTokenEnv string `toml:"github_token_env"`
+	Name string `toml:"-"`
 }
 
 // File is the on-disk TOML structure.
 type File struct {
-	Orgs map[string]struct {
-		GitHubTokenEnv string `toml:"github_token_env"`
-	} `toml:"-"`
+	Orgs map[string]struct{} `toml:"-"`
 }
 
 // Load reads orgs.toml from path. Returns empty if the file doesn't exist.
@@ -31,19 +28,14 @@ func Load(path string) ([]Entry, error) {
 		return nil, fmt.Errorf("reading orgs file: %w", err)
 	}
 
-	var raw map[string]struct {
-		GitHubTokenEnv string `toml:"github_token_env"`
-	}
+	var raw map[string]struct{}
 	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parsing orgs file: %w", err)
 	}
 
 	entries := make([]Entry, 0, len(raw))
-	for name, e := range raw {
-		entries = append(entries, Entry{
-			Name:           name,
-			GitHubTokenEnv: e.GitHubTokenEnv,
-		})
+	for name := range raw {
+		entries = append(entries, Entry{Name: name})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {

@@ -8,19 +8,15 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-
-	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/org"
 )
 
 // Entry represents a project from projects.toml.
 type Entry struct {
-	Alias          string `toml:"-"                json:"alias,omitempty"`
-	Name           string `toml:"name"             json:"name,omitempty"`
-	Path           string `toml:"path"             json:"path,omitempty"`
-	GitHubTokenEnv string `toml:"github_token_env" json:"github_token_env,omitempty"`
-	K8sApp         string `toml:"k8s_app"          json:"k8s_app,omitempty"`
-	K8sNamespace   string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
+	Alias        string `toml:"-"                json:"alias,omitempty"`
+	Name         string `toml:"name"             json:"name,omitempty"`
+	Path         string `toml:"path"             json:"path,omitempty"`
+	K8sApp       string `toml:"k8s_app"          json:"k8s_app,omitempty"`
+	K8sNamespace string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
 }
 
 // Load reads projects.toml from path. Returns empty if the file doesn't exist.
@@ -41,7 +37,6 @@ func Load(path string) ([]Entry, error) {
 	}
 
 	entries := flattenEntries(raw, "")
-	inheritGitHubTokenEnv(entries, filepath.Join(filepath.Dir(path), "orgs.toml"))
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Alias < entries[j].Alias
 	})
@@ -77,9 +72,6 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 			if p, ok := sub["path"].(string); ok {
 				e.Path = p
 			}
-			if g, ok := sub["github_token_env"].(string); ok {
-				e.GitHubTokenEnv = g
-			}
 			if k, ok := sub["k8s_app"].(string); ok {
 				e.K8sApp = k
 			}
@@ -94,24 +86,6 @@ func flattenEntries(m map[string]any, prefix string) []Entry {
 		entries = append(entries, subEntries...)
 	}
 	return entries
-}
-func inheritGitHubTokenEnv(entries []Entry, orgsPath string) {
-	orgs, err := org.Load(orgsPath)
-	if err != nil {
-		return
-	}
-	tokenByOrg := make(map[string]string, len(orgs))
-	for _, e := range orgs {
-		tokenByOrg[e.Name] = e.GitHubTokenEnv
-	}
-	for i := range entries {
-		if entries[i].GitHubTokenEnv != "" {
-			continue
-		}
-		if tokenEnv := tokenByOrg[DeriveOrg(entries[i].Path)]; tokenEnv != "" {
-			entries[i].GitHubTokenEnv = tokenEnv
-		}
-	}
 }
 
 // Get returns a project by exact alias. Returns nil if not found.
@@ -162,20 +136,6 @@ func Resolve(path, alias string) (*Entry, error) {
 	}
 
 	return nil, nil
-}
-
-// ResolveGitHubToken returns the GitHub token for a project alias.
-func ResolveGitHubToken(alias string) string {
-	if alias != "" {
-		e, err := Resolve(config.ProjectsPath(), alias)
-		if err == nil && e != nil && e.GitHubTokenEnv != "" {
-			return os.Getenv(e.GitHubTokenEnv)
-		}
-	}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
-	}
-	return os.Getenv("GH_TOKEN")
 }
 
 // ListFiltered returns all projects, optionally filtered by org derived from path.

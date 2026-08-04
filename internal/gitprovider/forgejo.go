@@ -106,21 +106,6 @@ func (p *ForgejoProvider) GetPR(owner, repo string, index int64) (*PullRequest, 
 	return toPullRequest(pr), nil
 }
 
-func (p *ForgejoProvider) MergePR(owner, repo string, index int64, deleteBranch bool) error {
-	merged, _, err := p.client.MergePullRequest(owner, repo, index, forgejo_sdk.MergePullRequestOption{
-		Style:                  forgejo_sdk.MergeStyleSquash,
-		DeleteBranchAfterMerge: deleteBranch,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to merge PR #%d: %w", index, err)
-	}
-	if !merged {
-		return fmt.Errorf("PR #%d merge was rejected by the server", index)
-	}
-
-	return nil
-}
-
 func (p *ForgejoProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
 	comment, _, err := p.client.CreateIssueComment(owner, repo, index, forgejo_sdk.CreateIssueCommentOption{
 		Body: body,

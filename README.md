@@ -125,6 +125,61 @@ matches stations by stream URL and `radio apply --yes` creates only missing
 stations. Keep machine-owned station files under `playlists/navidrome/`, which
 is ignored by Git. Navidrome requires an admin account for this global change.
 
+### `og` — guarded forge operations
+
+`og` runs GitHub PR and Git network operations through its local daemon. GitHub
+authentication uses repository-scoped installation tokens minted by a GitHub
+App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
+continues to use its existing token environment variables.
+
+Create a GitHub App owned by the organization, with no webhook, and grant these
+repository permissions:
+
+- Contents: read and write
+- Pull requests: read and write
+- Checks: read-only
+- Actions: read-only
+- Workflows: read and write
+
+Install it on either all organization repositories or selected repositories.
+Selected repositories give the smallest access scope; all repositories avoid a
+manual installation update whenever a repository is added. Organization
+rulesets and branch protection still apply. If the App must push to a protected
+branch, add the App to that rule's bypass list; `og` does not merge PRs or bypass
+rules by itself.
+
+After downloading a private key, keep it outside the repository and configure
+the daemon:
+
+```bash
+install -d -m 700 ~/.config/ttal
+install -m 600 ~/Downloads/your-app.private-key.pem \
+  ~/.config/ttal/og-github-app.pem
+cat <<'EOF' > ~/.config/ttal/og.toml
+[github_app]
+app_id = 123456
+key_source = "file"
+key_ref = "og-github-app.pem"
+allowed_owners = ["tta-lab"]
+EOF
+chmod 600 ~/.config/ttal/og.toml
+
+og daemon restart
+og daemon health
+og auth status
+og pr view --json
+og git pull
+```
+
+Run the rollout only after the version containing GitHub App support is
+installed. Keep the old PAT available but unused until the smoke checks pass,
+then remove it from `~/.config/ttal/.env`, shell startup files, and project/org
+configuration. To rotate the key, create and install a new App private key,
+update `key_ref` if its filename changed, restart the daemon, verify `og auth
+status`, and revoke the old key in GitHub. To roll back, restore the previous
+working App key/config and restart the daemon; legacy PAT authentication is not
+a fallback.
+
 ## Why
 
 AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.

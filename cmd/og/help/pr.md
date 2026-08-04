@@ -2,10 +2,10 @@
 
 Pull request operations.
 
-V1 includes create, view/list, find, get, modify, comment, checks/status, and
-failure logs. Merge is not available in V1.
+Includes create, view/list, find, get, modify, comment, checks/status, and
+failure logs. Merge is not available.
 
-V1 behavior:
+Behavior:
 
 - `og pr create <title>` reads the body from stdin and creates the PR.
 - `og pr view --json` and `og pr list --json` show PR details and CI summary.
@@ -17,3 +17,7 @@ V1 behavior:
   provider API paths.
 - `og pr failures --tail <lines>` and `og pr log --tail <lines>` show CI failure
   detail.
+
+GitHub API calls use a repository-scoped App installation token minted by the
+daemon. GitHub tokens supplied through the environment or request payload are
+ignored or rejected.

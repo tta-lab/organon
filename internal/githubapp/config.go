@@ -71,5 +71,5 @@ func (c Config) RequireOwner(owner string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("GitHub owner %q is not in github_app.allowed_owners", owner)
+	return fmt.Errorf("%w: %q is not in github_app.allowed_owners", ErrOwnerNotAllowed, owner)
 }

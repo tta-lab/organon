@@ -11,6 +11,52 @@ import (
 
 const testGitHubBaseBranch = "main"
 
+func TestNewGitHubProviderWithTokenDoesNotUseAmbientToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ambient-token")
+	_, err := NewGitHubProviderWithToken("")
+	if err == nil || !strings.Contains(err.Error(), "explicit") {
+		t.Fatalf("NewGitHubProviderWithToken error = %v, want explicit token error", err)
+	}
+}
+
+func TestGitHubProviderReportsConfirmedAuthFailureWithoutRetry(t *testing.T) {
+	var requests, failures int
+	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if got := r.Header.Get("Authorization"); got != "Bearer installation-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Status:     "401 Unauthorized",
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+			Request:    r,
+		}, nil
+	})
+	client, err := github.NewClient(github.WithTransport(&githubTokenTransport{
+		base:          transport,
+		token:         "installation-token",
+		onAuthFailure: func() { failures++ },
+	}))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	provider := &GitHubProvider{client: client}
+
+	_, err = provider.GetPR("tta-lab", "organon", 1)
+	if err == nil {
+		t.Fatal("expected authentication error")
+	}
+	if requests != 1 || failures != 1 {
+		t.Fatalf("requests = %d, auth failure callbacks = %d; want 1, 1", requests, failures)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestGitHubProviderFindPRByCommit(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/o/r/commits/abc123/pulls", func(w http.ResponseWriter, r *http.Request) {

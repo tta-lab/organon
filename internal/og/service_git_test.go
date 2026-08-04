@@ -6,8 +6,60 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
+
+func TestGitPushRequestsWritePurpose(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	broker := &recordingBroker{}
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error { return nil })
+	defer restoreGit()
+
+	if _, err := NewService(broker).GitPush(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPush: %v", err)
+	}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitWrite}
+	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
+		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
+	}
+}
+
+func TestGitPullRequestsReadPurpose(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	broker := &recordingBroker{}
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error { return nil })
+	defer restoreGit()
+
+	if _, err := NewService(broker).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitRead}
+	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
+		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
+	}
+}
+
+func TestGitTagRequestsWritePurpose(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	broker := &recordingBroker{}
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error { return nil })
+	defer restoreGit()
+
+	if _, err := NewService(broker).GitTag(Request{WorkDir: repo, Tag: "v1.2.3"}); err != nil {
+		t.Fatalf("GitTag: %v", err)
+	}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitWrite}
+	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
+		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
+	}
+}
 
 func TestGitPushPassesForceWithLease(t *testing.T) {
 	home := t.TempDir()
@@ -21,7 +73,7 @@ func TestGitPushPassesForceWithLease(t *testing.T) {
 	})
 	defer restoreGit()
 
-	if _, err := (Service{}).GitPush(Request{WorkDir: repo, Force: true}); err != nil {
+	if _, err := NewService(&recordingBroker{}).GitPush(Request{WorkDir: repo, Force: true}); err != nil {
 		t.Fatalf("GitPush: %v", err)
 	}
 	want := []string{"push", "-u", remoteOrigin, "feature/x", "--force-with-lease"}
@@ -42,7 +94,7 @@ func TestGitPullDefaultBranch(t *testing.T) {
 	})
 	defer restoreGit()
 
-	if _, err := (Service{}).GitPull(Request{WorkDir: repo}); err != nil {
+	if _, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo}); err != nil {
 		t.Fatalf("GitPull: %v", err)
 	}
 	want := [][]string{{"pull", "--ff-only", remoteOrigin, branchMain}}
@@ -71,7 +123,7 @@ func TestGitPullFeatureBranchFallsBackToBranchPullWhenNoPR(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	if _, err := (Service{}).GitPull(Request{WorkDir: repo}); err != nil {
+	if _, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo}); err != nil {
 		t.Fatalf("GitPull: %v", err)
 	}
 	want := [][]string{{"pull", "--ff-only", remoteOrigin, "feature/x"}}
@@ -99,7 +151,7 @@ func TestGitPullFeatureBranchReturnsPRLookupError(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	_, err := (Service{}).GitPull(Request{WorkDir: repo})
+	_, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo})
 	if err == nil {
 		t.Fatal("expected PR lookup error")
 	}
@@ -113,6 +165,10 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	featureSHA := gitOut(t, repo, "rev-parse", "feature/x")
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", featureSHA)
+	broker := &recordingBroker{}
 	var calls [][]string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		calls = append(calls, append([]string(nil), args...))
@@ -134,16 +190,25 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	if _, err := (Service{}).GitPull(Request{WorkDir: repo}); err != nil {
+	if _, err := NewService(broker).GitPull(Request{WorkDir: repo}); err != nil {
 		t.Fatalf("GitPull: %v", err)
 	}
 	want := [][]string{
 		{"fetch", "--prune", remoteOrigin},
-		{"switch", branchMain},
 		{"pull", "--ff-only", remoteOrigin, branchMain},
-		{"branch", "-D", "feature/x"},
+		{"push", remoteOrigin, "--delete", "feature/x"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("git calls = %v, want %v", calls, want)
+	}
+	wantPurposes := []githubapp.Purpose{
+		githubapp.PurposeGitRead, githubapp.PurposeGitRead, githubapp.PurposeGitWrite,
+	}
+	gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+	for _, call := range broker.tokenCalls {
+		gotPurposes = append(gotPurposes, call.purpose)
+	}
+	if !reflect.DeepEqual(gotPurposes, wantPurposes) {
+		t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
 	}
 }

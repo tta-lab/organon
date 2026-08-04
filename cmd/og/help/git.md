@@ -5,7 +5,7 @@ Guarded git operations.
 This command group replaces the forge-related top-level `ttal push`, `ttal pull`,
 and `ttal tag` commands.
 
-V1 behavior:
+Behavior:
 
 - `og git push [--force]` pushes the current branch to origin. `--force` means
   force-with-lease, matching `ttal push --force`.
@@ -16,4 +16,7 @@ V1 behavior:
   pushes that existing local tag instead of bumping again.
 
 Commands resolve the current repository from git metadata and do not accept
-arbitrary git args.
+arbitrary git args. GitHub SSH and HTTPS origins are routed through canonical
+GitHub HTTPS only in the child Git process; the stored origin is not changed.
+Reads outside the App owner/install scope may proceed anonymously. Writes fail
+closed unless the App can mint a repository-scoped write token.

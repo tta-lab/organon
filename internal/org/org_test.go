@@ -11,10 +11,8 @@ func TestLoad(t *testing.T) {
 	p := filepath.Join(dir, "orgs.toml")
 	os.WriteFile(p, []byte(`
 [tta-lab]
-github_token_env = "GITHUB_TOKEN"
 
 [guionai]
-github_token_env = "GUION_GITHUB_TOKEN"
 `), 0644)
 
 	entries, err := Load(p)
@@ -27,9 +25,6 @@ github_token_env = "GUION_GITHUB_TOKEN"
 	if entries[0].Name != "guionai" || entries[1].Name != "tta-lab" {
 		t.Errorf("expected sorted, got %v", entries)
 	}
-	if entries[1].GitHubTokenEnv != "GITHUB_TOKEN" {
-		t.Errorf("unexpected token env: %s", entries[1].GitHubTokenEnv)
-	}
 }
 
 func TestGet(t *testing.T) {
@@ -37,7 +32,6 @@ func TestGet(t *testing.T) {
 	p := filepath.Join(dir, "orgs.toml")
 	os.WriteFile(p, []byte(`
 [tta-lab]
-github_token_env = "GITHUB_TOKEN"
 `), 0644)
 
 	e, err := Get(p, "tta-lab")
@@ -47,9 +41,6 @@ github_token_env = "GITHUB_TOKEN"
 	if e == nil {
 		t.Fatal("expected entry, got nil")
 		return
-	}
-	if e.GitHubTokenEnv != "GITHUB_TOKEN" {
-		t.Errorf("unexpected token env: %s", e.GitHubTokenEnv)
 	}
 }
 

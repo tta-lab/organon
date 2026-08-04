@@ -1,13 +1,16 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/og"
 )
 
@@ -17,14 +20,37 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 	if err := config.InjectDotEnvFallback(); err != nil {
 		cmd.PrintErrf("warning: could not load .env: %v\n", err)
 	}
+	service, err := loadDaemonService(config.OGConfigPath(), config.DefaultConfigDir())
+	if err != nil {
+		return err
+	}
 	socketPath := og.SocketPath()
-	err := og.ListenAndServeUnixReady(socketPath, og.NewMux(og.Service{}), func() {
+	err = og.ListenAndServeUnixReady(socketPath, og.NewMux(service), func() {
 		cmd.Printf("og daemon listening on unix://%s\n", socketPath)
 	})
 	if err != nil {
 		return fmt.Errorf("serve daemon unix://%s: %w", socketPath, err)
 	}
 	return nil
+}
+
+func loadDaemonService(configPath, configDir string) (og.Service, error) {
+	cfg, err := githubapp.LoadConfig(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return og.NewService(nil), nil
+	}
+	if err != nil {
+		return og.Service{}, err
+	}
+	keySource, err := githubapp.NewKeySource(cfg, configDir)
+	if err != nil {
+		return og.Service{}, err
+	}
+	broker, err := githubapp.NewBroker(cfg, keySource)
+	if err != nil {
+		return og.Service{}, err
+	}
+	return og.NewService(broker), nil
 }
 
 func runDaemonInstall(cmd *cobra.Command, args []string) error {

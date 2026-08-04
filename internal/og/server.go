@@ -10,6 +10,12 @@ import (
 
 type HandlerFunc func(Request) (Response, error)
 
+type wireRequest struct {
+	Request
+	Token    json.RawMessage `json:"token"`
+	TokenEnv json.RawMessage `json:"token_env"`
+}
+
 func NewMux(service Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -38,17 +44,18 @@ func HTTPHandler(fn HandlerFunc) http.HandlerFunc {
 			_ = json.NewEncoder(w).Encode(Response{Error: "method not allowed"})
 			return
 		}
-		var req Request
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var wire wireRequest
+		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(Response{Error: "decode request: " + err.Error()})
 			return
 		}
-		if req.Token != "" || req.TokenEnv != "" {
+		if len(wire.Token) != 0 || len(wire.TokenEnv) != 0 {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(Response{Error: "token fields are not accepted in daemon requests"})
 			return
 		}
+		req := wire.Request
 		resp, err := fn(req)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)

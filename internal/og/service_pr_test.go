@@ -1,11 +1,13 @@
 package og
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -14,13 +16,17 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("GITHUB_TOKEN", "token")
 	var calls []string
+	broker := &recordingBroker{}
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		calls = append(calls, "git:"+joinArgs(args))
 		return nil
 	})
 	defer restoreGit()
-	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
 		calls = append(calls, "provider")
+		if _, err := broker.Token(context.Background(), ctx.Owner, ctx.Repo, githubapp.PurposeAPI); err != nil {
+			return nil, err
+		}
 		return fakeProvider{
 			createPR: func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error) {
 				calls = append(calls, "create")
@@ -30,7 +36,9 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	resp, err := Service{}.PRCreate(Request{WorkDir: testRegisteredHTTPRepo(t, home, "feature/x"), Title: "title"})
+	resp, err := NewService(broker).PRCreate(Request{
+		WorkDir: testRegisteredHTTPRepo(t, home, "feature/x"), Title: "title",
+	})
 	if err != nil {
 		t.Fatalf("PRCreate: %v", err)
 	}
@@ -40,6 +48,14 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	want := []string{"git:push -u origin feature/x", "provider", "create"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	wantPurposes := []githubapp.Purpose{githubapp.PurposeGitWrite, githubapp.PurposeAPI}
+	gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+	for _, call := range broker.tokenCalls {
+		gotPurposes = append(gotPurposes, call.purpose)
+	}
+	if !reflect.DeepEqual(gotPurposes, wantPurposes) {
+		t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
 	}
 }
 
@@ -443,10 +459,6 @@ func (p fakeProvider) GetPR(owner, repo string, index int64) (*gitprovider.PullR
 	if p.getPR != nil {
 		return p.getPR(owner, repo, index)
 	}
-	panic("not implemented")
-}
-
-func (p fakeProvider) MergePR(owner, repo string, index int64, deleteBranch bool) error {
 	panic("not implemented")
 }
 

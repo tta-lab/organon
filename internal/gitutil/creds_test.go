@@ -1,77 +1,102 @@
 package gitutil
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
-func TestTokenForRemote(t *testing.T) {
+func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	tests := []struct {
-		name      string
-		remoteURL string
-		envKey    string
-		envVal    string
-		wantToken string
+		name   string
+		remote string
 	}{
-		{"github https", "https://github.com/org/repo.git", "GITHUB_TOKEN", "gh-tok", "gh-tok"},
-		{"forgejo https", "https://git.guion.io/org/repo.git", "FORGEJO_TOKEN", "fg-tok", "fg-tok"},
-		{"forgejo access token", "https://git.guion.io/org/repo.git", "FORGEJO_ACCESS_TOKEN", "fg-access", "fg-access"},
-		{"gitea token", "https://git.guion.io/org/repo.git", "GITEA_TOKEN", "gitea-tok", "gitea-tok"},
-		{"github ssh-style", "git@github.com:org/repo.git", "GITHUB_TOKEN", "gh-tok2", "gh-tok2"},
+		{"SSH shorthand", "git@github.com:tta-lab/organon.git"},
+		{"SSH URL", "ssh://git@github.com/tta-lab/organon.git"},
+		{"HTTPS", "https://github.com/tta-lab/organon.git"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clearTokenEnv(t)
-			t.Setenv(tt.envKey, tt.envVal)
-			got := tokenForRemote(tt.remoteURL, "")
-			if got != tt.wantToken {
-				t.Errorf("tokenForRemote(%q) = %q, want %q", tt.remoteURL, got, tt.wantToken)
+			env := GitHubAppGitEnv([]string{"PATH=/bin"}, tt.remote, "tta-lab", "organon", "test-token-secret")
+			configs := gitConfigPairs(t, env)
+			canonical := "https://github.com/tta-lab/organon.git"
+			if tt.remote != canonical && configs["url."+canonical+".insteadOf"] != tt.remote {
+				t.Fatalf("configs = %#v, want rewrite from %q to %q", configs, tt.remote, canonical)
+			}
+			for key, value := range configs {
+				if strings.Contains(key, "test-token-secret") || strings.Contains(value, "test-token-secret") {
+					t.Fatalf("token leaked into git config %q=%q", key, value)
+				}
+			}
+			if envValue(env, "GIT_TOKEN_INJECT") != "test-token-secret" {
+				t.Fatalf("GIT_TOKEN_INJECT missing from %v", env)
 			}
 		})
 	}
 }
 
-func TestGitCredEnv(t *testing.T) {
-	t.Run("with token includes all 7 env vars", func(t *testing.T) {
-		clearTokenEnv(t)
-		t.Setenv("GITHUB_TOKEN", "test-token-123")
-		env := GitCredEnv("https://github.com/org/repo", "")
-		if len(env) != 7 {
-			t.Fatalf("expected 7 env vars, got %d: %v", len(env), env)
+func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
+	base := []string{
+		"PATH=/bin",
+		"GIT_TERMINAL_PROMPT=1",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=store",
+		"GIT_TOKEN_INJECT=ambient-token",
+		"GIT_ASKPASS=/tmp/leaky-helper",
+		"SSH_ASKPASS=/tmp/leaky-ssh-helper",
+		"GCM_INTERACTIVE=always",
+	}
+	env := GitHubAppGitEnv(base, "git@github.com:tta-lab/organon.git", "tta-lab", "organon", "")
+	if envValue(env, "PATH") != "/bin" || envValue(env, "GIT_TERMINAL_PROMPT") != "0" {
+		t.Fatalf("environment = %v", env)
+	}
+	if envValue(env, "GIT_TOKEN_INJECT") != "" {
+		t.Fatalf("anonymous environment retained token: %v", env)
+	}
+	for _, name := range []string{"GIT_ASKPASS", "SSH_ASKPASS", "GCM_INTERACTIVE"} {
+		if envValue(env, name) != "" {
+			t.Fatalf("anonymous environment retained %s: %v", name, env)
 		}
-		if env[0] != "GIT_TERMINAL_PROMPT=0" {
-			t.Errorf("env[0] = %q, want GIT_TERMINAL_PROMPT=0", env[0])
-		}
-		if env[1] != "GIT_CONFIG_COUNT=2" {
-			t.Errorf("env[1] = %q, want GIT_CONFIG_COUNT=2", env[1])
-		}
-		// Token is passed via GIT_TOKEN_INJECT, not interpolated into the shell string.
-		if env[6] != "GIT_TOKEN_INJECT=test-token-123" {
-			t.Errorf("env[6] = %q, want GIT_TOKEN_INJECT=test-token-123", env[6])
-		}
-	})
+	}
+	configs := gitConfigPairs(t, env)
+	if got, ok := configs["credential.helper"]; !ok || got != "" {
+		t.Fatalf("credential.helper = %q, present %v; want explicit clear", got, ok)
+	}
+	if got, ok := configs["core.askPass"]; !ok || got != "" {
+		t.Fatalf("core.askPass = %q, present %v; want explicit clear", got, ok)
+	}
+}
 
-	t.Run("without token still returns GIT_TERMINAL_PROMPT=0", func(t *testing.T) {
-		clearTokenEnv(t)
-		env := GitCredEnv("https://github.com/org/repo", "")
-		if len(env) != 1 {
-			t.Fatalf("expected 1 env var, got %d: %v", len(env), env)
-		}
-		if env[0] != "GIT_TERMINAL_PROMPT=0" {
-			t.Errorf("env[0] = %q, want GIT_TERMINAL_PROMPT=0", env[0])
-		}
-	})
+func gitConfigPairs(t *testing.T, env []string) map[string]string {
+	t.Helper()
+	countValue := envValue(env, "GIT_CONFIG_COUNT")
+	if countValue == "" {
+		t.Fatal("GIT_CONFIG_COUNT is missing")
+	}
+	var count int
+	if _, err := fmt.Sscanf(countValue, "%d", &count); err != nil {
+		t.Fatalf("parse GIT_CONFIG_COUNT %q: %v", countValue, err)
+	}
+	pairs := make(map[string]string, count)
+	for i := range count {
+		key := envValue(env, fmt.Sprintf("GIT_CONFIG_KEY_%d", i))
+		pairs[key] = envValue(env, fmt.Sprintf("GIT_CONFIG_VALUE_%d", i))
+	}
+	return pairs
+}
 
-	t.Run("forgejo without token returns prompt suppression only", func(t *testing.T) {
-		clearTokenEnv(t)
-		env := GitCredEnv("https://git.guion.io/org/repo", "")
-		if len(env) != 1 {
-			t.Fatalf("expected 1 env var, got %d", len(env))
+func envValue(env []string, name string) string {
+	prefix := name + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
 		}
-	})
+	}
+	return ""
 }
 
 func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
-	clearTokenEnv(t)
 	t.Setenv("GITHUB_TOKEN", "ambient-token")
 
 	env := GitCredEnvWithToken("resolved-token")
@@ -80,29 +105,5 @@ func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
 	}
 	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
 		t.Fatalf("env[6] = %q, want explicit resolved token", env[6])
-	}
-}
-
-func TestGitCredEnvHasToken(t *testing.T) {
-	t.Run("returns true when token available", func(t *testing.T) {
-		clearTokenEnv(t)
-		t.Setenv("GITHUB_TOKEN", "mytoken")
-		if !GitCredEnvHasToken("https://github.com/org/repo", "") {
-			t.Error("expected true, got false")
-		}
-	})
-
-	t.Run("returns false when no token", func(t *testing.T) {
-		clearTokenEnv(t)
-		if GitCredEnvHasToken("https://github.com/org/repo", "") {
-			t.Error("expected false, got true")
-		}
-	})
-}
-
-func clearTokenEnv(t *testing.T) {
-	t.Helper()
-	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
-		t.Setenv(name, "")
 	}
 }

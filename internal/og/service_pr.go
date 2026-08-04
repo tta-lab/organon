@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 func (s Service) PRCreate(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
-	if err := runGitWithCreds(ctx, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
 	pr, err := createPR(ctx, req.Title, req.Body)
@@ -23,7 +24,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 }
 
 func (s Service) PRView(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -40,7 +41,7 @@ func (s Service) PRView(req Request) (Response, error) {
 }
 
 func (s Service) PRFind(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -52,7 +53,7 @@ func (s Service) PRFind(req Request) (Response, error) {
 }
 
 func (s Service) PRGet(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -64,7 +65,7 @@ func (s Service) PRGet(req Request) (Response, error) {
 }
 
 func (s Service) PRModify(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -84,7 +85,7 @@ func (s Service) PRModify(req Request) (Response, error) {
 }
 
 func (s Service) PRComment(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -99,7 +100,7 @@ func (s Service) PRComment(req Request) (Response, error) {
 }
 
 func (s Service) PRChecks(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -130,7 +131,7 @@ func attachCIStatus(ctx *repoContext, pr *PullRequest) {
 }
 
 func (s Service) PRFailures(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -149,7 +150,7 @@ func (s Service) PRFailures(req Request) (Response, error) {
 }
 
 func (s Service) PRLog(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
