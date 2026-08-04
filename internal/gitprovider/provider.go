@@ -73,7 +73,6 @@ type Provider interface {
 	FindPRByState(owner, repo, head, base, state string) (*PullRequest, error)
 	EditPR(owner, repo string, index int64, title, body string) (*PullRequest, error)
 	GetPR(owner, repo string, index int64) (*PullRequest, error)
-	MergePR(owner, repo string, index int64, deleteBranch bool) error
 	CreateComment(owner, repo string, index int64, body string) (*Comment, error)
 	ListComments(owner, repo string, index int64) ([]*Comment, error)
 	GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error)

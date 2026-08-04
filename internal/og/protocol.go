@@ -1,7 +1,6 @@
 package og
 
-// Request is the typed local daemon request. CLI callers should only populate
-// working-directory and operation fields; token fields are intentionally daemon-owned.
+// Request is the typed local daemon request.
 type Request struct {
 	WorkDir string `json:"work_dir"`
 	Force   bool   `json:"force,omitempty"`
@@ -12,9 +11,6 @@ type Request struct {
 	Index   int64  `json:"index,omitempty"`
 	State   string `json:"state,omitempty"`
 	Tail    int    `json:"tail,omitempty"`
-
-	Token    string `json:"token,omitempty"`
-	TokenEnv string `json:"token_env,omitempty"`
 }
 
 // Response is the typed local daemon response.

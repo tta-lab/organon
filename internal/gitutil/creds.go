@@ -7,25 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/tta-lab/organon/internal/project"
 )
-
-// GitCredEnv returns environment variables for git network operations.
-// It ALWAYS includes GIT_TERMINAL_PROMPT=0 to suppress interactive prompts.
-// If a token is available for the remote host, it also injects a one-shot
-// credential helper that clears osxkeychain and provides the token.
-//
-// projectAlias is optional; when provided, per-project github_token_env
-// overrides are respected via project.ResolveGitHubToken().
-//
-// The token is passed via GIT_TOKEN_INJECT rather than interpolated into the
-// shell string, which avoids breakage if a token ever contains shell metacharacters.
-//
-// Use GitCredEnvHasToken to check whether credentials were injected.
-func GitCredEnv(remoteURL, projectAlias string) []string {
-	return GitCredEnvWithToken(tokenForRemote(remoteURL, projectAlias))
-}
 
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
@@ -50,11 +32,52 @@ func GitCredEnvWithToken(token string) []string {
 	)
 }
 
-// GitCredEnvHasToken reports whether GitCredEnv would inject a token for the
-// given remote URL and project alias. Use this instead of checking len(GitCredEnv(...))
-// to guard critical operations that must fail fast without a token.
-func GitCredEnvHasToken(remoteURL, projectAlias string) bool {
-	return tokenForRemote(remoteURL, projectAlias) != ""
+// GitHubAppGitEnv returns a complete child-process environment that routes a
+// GitHub origin through canonical HTTPS and uses only the supplied App token.
+func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
+	env := filterControlledGitEnv(baseEnv)
+	env = append(env, "GIT_TERMINAL_PROMPT=0")
+
+	type configPair struct{ key, value string }
+	configs := []configPair{
+		{key: "credential.helper", value: ""},
+		{key: "core.askPass", value: ""},
+	}
+	if token != "" {
+		configs = append(configs, configPair{
+			key:   "credential.helper",
+			value: "!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
+		})
+	}
+	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
+	if remoteURL != canonicalURL {
+		configs = append(configs, configPair{key: "url." + canonicalURL + ".insteadOf", value: remoteURL})
+	}
+	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(configs)))
+	for i, config := range configs {
+		env = append(env,
+			fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, config.key),
+			fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, config.value),
+		)
+	}
+	if token != "" {
+		env = append(env, "GIT_TOKEN_INJECT="+token)
+	}
+	return env
+}
+
+func filterControlledGitEnv(baseEnv []string) []string {
+	filtered := make([]string, 0, len(baseEnv))
+	for _, entry := range baseEnv {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "GIT_TERMINAL_PROMPT" || name == "GIT_CONFIG_COUNT" || name == "GIT_TOKEN_INJECT" ||
+			name == "GIT_ASKPASS" || name == "SSH_ASKPASS" || name == "GCM_INTERACTIVE" ||
+			strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 // RemoteURL returns the origin remote URL for the given directory.
@@ -66,16 +89,6 @@ func RemoteURL(dir string) (string, error) {
 		return "", fmt.Errorf("git remote get-url origin: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// tokenForRemote selects the appropriate token based on remote URL and project alias.
-// For GitHub repos: uses project.ResolveGitHubToken (respects github_token_env override).
-// For non-GitHub repos: uses FORGEJO_TOKEN.
-func tokenForRemote(remoteURL, projectAlias string) string {
-	if strings.Contains(remoteURL, "github.com") {
-		return project.ResolveGitHubToken(projectAlias)
-	}
-	return ForgeToken()
 }
 
 // ForgeTokenEnv returns the first configured token environment variable for

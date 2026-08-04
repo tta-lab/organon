@@ -254,12 +254,11 @@ func newOrgListCmd() *cobra.Command {
 
 			if jsonOut {
 				type item struct {
-					Org            string `json:"org"`
-					GitHubTokenEnv string `json:"github_token_env"`
+					Org string `json:"org"`
 				}
 				out := make([]item, len(entries))
 				for i, e := range entries {
-					out[i] = item{Org: e.Name, GitHubTokenEnv: e.GitHubTokenEnv}
+					out[i] = item{Org: e.Name}
 				}
 				return json.NewEncoder(os.Stdout).Encode(out)
 			}
@@ -269,11 +268,11 @@ func newOrgListCmd() *cobra.Command {
 				return nil
 			}
 
-			dimColor, headerStyle, cellStyle, dimStyle := format.TableStyles()
+			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
 
 			rows := make([][]string, len(entries))
 			for i, e := range entries {
-				rows[i] = []string{e.Name, e.GitHubTokenEnv}
+				rows[i] = []string{e.Name}
 			}
 
 			t := table.New().
@@ -283,12 +282,9 @@ func newOrgListCmd() *cobra.Command {
 					if row == table.HeaderRow {
 						return headerStyle
 					}
-					if col == 1 {
-						return dimStyle
-					}
 					return cellStyle
 				}).
-				Headers("ORG", "GITHUB_TOKEN_ENV").
+				Headers("ORG").
 				Rows(rows...)
 
 			fmt.Println(t)
@@ -317,14 +313,12 @@ func newOrgGetCmd() *cobra.Command {
 
 			if jsonOut {
 				type item struct {
-					Org            string `json:"org"`
-					GitHubTokenEnv string `json:"github_token_env"`
+					Org string `json:"org"`
 				}
-				return json.NewEncoder(os.Stdout).Encode(item{Org: e.Name, GitHubTokenEnv: e.GitHubTokenEnv})
+				return json.NewEncoder(os.Stdout).Encode(item{Org: e.Name})
 			}
 
 			fmt.Printf("org: %s\n", e.Name)
-			fmt.Printf("github_token_env: %s\n", e.GitHubTokenEnv)
 			return nil
 		},
 	}

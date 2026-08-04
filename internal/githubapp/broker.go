@@ -260,7 +260,7 @@ func classifyGitHubError(operation, owner, repo string, err error) error {
 	status := responseError.Response.StatusCode
 	switch {
 	case operation == "discover installation" && status == http.StatusNotFound:
-		return fmt.Errorf("GitHub App is not installed on or cannot access %s/%s", owner, repo)
+		return fmt.Errorf("%w: App is not installed on or cannot access %s/%s", ErrInstallationNotFound, owner, repo)
 	case status == http.StatusUnauthorized:
 		return fmt.Errorf(
 			"GitHub App JWT authentication failed for %s/%s (HTTP 401); check the private key and system clock",

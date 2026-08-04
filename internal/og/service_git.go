@@ -1,12 +1,16 @@
 package og
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 func (s Service) GitPush(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -14,26 +18,28 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")
 	}
-	if err := runGitWithCreds(ctx, gitArgs...); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, gitArgs...); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Pushed %s -> origin/%s", ctx.Branch, ctx.Branch)}), nil
 }
 
 func (s Service) GitPull(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
 	if ctx.Branch == ctx.DefaultBase {
-		if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase); err != nil {
+		if err := runGitWithCreds(
+			ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase,
+		); err != nil {
 			return Response{}, err
 		}
 		return success(Response{Message: "Pulled " + ctx.DefaultBase}), nil
 	}
 
 	pr, err := findPR(ctx, stateAll)
-	if err != nil && !isNoPRFound(err) {
+	if err != nil && !isNoPRFound(err) && !isAnonymousGitHubReadScopeError(ctx, err) {
 		return Response{}, err
 	}
 	if err == nil && pr.Merged {
@@ -45,14 +51,19 @@ func (s Service) GitPull(req Request) (Response, error) {
 		}), nil
 	}
 
-	if err := runGitWithCreds(ctx, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: "Pulled " + ctx.Branch}), nil
 }
 
+func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
+	return ctx.Provider == gitprovider.ProviderGitHub &&
+		(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound))
+}
+
 func (s Service) GitTag(req Request) (Response, error) {
-	ctx, err := resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -77,7 +88,7 @@ func (s Service) GitTag(req Request) (Response, error) {
 			return Response{}, err
 		}
 	}
-	if err := runGitWithCreds(ctx, "push", remoteOrigin, "--", tag); err != nil {
+	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", remoteOrigin, "--", tag); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}), nil

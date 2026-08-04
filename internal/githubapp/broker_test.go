@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,9 @@ func TestBrokerRejectsDisallowedOwnerBeforeNetwork(t *testing.T) {
 	_, err := broker.Token(context.Background(), "outsider", "organon", PurposeGitRead)
 	if err == nil || !strings.Contains(err.Error(), "allowed_owners") {
 		t.Fatalf("Token error = %v", err)
+	}
+	if !errors.Is(err, ErrOwnerNotAllowed) {
+		t.Fatalf("Token error = %v, want ErrOwnerNotAllowed", err)
 	}
 	if got := requests.Load(); got != 0 {
 		t.Fatalf("network requests = %d, want 0", got)
@@ -326,6 +330,19 @@ func TestBrokerClassifiesGitHubFailures(t *testing.T) {
 				t.Fatalf("Token error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestBrokerMissingInstallationReturnsTypedError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSONStatus(t, w, http.StatusNotFound, map[string]string{"message": "not found"})
+	}))
+	t.Cleanup(server.Close)
+	broker := newTestBroker(t, server, Config{AppID: 7, AllowedOwners: []string{"tta-lab"}})
+
+	_, err := broker.Token(context.Background(), "tta-lab", "organon", PurposeGitRead)
+	if !errors.Is(err, ErrInstallationNotFound) {
+		t.Fatalf("Token error = %v, want ErrInstallationNotFound", err)
 	}
 }
 

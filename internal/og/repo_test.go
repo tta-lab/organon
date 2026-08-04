@@ -1,25 +1,37 @@
 package og
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
-	"github.com/tta-lab/organon/internal/project"
 )
 
-func TestTokenEnvForDoesNotUseGitHubTokenEnvForForgejo(t *testing.T) {
+func TestTokenEnvForUsesForgejoConfiguration(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "")
 	t.Setenv("FORGEJO_ACCESS_TOKEN", "")
 	t.Setenv("ORG_GITHUB_TOKEN", "gh-token")
 	t.Setenv("GITEA_TOKEN", "forge-token")
 
-	got := tokenEnvFor(gitprovider.ProviderForgejo, &project.Entry{GitHubTokenEnv: "ORG_GITHUB_TOKEN"})
+	got := tokenEnvFor(gitprovider.ProviderForgejo)
 	if got != "GITEA_TOKEN" {
 		t.Fatalf("tokenEnvFor(Forgejo) = %q, want GITEA_TOKEN", got)
+	}
+}
+
+func TestTokenEnvForIgnoresGitHubPATConfiguration(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ambient-github-token")
+	t.Setenv("GH_TOKEN", "ambient-gh-token")
+	t.Setenv("ORG_GITHUB_TOKEN", "project-token")
+
+	got := tokenEnvFor(gitprovider.ProviderGitHub)
+	if got != "" {
+		t.Fatalf("tokenEnvFor(GitHub) = %q, want empty", got)
 	}
 }
 
@@ -27,8 +39,10 @@ func TestCleanupMergedBranchSkipsMissingRemoteBranch(t *testing.T) {
 	repo := testGitRepoWithMissingRemoteFeature(t)
 
 	if err := cleanupMergedBranch(&repoContext{
+		Provider:    gitprovider.ProviderForgejo,
 		WorkDir:     repo,
 		RemoteURL:   "file://" + filepath.Join(repo, "..", "origin.git"),
+		Token:       "test-token",
 		DefaultBase: branchMain,
 		Branch:      "feature",
 	}); err != nil {
@@ -48,7 +62,11 @@ func TestComputeBumpedTagReusesUnpushedLocalLatestTag(t *testing.T) {
 	repo := testGitRepoWithRemote(t)
 	gitRun(t, repo, "tag", "v1.2.3")
 
-	tag, err := computeBumpedTag(&repoContext{WorkDir: repo}, "patch")
+	tag, err := computeBumpedTag(&repoContext{
+		Provider: gitprovider.ProviderForgejo,
+		WorkDir:  repo,
+		Token:    "test-token",
+	}, "patch")
 	if err != nil {
 		t.Fatalf("computeBumpedTag: %v", err)
 	}
@@ -59,7 +77,12 @@ func TestComputeBumpedTagReusesUnpushedLocalLatestTag(t *testing.T) {
 
 func TestShouldBumpLatestTagUsesCredentialAwareGit(t *testing.T) {
 	repo := testGitRepoWithRemote(t)
-	ctx := &repoContext{WorkDir: repo, RemoteURL: "https://git.example.test/org/repo.git"}
+	ctx := &repoContext{
+		Provider:  gitprovider.ProviderForgejo,
+		WorkDir:   repo,
+		RemoteURL: "https://git.example.test/org/repo.git",
+		Token:     "test-token",
+	}
 	var gotArgs []string
 	restore := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		gotArgs = append([]string(nil), args...)
@@ -88,7 +111,7 @@ func TestGitPushAllowsMainAndMasterToReachRemote(t *testing.T) {
 			t.Setenv("GH_TOKEN", "")
 			repo := testRegisteredHTTPRepo(t, home, branch)
 
-			_, err := Service{}.GitPush(Request{WorkDir: repo})
+			_, err := NewService(&recordingBroker{}).GitPush(Request{WorkDir: repo})
 			if err == nil {
 				t.Fatal("expected remote push error")
 			}
@@ -99,32 +122,94 @@ func TestGitPushAllowsMainAndMasterToReachRemote(t *testing.T) {
 	}
 }
 
-func TestGitCredentialEnvUsesResolvedContextToken(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "ambient-token")
-
-	env := gitCredentialEnv(&repoContext{
-		RemoteURL: "https://github.com/tta-lab/example.git",
-		Token:     "resolved-token",
-	})
-	if len(env) != 7 {
-		t.Fatalf("expected 7 env vars, got %d: %v", len(env), env)
-	}
-	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
-		t.Fatalf("env[6] = %q, want resolved token from repoContext", env[6])
-	}
-}
-
 func TestRunGitWithCredsFailsFastWithoutToken(t *testing.T) {
 	err := runGitWithCreds(&repoContext{
+		Provider:  gitprovider.ProviderForgejo,
 		WorkDir:   t.TempDir(),
 		TokenEnv:  "GITHUB_TOKEN",
 		RemoteURL: "https://github.com/tta-lab/example.git",
-	}, "ls-remote", remoteOrigin)
+	}, githubapp.PurposeGitRead, "ls-remote", remoteOrigin)
 	if err == nil {
 		t.Fatal("expected missing token error")
 	}
 	if !strings.Contains(err.Error(), "missing token: set GITHUB_TOKEN") {
 		t.Fatalf("error = %v, want missing token message", err)
+	}
+}
+
+func TestGitHubReadFallsBackToAnonymousOnlyForScopeErrors(t *testing.T) {
+	for _, tokenErr := range []error{githubapp.ErrOwnerNotAllowed, githubapp.ErrInstallationNotFound} {
+		t.Run(tokenErr.Error(), func(t *testing.T) {
+			broker := &recordingBroker{tokenErr: tokenErr}
+			ctx := &repoContext{
+				Provider: gitprovider.ProviderGitHub, Owner: "tta-lab", Repo: "organon",
+				githubBroker: broker,
+			}
+			var gotToken string
+			restore := stubRunGitWithAuthentication(t, func(_ *repoContext, auth gitAuthentication, _ ...string) error {
+				gotToken = auth.token
+				return nil
+			})
+			defer restore()
+
+			if err := runGitWithCreds(ctx, githubapp.PurposeGitRead, "fetch", "origin"); err != nil {
+				t.Fatalf("anonymous read: %v", err)
+			}
+			if gotToken != "" {
+				t.Fatalf("anonymous read token = %q", gotToken)
+			}
+		})
+	}
+}
+
+func TestGitHubWriteFailsClosedWhenInstallationIsMissing(t *testing.T) {
+	broker := &recordingBroker{tokenErr: githubapp.ErrInstallationNotFound}
+	ctx := &repoContext{
+		Provider: gitprovider.ProviderGitHub, Owner: "tta-lab", Repo: "organon",
+		githubBroker: broker,
+	}
+	runs := 0
+	restore := stubRunGitWithAuthentication(t, func(_ *repoContext, _ gitAuthentication, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restore()
+
+	err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "origin")
+	if !errors.Is(err, githubapp.ErrInstallationNotFound) || runs != 0 {
+		t.Fatalf("error = %v, git runs = %d", err, runs)
+	}
+}
+
+func TestGitHubAuthFailureInvalidatesWithoutRetry(t *testing.T) {
+	broker := &recordingBroker{token: "rejected-token"}
+	ctx := &repoContext{
+		Provider: gitprovider.ProviderGitHub, Owner: "tta-lab", Repo: "organon",
+		githubBroker: broker,
+	}
+	runs := 0
+	restore := stubRunGitWithAuthentication(t, func(_ *repoContext, _ gitAuthentication, _ ...string) error {
+		runs++
+		return errors.New("remote: HTTP 401")
+	})
+	defer restore()
+
+	err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "origin")
+	if err == nil || runs != 1 {
+		t.Fatalf("error = %v, git runs = %d; want error and one run", err, runs)
+	}
+	want := brokerInvalidation{
+		owner: "tta-lab", repo: "organon", purpose: githubapp.PurposeGitWrite, token: "rejected-token",
+	}
+	if len(broker.invalidations) != 1 || broker.invalidations[0] != want {
+		t.Fatalf("invalidations = %+v, want [%+v]", broker.invalidations, want)
+	}
+}
+
+func TestConfirmedGitAuthenticationFailureRecognizesGitHub403(t *testing.T) {
+	err := errors.New("fatal: unable to access repository: The requested URL returned error: 403")
+	if !confirmedGitAuthenticationFailure(err) {
+		t.Fatalf("confirmedGitAuthenticationFailure(%v) = false", err)
 	}
 }
 
@@ -219,6 +304,18 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 }
 
 func stubRunGitWithCreds(t *testing.T, fn func(*repoContext, ...string) error) func() {
+	t.Helper()
+	old := runGitWithCredsFunc
+	runGitWithCredsFunc = func(ctxInfo *repoContext, _ gitAuthentication, args ...string) error {
+		return fn(ctxInfo, args...)
+	}
+	return func() { runGitWithCredsFunc = old }
+}
+
+func stubRunGitWithAuthentication(
+	t *testing.T,
+	fn func(*repoContext, gitAuthentication, ...string) error,
+) func() {
 	t.Helper()
 	old := runGitWithCredsFunc
 	runGitWithCredsFunc = fn

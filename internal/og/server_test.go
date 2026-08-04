@@ -2,7 +2,6 @@ package og
 
 import (
 	"bytes"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,10 +15,7 @@ func TestHTTPHandlerRejectsTokenFields(t *testing.T) {
 	handler := HTTPHandler(func(req Request) (Response, error) {
 		return Response{Message: "accepted"}, nil
 	})
-	body, err := json.Marshal(Request{WorkDir: "/tmp/repo", Token: "secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := []byte(`{"work_dir":"/tmp/repo","token":"secret"}`)
 	req := httptest.NewRequest(http.MethodPost, "/git/push", bytes.NewReader(body))
 	resp := httptest.NewRecorder()
 
@@ -30,6 +26,17 @@ func TestHTTPHandlerRejectsTokenFields(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), "token fields are not accepted") {
 		t.Fatalf("body = %q", resp.Body.String())
+	}
+}
+
+func TestMuxDoesNotExposePRMergeRoute(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/pr/merge", bytes.NewReader([]byte(`{}`)))
+	resp := httptest.NewRecorder()
+
+	NewMux(Service{}).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusNotFound)
 	}
 }
 

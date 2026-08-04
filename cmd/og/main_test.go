@@ -225,7 +225,7 @@ func TestDaemonLifecycleCommandsAreImplemented(t *testing.T) {
 
 func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "worker-token-must-not-be-read")
-	var got og.Request
+	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/git/push" {
 			t.Fatalf("path = %s, want /git/push", r.URL.Path)
@@ -242,13 +242,16 @@ func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOG: %v", err)
 	}
-	if got.WorkDir == "" {
+	if got["work_dir"] == "" {
 		t.Fatal("daemon request missing work_dir")
 	}
-	if !got.Force {
+	if got["force"] != true {
 		t.Fatal("daemon request missing force=true")
 	}
-	if got.Token != "" || got.TokenEnv != "" {
+	if _, ok := got["token"]; ok {
+		t.Fatalf("CLI leaked token field to daemon: %+v", got)
+	}
+	if _, ok := got["token_env"]; ok {
 		t.Fatalf("CLI leaked token fields to daemon: %+v", got)
 	}
 	if !strings.Contains(stdout, "pushed from daemon") {
@@ -257,7 +260,7 @@ func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 }
 
 func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
-	var got og.Request
+	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/pr/create" {
 			t.Fatalf("path = %s, want /pr/create", r.URL.Path)
@@ -274,10 +277,13 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOG: %v", err)
 	}
-	if got.Title != "feat: daemon first" || got.Body != "body from stdin" {
+	if got["title"] != "feat: daemon first" || got["body"] != "body from stdin" {
 		t.Fatalf("request = %+v, want title/body", got)
 	}
-	if got.Token != "" || got.TokenEnv != "" {
+	if _, ok := got["token"]; ok {
+		t.Fatalf("CLI leaked token field to daemon: %+v", got)
+	}
+	if _, ok := got["token_env"]; ok {
 		t.Fatalf("CLI leaked token fields to daemon: %+v", got)
 	}
 	if !strings.Contains(stdout, "PR #12 created") {

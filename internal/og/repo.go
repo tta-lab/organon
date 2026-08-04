@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/gitutil"
 	"github.com/tta-lab/organon/internal/project"
@@ -44,6 +45,7 @@ type repoContext struct {
 	Token        string
 	DefaultBase  string
 	Branch       string
+	githubBroker githubapp.CredentialBroker
 }
 
 func resolveRepoContextFor(workDir string) (*repoContext, error) {
@@ -81,7 +83,7 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 		return nil, fmt.Errorf("not on a named branch")
 	}
 	base := defaultBranch(root)
-	tokenEnv := tokenEnvFor(info.Provider, e)
+	tokenEnv := tokenEnvFor(info.Provider)
 	token := ""
 	if tokenEnv != "" {
 		token = os.Getenv(tokenEnv)
@@ -102,17 +104,9 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 	}, nil
 }
 
-func tokenEnvFor(provider gitprovider.ProviderType, e *project.Entry) string {
+func tokenEnvFor(provider gitprovider.ProviderType) string {
 	if provider == gitprovider.ProviderGitHub {
-		if e != nil && e.GitHubTokenEnv != "" {
-			return e.GitHubTokenEnv
-		}
-		for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
-			if os.Getenv(name) != "" {
-				return name
-			}
-		}
-		return "GITHUB_TOKEN"
+		return ""
 	}
 	return gitutil.ForgeTokenEnv()
 }
@@ -139,21 +133,62 @@ func runGit(workDir string, args ...string) error {
 	return nil
 }
 
-var runGitWithCredsFunc = runGitWithCredsImpl
-
-func runGitWithCreds(ctxInfo *repoContext, args ...string) error {
-	if ctxInfo.TokenEnv != "" && ctxInfo.Token == "" {
-		return requireToken(ctxInfo)
-	}
-	return runGitWithCredsFunc(ctxInfo, args...)
+type gitAuthentication struct {
+	token string
 }
 
-func runGitWithCredsImpl(ctxInfo *repoContext, args ...string) error {
+var runGitWithCredsFunc = runGitWithCredsImpl
+
+func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...string) error {
+	auth, err := gitAuthenticationFor(ctxInfo, purpose)
+	if err != nil {
+		return err
+	}
+	err = runGitWithCredsFunc(ctxInfo, auth, args...)
+	if err != nil && ctxInfo.Provider == gitprovider.ProviderGitHub && auth.token != "" &&
+		confirmedGitAuthenticationFailure(err) {
+		invalidateErr := ctxInfo.githubBroker.Invalidate(
+			ctxInfo.Owner, ctxInfo.Repo, purpose, auth.token,
+		)
+		if invalidateErr != nil {
+			return fmt.Errorf("%w (invalidate rejected credential: %v)", err, invalidateErr)
+		}
+	}
+	return err
+}
+
+func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitAuthentication, error) {
+	if ctxInfo.Provider != gitprovider.ProviderGitHub {
+		if err := requireToken(ctxInfo); err != nil {
+			return gitAuthentication{}, err
+		}
+		return gitAuthentication{token: ctxInfo.Token}, nil
+	}
+	if ctxInfo.githubBroker == nil {
+		return gitAuthentication{}, fmt.Errorf("GitHub App authentication is not configured")
+	}
+	token, err := ctxInfo.githubBroker.Token(context.Background(), ctxInfo.Owner, ctxInfo.Repo, purpose)
+	if err != nil {
+		if purpose == githubapp.PurposeGitRead &&
+			(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound)) {
+			return gitAuthentication{}, nil
+		}
+		return gitAuthentication{}, err
+	}
+	return gitAuthentication{token: token}, nil
+}
+
+func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, gitCredentialEnv(ctxInfo)...)
+	if ctxInfo.Provider == gitprovider.ProviderGitHub {
+		cmd.Env = gitutil.GitHubAppGitEnv(
+			os.Environ(), ctxInfo.RemoteURL, ctxInfo.Owner, ctxInfo.Repo, auth.token,
+		)
+	} else {
+		cmd.Env = append(os.Environ(), gitutil.GitCredEnvWithToken(auth.token)...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -161,8 +196,12 @@ func runGitWithCredsImpl(ctxInfo *repoContext, args ...string) error {
 	return nil
 }
 
-func gitCredentialEnv(ctxInfo *repoContext) []string {
-	return gitutil.GitCredEnvWithToken(ctxInfo.Token)
+func confirmedGitAuthenticationFailure(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "authentication failed") ||
+		strings.Contains(message, "http 401") ||
+		strings.Contains(message, "http 403: bad credentials") ||
+		strings.Contains(message, "requested url returned error: 403")
 }
 
 func defaultBranch(workDir string) string {
@@ -242,7 +281,9 @@ func shouldBumpLatestTag(ctxInfo *repoContext, tag string) (bool, error) {
 		return true, nil
 	}
 	ref := "refs/tags/" + tag
-	if err := runGitWithCreds(ctxInfo, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref); err != nil {
+	if err := runGitWithCreds(
+		ctxInfo, githubapp.PurposeGitRead, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref,
+	); err != nil {
 		if exitCode(err) == 2 {
 			return false, nil
 		}
@@ -272,7 +313,7 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	if strings.TrimSpace(out) != "" {
 		return fmt.Errorf("refusing merged-branch cleanup: worktree has uncommitted changes")
 	}
-	if err := runGitWithCreds(ctxInfo, "fetch", "--prune", remoteOrigin); err != nil {
+	if err := runGitWithCreds(ctxInfo, githubapp.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
 		return fmt.Errorf("refusing merged-branch cleanup: cannot refresh origin: %w", err)
 	}
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
@@ -300,20 +341,22 @@ func cleanupMergedBranch(ctxInfo *repoContext) error {
 		return err
 	}
 	remoteExists := remoteBranchExists(ctxInfo)
-	for _, args := range [][]string{
-		{"switch", ctxInfo.DefaultBase},
-		{"pull", "--ff-only", remoteOrigin, ctxInfo.DefaultBase},
-	} {
-		if err := runGitWithCreds(ctxInfo, args...); err != nil {
-			return err
-		}
+	if err := runGit(ctxInfo.WorkDir, "switch", ctxInfo.DefaultBase); err != nil {
+		return err
+	}
+	if err := runGitWithCreds(
+		ctxInfo, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctxInfo.DefaultBase,
+	); err != nil {
+		return err
 	}
 	if remoteExists {
-		if err := runGitWithCreds(ctxInfo, "push", remoteOrigin, "--delete", ctxInfo.Branch); err != nil {
+		if err := runGitWithCreds(
+			ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", ctxInfo.Branch,
+		); err != nil {
 			return err
 		}
 	}
-	return runGitWithCreds(ctxInfo, "branch", "-D", ctxInfo.Branch)
+	return runGit(ctxInfo.WorkDir, "branch", "-D", ctxInfo.Branch)
 }
 
 func remoteBranchExists(ctxInfo *repoContext) bool {

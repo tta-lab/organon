@@ -1,10 +1,13 @@
 package gitprovider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
-	"os"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v88/github"
@@ -15,20 +18,66 @@ type GitHubProvider struct {
 }
 
 // NewGitHubProviderWithToken creates a GitHub provider with an explicit token.
-// If token is empty, falls back to the GITHUB_TOKEN environment variable.
 func NewGitHubProviderWithToken(token string) (Provider, error) {
+	return NewGitHubProviderWithTokenAndAuthFailure(token, nil)
+}
+
+// NewGitHubProviderWithTokenAndAuthFailure creates a GitHub provider and
+// reports confirmed credential rejection without retrying the request.
+func NewGitHubProviderWithTokenAndAuthFailure(token string, onAuthFailure func()) (Provider, error) {
 	if token == "" {
-		token = os.Getenv("GITHUB_TOKEN")
-	}
-	if token == "" {
-		return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required")
+		return nil, fmt.Errorf("an explicit GitHub token is required")
 	}
 
-	client, err := github.NewClient(github.WithAuthToken(token), github.WithTimeout(30*time.Second))
+	client, err := github.NewClient(
+		github.WithTransport(&githubTokenTransport{
+			base:          http.DefaultTransport,
+			token:         token,
+			onAuthFailure: onAuthFailure,
+		}),
+		github.WithTimeout(30*time.Second),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub client: %w", err)
 	}
 	return &GitHubProvider{client: client}, nil
+}
+
+type githubTokenTransport struct {
+	base          http.RoundTripper
+	token         string
+	onAuthFailure func()
+}
+
+func (t *githubTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	request := req.Clone(req.Context())
+	request.Header = req.Header.Clone()
+	request.Header.Set("Authorization", "Bearer "+t.token)
+	response, err := t.base.RoundTrip(request)
+	if err == nil && confirmedGitHubAPIAuthFailure(response) && t.onAuthFailure != nil {
+		t.onAuthFailure()
+	}
+	return response, err
+}
+
+func confirmedGitHubAPIAuthFailure(response *http.Response) bool {
+	if response.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	if response.StatusCode != http.StatusForbidden || response.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	message := strings.ToLower(string(body))
+	return strings.Contains(message, "bad credentials") ||
+		strings.Contains(message, "resource not accessible by integration") ||
+		strings.Contains(message, "installation access token has expired") ||
+		strings.Contains(message, "requires authentication")
 }
 
 func (p *GitHubProvider) Name() string { return "github" }
@@ -120,35 +169,6 @@ func (p *GitHubProvider) GetPR(owner, repo string, index int64) (*PullRequest, e
 	}
 
 	return toGitHubPullRequest(pr), nil
-}
-
-func (p *GitHubProvider) MergePR(owner, repo string, index int64, deleteBranch bool) error {
-	squash := "squash"
-	result, _, err := p.client.PullRequests.Merge(context.Background(), owner, repo, int(index),
-		"", &github.PullRequestOptions{
-			MergeMethod: squash,
-		})
-	if err != nil {
-		return fmt.Errorf("failed to merge PR #%d: %w", index, err)
-	}
-	if !result.GetMerged() {
-		return fmt.Errorf("PR #%d merge was rejected: %s", index, result.GetMessage())
-	}
-
-	if deleteBranch {
-		pr, _, err := p.client.PullRequests.Get(context.Background(), owner, repo, int(index))
-		if err != nil {
-			return fmt.Errorf("failed to get PR #%d for branch deletion: %w", index, err)
-		}
-		if pr.Head != nil && pr.Head.Ref != nil {
-			_, err = p.client.Git.DeleteRef(context.Background(), owner, repo, "heads/"+*pr.Head.Ref)
-			if err != nil {
-				return fmt.Errorf("failed to delete branch: %w", err)
-			}
-		}
-	}
-
-	return nil
 }
 
 func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
