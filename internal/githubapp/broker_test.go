@@ -164,6 +164,44 @@ func TestBrokerDoesNotInvalidateReplacementForStaleFailure(t *testing.T) {
 	}
 }
 
+func TestBrokerRediscoversInstallationAfterAuthenticationFailure(t *testing.T) {
+	var installationRequests atomic.Int32
+	var tokenRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/tta-lab/organon/installation":
+			id := 40 + installationRequests.Add(1)
+			writeJSON(t, w, map[string]any{"id": id, "permissions": map[string]string{"contents": "read"}})
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/41/access_tokens":
+			if tokenRequests.Add(1) > 1 {
+				writeJSONStatus(t, w, http.StatusNotFound, map[string]string{"message": "installation not found"})
+				return
+			}
+			writeJSON(t, w, installationTokenResponse("token-1"))
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/42/access_tokens":
+			tokenRequests.Add(1)
+			writeJSON(t, w, installationTokenResponse("token-2"))
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	broker := newTestBroker(t, server, Config{AppID: 7, AllowedOwners: []string{"tta-lab"}})
+
+	first, err := broker.Token(context.Background(), "tta-lab", "organon", PurposeGitRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = broker.Invalidate("tta-lab", "organon", PurposeGitRead, first)
+	second, err := broker.Token(context.Background(), "tta-lab", "organon", PurposeGitRead)
+	if err != nil {
+		t.Fatalf("Token after invalidation: %v", err)
+	}
+	if second != "token-2" || installationRequests.Load() != 2 {
+		t.Fatalf("token = %q, installation requests = %d; want token-2 and 2", second, installationRequests.Load())
+	}
+}
+
 func TestBrokerConcurrentRequestsMintOneToken(t *testing.T) {
 	var tokenRequests atomic.Int32
 	server := testBrokerServer(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -366,6 +404,13 @@ func installationResponse() map[string]any {
 			"contents": "write", "pull_requests": "write", "checks": "read",
 			"actions": "read", "workflows": "write",
 		},
+	}
+}
+
+func installationTokenResponse(token string) map[string]any {
+	return map[string]any{
+		"token":      token,
+		"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 	}
 }
 

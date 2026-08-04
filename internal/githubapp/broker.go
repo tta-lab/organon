@@ -189,6 +189,7 @@ func (b *broker) Invalidate(owner, repo string, purpose Purpose, failedToken str
 		)
 	}
 	delete(b.tokens, cacheKey)
+	delete(b.installations, repositoryCacheKey(owner, repo))
 	return fmt.Errorf("GitHub App authentication failed for %s/%s; cached credential invalidated", owner, repo)
 }
 
