@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v88/github"
 )
 
 type GitHubProvider struct {
@@ -23,7 +24,10 @@ func NewGitHubProviderWithToken(token string) (Provider, error) {
 		return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required")
 	}
 
-	client := github.NewClient(nil).WithAuthToken(token)
+	client, err := github.NewClient(github.WithAuthToken(token), github.WithTimeout(30*time.Second))
+	if err != nil {
+		return nil, fmt.Errorf("create GitHub client: %w", err)
+	}
 	return &GitHubProvider{client: client}, nil
 }
 

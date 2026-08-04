@@ -3,11 +3,10 @@ package gitprovider
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v88/github"
 )
 
 const testGitHubBaseBranch = "main"
@@ -34,12 +33,14 @@ func TestGitHubProviderFindPRByCommit(t *testing.T) {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	client := github.NewClient(server.Client())
-	baseURL, err := url.Parse(server.URL + "/")
+	baseURL := server.URL + "/"
+	client, err := github.NewClient(
+		github.WithHTTPClient(server.Client()),
+		github.WithURLs(&baseURL, &baseURL),
+	)
 	if err != nil {
-		t.Fatalf("parse server URL: %v", err)
+		t.Fatalf("new GitHub client: %v", err)
 	}
-	client.BaseURL = baseURL
 	provider := &GitHubProvider{client: client}
 
 	pr, err := provider.FindPRByCommit("o", "r", "abc123")
