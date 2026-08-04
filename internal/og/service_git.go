@@ -43,7 +43,7 @@ func (s Service) GitPull(req Request) (Response, error) {
 		return Response{}, err
 	}
 	if err == nil && pr.State == "closed" {
-		if err := cleanupClosedPRBranch(ctx); err != nil {
+		if err := cleanupClosedPRBranch(ctx, pr.Merged); err != nil {
 			return Response{}, err
 		}
 		prOutcome := "Closed PR"

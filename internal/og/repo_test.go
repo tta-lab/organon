@@ -45,7 +45,7 @@ func TestCleanupMergedBranchSkipsMissingRemoteBranch(t *testing.T) {
 		Token:       "test-token",
 		DefaultBase: branchMain,
 		Branch:      "feature",
-	}); err != nil {
+	}, true); err != nil {
 		t.Fatalf("cleanupClosedPRBranch: %v", err)
 	}
 

@@ -26,7 +26,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 
 	cmd.AddCommand(newPRCmd())
 	cmd.AddCommand(newGitPushCmd())
-	cmd.AddCommand(newRunnableCmd("pull", "Pull from the tracked branch", runGitPull))
+	cmd.AddCommand(newGitPullCmd())
 	cmd.AddCommand(newGitTagCmd())
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newDaemonCmd())
@@ -131,6 +131,17 @@ func newPRFailuresCmd(use string) *cobra.Command {
 func newGitPushCmd() *cobra.Command {
 	cmd := newRunnableCmd("push", "Push the current branch", runGitPush)
 	cmd.Flags().Bool("force", false, "Force push with --force-with-lease")
+	return cmd
+}
+
+func newGitPullCmd() *cobra.Command {
+	cmd := newRunnableCmd("pull", "Pull the current branch or clean up a closed PR branch", runGitPull)
+	cmd.Long = `Pull the current branch with fast-forward only.
+
+When the current feature branch has a closed PR, og returns to the default
+branch and deletes the feature branch locally and remotely. Cleanup refuses a
+dirty worktree, unpushed local commits, or a closed-unmerged branch whose remote
+ref is already missing.`
 	return cmd
 }
 

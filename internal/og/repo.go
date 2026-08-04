@@ -305,7 +305,7 @@ func localTagExists(workDir, tag string) bool {
 	return err == nil
 }
 
-func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
+func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) error {
 	out, err := gitOutput(ctxInfo.WorkDir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot verify worktree is clean: %w", err)
@@ -318,7 +318,12 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	}
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
 	if err := runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
-		return nil
+		if allowMissingRemote {
+			return nil
+		}
+		return fmt.Errorf(
+			"refusing closed PR branch cleanup: remote branch is missing; local branch may be the only remaining ref",
+		)
 	}
 	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
 	ahead, err := gitOutput(ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
@@ -336,8 +341,8 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	return nil
 }
 
-func cleanupClosedPRBranch(ctxInfo *repoContext) error {
-	if err := ensureCleanBranchForCleanup(ctxInfo); err != nil {
+func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
+	if err := ensureCleanBranchForCleanup(ctxInfo, prMerged); err != nil {
 		return err
 	}
 	remoteExists := remoteBranchExists(ctxInfo)

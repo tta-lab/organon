@@ -291,3 +291,33 @@ func TestGitPullClosedUnmergedBranchCleanup(t *testing.T) {
 		t.Fatalf("message = %q, want closed PR cleanup", resp.Message)
 	}
 }
+
+func TestGitPullClosedUnmergedBranchKeepsOnlyRemainingLocalRef(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error { return nil })
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index: 5, Head: "feature/x", Base: branchMain, State: "closed", Merged: false,
+				}, nil
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	_, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "remote branch is missing") {
+		t.Fatalf("GitPull error = %v, want missing remote branch refusal", err)
+	}
+	if got := gitOut(t, repo, "branch", "--show-current"); got != "feature/x" {
+		t.Fatalf("current branch = %q, want feature/x retained", got)
+	}
+	if err := gitCmd(repo, "rev-parse", "--verify", "feature/x"); err != nil {
+		t.Fatalf("feature branch was deleted: %v", err)
+	}
+}
