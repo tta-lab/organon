@@ -25,7 +25,9 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.SetErr(stderr)
 
 	cmd.AddCommand(newPRCmd())
-	cmd.AddCommand(newGitCmd())
+	cmd.AddCommand(newGitPushCmd())
+	cmd.AddCommand(newRunnableCmd("pull", "Pull from the tracked branch", runGitPull))
+	cmd.AddCommand(newGitTagCmd())
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newDaemonCmd())
 
@@ -123,20 +125,6 @@ func newPRLogCmd() *cobra.Command {
 func newPRFailuresCmd(use string) *cobra.Command {
 	cmd := newRunnableCmd(use, "Show CI failure logs for the current PR", runPRFailures)
 	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
-	return cmd
-}
-
-func newGitCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "git",
-		Short: "Run guarded git operations",
-		Long:  helpGit,
-		Args:  cobra.NoArgs,
-		RunE:  showHelp,
-	}
-	cmd.AddCommand(newGitPushCmd())
-	cmd.AddCommand(newRunnableCmd("pull", "Pull from the tracked branch", runGitPull))
-	cmd.AddCommand(newGitTagCmd())
 	return cmd
 }
 

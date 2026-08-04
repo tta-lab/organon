@@ -3,8 +3,8 @@
 Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
-contains pull request, git, auth, and daemon operations. Merge is intentionally
-out of scope.
+contains pull request, guarded push/pull/tag, auth, and daemon operations. Merge
+is intentionally out of scope.
 
 GitHub commands authenticate in the daemon with repository-scoped GitHub App
 installation tokens. Worker environments and request payloads do not provide
