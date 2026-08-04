@@ -178,7 +178,7 @@ og daemon health
 
 Keep the migration PAT active during rollout. In one selected repository from
 each owner, run `og auth status` and require every permission to report ready.
-Then use a disposable feature branch to verify `og git push`, `og pr create`,
+Then use a disposable feature branch to verify `og push`, `og pr create`,
 `og pr view`, `og pr checks`, and `og pr comment`. Confirm GitHub attributes the
 push and PR activity to the App bot. Also verify that an SSH-configured origin
 is unchanged on disk, an uninstalled managed write fails without fallback, and

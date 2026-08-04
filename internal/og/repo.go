@@ -305,29 +305,34 @@ func localTagExists(workDir, tag string) bool {
 	return err == nil
 }
 
-func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
+func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) error {
 	out, err := gitOutput(ctxInfo.WorkDir, "status", "--porcelain")
 	if err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot verify worktree is clean: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot verify worktree is clean: %w", err)
 	}
 	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("refusing merged-branch cleanup: worktree has uncommitted changes")
+		return fmt.Errorf("refusing closed PR branch cleanup: worktree has uncommitted changes")
 	}
 	if err := runGitWithCreds(ctxInfo, githubapp.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot refresh origin: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot refresh origin: %w", err)
 	}
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
 	if err := runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
-		return nil
+		if allowMissingRemote {
+			return nil
+		}
+		return fmt.Errorf(
+			"refusing closed PR branch cleanup: remote branch is missing; local branch may be the only remaining ref",
+		)
 	}
 	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
 	ahead, err := gitOutput(ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
 	if err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot check local commits: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot check local commits: %w", err)
 	}
 	if strings.TrimSpace(ahead) != "0" {
 		return fmt.Errorf(
-			"refusing merged-branch cleanup: %s has %s local commit(s) not on origin/%s",
+			"refusing closed PR branch cleanup: %s has %s local commit(s) not on origin/%s",
 			ctxInfo.Branch,
 			strings.TrimSpace(ahead),
 			ctxInfo.Branch,
@@ -336,8 +341,8 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	return nil
 }
 
-func cleanupMergedBranch(ctxInfo *repoContext) error {
-	if err := ensureCleanBranchForCleanup(ctxInfo); err != nil {
+func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
+	if err := ensureCleanBranchForCleanup(ctxInfo, prMerged); err != nil {
 		return err
 	}
 	remoteExists := remoteBranchExists(ctxInfo)

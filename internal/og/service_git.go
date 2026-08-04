@@ -42,12 +42,19 @@ func (s Service) GitPull(req Request) (Response, error) {
 	if err != nil && !isNoPRFound(err) && !isAnonymousGitHubReadScopeError(ctx, err) {
 		return Response{}, err
 	}
-	if err == nil && pr.Merged {
-		if err := cleanupMergedBranch(ctx); err != nil {
+	if err == nil && pr.State == "closed" {
+		if err := cleanupClosedPRBranch(ctx, pr.Merged); err != nil {
 			return Response{}, err
 		}
+		prOutcome := "Closed PR"
+		if pr.Merged {
+			prOutcome = "Merged PR"
+		}
 		return success(Response{
-			Message: fmt.Sprintf("Pulled %s. Deleted %s locally and remotely", ctx.DefaultBase, ctx.Branch),
+			Message: fmt.Sprintf(
+				"%s. Pulled %s. Deleted %s locally and remotely",
+				prOutcome, ctx.DefaultBase, ctx.Branch,
+			),
 		}), nil
 	}
 

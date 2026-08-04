@@ -30,7 +30,7 @@ func runOGWithInput(t *testing.T, input string, args ...string) (stdout string, 
 	return outBuf.String(), err
 }
 
-func TestRootHelpListsV1CommandGroups(t *testing.T) {
+func TestRootHelpListsTopLevelCommands(t *testing.T) {
 	stdout, err := runOG(t, "--help")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -38,7 +38,9 @@ func TestRootHelpListsV1CommandGroups(t *testing.T) {
 
 	for _, want := range []string{
 		"pr",
-		"git",
+		"push",
+		"pull",
+		"tag",
 		"auth",
 		"daemon",
 	} {
@@ -48,6 +50,9 @@ func TestRootHelpListsV1CommandGroups(t *testing.T) {
 	}
 	if strings.Contains(stdout, "policy") {
 		t.Fatalf("root help should not list policy in V1:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "  git ") {
+		t.Fatalf("root help should not retain the git command group:\n%s", stdout)
 	}
 }
 
@@ -122,31 +127,30 @@ func TestPRMergeIsNotAvailableInV1(t *testing.T) {
 	}
 }
 
-func TestGitHelpListsTtalReplacementCommands(t *testing.T) {
-	stdout, err := runOG(t, "git", "--help")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	for _, want := range []string{
-		"push",
-		"pull",
-		"tag",
-		"--force",
-		"--bump",
+func TestTopLevelGitCommandHelpIncludesFlags(t *testing.T) {
+	for _, tt := range []struct {
+		command string
+		flag    string
+	}{
+		{command: "push", flag: "--force"},
+		{command: "tag", flag: "--bump"},
 	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("git help missing %q:\n%s", want, stdout)
+		stdout, err := runOG(t, tt.command, "--help")
+		if err != nil {
+			t.Fatalf("og %s --help: %v", tt.command, err)
+		}
+		if !strings.Contains(stdout, tt.flag) {
+			t.Fatalf("og %s help missing %q:\n%s", tt.command, tt.flag, stdout)
 		}
 	}
 }
 
-func TestGitCommandsAreImplemented(t *testing.T) {
+func TestTopLevelGitCommandsAreImplemented(t *testing.T) {
 	tests := [][]string{
-		{"git", "push", "--force"},
-		{"git", "pull"},
-		{"git", "tag", "v1.2.3"},
-		{"git", "tag", "--bump", "patch"},
+		{"push", "--force"},
+		{"pull"},
+		{"tag", "v1.2.3"},
+		{"tag", "--bump", "patch"},
 	}
 
 	for _, args := range tests {
@@ -157,6 +161,13 @@ func TestGitCommandsAreImplemented(t *testing.T) {
 		if !strings.Contains(err.Error(), "daemon call") {
 			t.Fatalf("runOG(%v) error = %v, want daemon routing error", args, err)
 		}
+	}
+}
+
+func TestGitCommandGroupIsRemoved(t *testing.T) {
+	_, err := runOG(t, "git", "pull")
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("og git pull error = %v, want unknown command", err)
 	}
 }
 
@@ -238,7 +249,7 @@ func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 	defer server.Close()
 	t.Setenv("OG_DAEMON_URL", server.URL)
 
-	stdout, err := runOG(t, "git", "push", "--force")
+	stdout, err := runOG(t, "push", "--force")
 	if err != nil {
 		t.Fatalf("runOG: %v", err)
 	}
