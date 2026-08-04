@@ -1,6 +1,7 @@
 package gitprovider
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,36 +21,54 @@ func TestNewGitHubProviderWithTokenDoesNotUseAmbientToken(t *testing.T) {
 }
 
 func TestGitHubProviderReportsConfirmedAuthFailureWithoutRetry(t *testing.T) {
-	var requests, failures int
-	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		requests++
-		if got := r.Header.Get("Authorization"); got != "Bearer installation-token" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		return &http.Response{
-			StatusCode: http.StatusUnauthorized,
-			Status:     "401 Unauthorized",
-			Header:     make(http.Header),
-			Body:       http.NoBody,
-			Request:    r,
-		}, nil
-	})
-	client, err := github.NewClient(github.WithTransport(&githubTokenTransport{
-		base:          transport,
-		token:         "installation-token",
-		onAuthFailure: func() { failures++ },
-	}))
-	if err != nil {
-		t.Fatalf("new client: %v", err)
+	tests := []struct {
+		name         string
+		status       int
+		body         string
+		wantFailures int
+	}{
+		{name: "401", status: http.StatusUnauthorized, wantFailures: 1},
+		{
+			name: "403 integration permission", status: http.StatusForbidden,
+			body: `{"message":"Resource not accessible by integration"}`, wantFailures: 1,
+		},
+		{
+			name: "403 rate limit", status: http.StatusForbidden,
+			body: `{"message":"API rate limit exceeded"}`, wantFailures: 0,
+		},
 	}
-	provider := &GitHubProvider{client: client}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests, failures int
+			transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				requests++
+				if got := r.Header.Get("Authorization"); got != "Bearer installation-token" {
+					t.Fatalf("Authorization = %q", got)
+				}
+				return &http.Response{
+					StatusCode: tt.status,
+					Status:     http.StatusText(tt.status),
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(tt.body)),
+					Request:    r,
+				}, nil
+			})
+			client, err := github.NewClient(github.WithTransport(&githubTokenTransport{
+				base: transport, token: "installation-token", onAuthFailure: func() { failures++ },
+			}))
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			provider := &GitHubProvider{client: client}
 
-	_, err = provider.GetPR("tta-lab", "organon", 1)
-	if err == nil {
-		t.Fatal("expected authentication error")
-	}
-	if requests != 1 || failures != 1 {
-		t.Fatalf("requests = %d, auth failure callbacks = %d; want 1, 1", requests, failures)
+			_, err = provider.GetPR("tta-lab", "organon", 1)
+			if err == nil {
+				t.Fatal("expected API error")
+			}
+			if requests != 1 || failures != tt.wantFailures {
+				t.Fatalf("requests = %d, callbacks = %d; want 1, %d", requests, failures, tt.wantFailures)
+			}
+		})
 	}
 }
 

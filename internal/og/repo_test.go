@@ -206,6 +206,13 @@ func TestGitHubAuthFailureInvalidatesWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestConfirmedGitAuthenticationFailureRecognizesGitHub403(t *testing.T) {
+	err := errors.New("fatal: unable to access repository: The requested URL returned error: 403")
+	if !confirmedGitAuthenticationFailure(err) {
+		t.Fatalf("confirmedGitAuthenticationFailure(%v) = false", err)
+	}
+}
+
 func testGitRepoWithMissingRemoteFeature(t *testing.T) string {
 	t.Helper()
 

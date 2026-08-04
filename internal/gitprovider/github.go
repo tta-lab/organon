@@ -1,10 +1,13 @@
 package gitprovider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v88/github"
@@ -51,10 +54,30 @@ func (t *githubTokenTransport) RoundTrip(req *http.Request) (*http.Response, err
 	request.Header = req.Header.Clone()
 	request.Header.Set("Authorization", "Bearer "+t.token)
 	response, err := t.base.RoundTrip(request)
-	if err == nil && response.StatusCode == http.StatusUnauthorized && t.onAuthFailure != nil {
+	if err == nil && confirmedGitHubAPIAuthFailure(response) && t.onAuthFailure != nil {
 		t.onAuthFailure()
 	}
 	return response, err
+}
+
+func confirmedGitHubAPIAuthFailure(response *http.Response) bool {
+	if response.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	if response.StatusCode != http.StatusForbidden || response.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	message := strings.ToLower(string(body))
+	return strings.Contains(message, "bad credentials") ||
+		strings.Contains(message, "resource not accessible by integration") ||
+		strings.Contains(message, "installation access token has expired") ||
+		strings.Contains(message, "requires authentication")
 }
 
 func (p *GitHubProvider) Name() string { return "github" }

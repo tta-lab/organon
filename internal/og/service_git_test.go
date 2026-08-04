@@ -44,6 +44,44 @@ func TestGitPullRequestsReadPurpose(t *testing.T) {
 	}
 }
 
+func TestGitPullFeatureBranchFallsBackToAnonymousForUnmanagedRepository(t *testing.T) {
+	for _, tokenErr := range []error{githubapp.ErrOwnerNotAllowed, githubapp.ErrInstallationNotFound} {
+		t.Run(tokenErr.Error(), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, "feature/x")
+			broker := &recordingBroker{tokenErr: tokenErr}
+			var calls [][]string
+			restoreGit := stubRunGitWithAuthentication(t, func(
+				_ *repoContext, auth gitAuthentication, args ...string,
+			) error {
+				if auth.token != "" {
+					t.Fatalf("anonymous pull received token %q", auth.token)
+				}
+				calls = append(calls, append([]string(nil), args...))
+				return nil
+			})
+			defer restoreGit()
+
+			if _, err := NewService(broker).GitPull(Request{WorkDir: repo}); err != nil {
+				t.Fatalf("GitPull: %v", err)
+			}
+			wantCalls := [][]string{{"pull", "--ff-only", remoteOrigin, "feature/x"}}
+			if !reflect.DeepEqual(calls, wantCalls) {
+				t.Fatalf("git calls = %v, want %v", calls, wantCalls)
+			}
+			wantPurposes := []githubapp.Purpose{githubapp.PurposeAPI, githubapp.PurposeGitRead}
+			gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+			for _, call := range broker.tokenCalls {
+				gotPurposes = append(gotPurposes, call.purpose)
+			}
+			if !reflect.DeepEqual(gotPurposes, wantPurposes) {
+				t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
+			}
+		})
+	}
+}
+
 func TestGitTagRequestsWritePurpose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -200,7 +200,8 @@ func confirmedGitAuthenticationFailure(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "authentication failed") ||
 		strings.Contains(message, "http 401") ||
-		strings.Contains(message, "http 403: bad credentials")
+		strings.Contains(message, "http 403: bad credentials") ||
+		strings.Contains(message, "requested url returned error: 403")
 }
 
 func defaultBranch(workDir string) string {

@@ -1,10 +1,12 @@
 package og
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 func (s Service) GitPush(req Request) (Response, error) {
@@ -37,7 +39,7 @@ func (s Service) GitPull(req Request) (Response, error) {
 	}
 
 	pr, err := findPR(ctx, stateAll)
-	if err != nil && !isNoPRFound(err) {
+	if err != nil && !isNoPRFound(err) && !isAnonymousGitHubReadScopeError(ctx, err) {
 		return Response{}, err
 	}
 	if err == nil && pr.Merged {
@@ -53,6 +55,11 @@ func (s Service) GitPull(req Request) (Response, error) {
 		return Response{}, err
 	}
 	return success(Response{Message: "Pulled " + ctx.Branch}), nil
+}
+
+func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
+	return ctx.Provider == gitprovider.ProviderGitHub &&
+		(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound))
 }
 
 func (s Service) GitTag(req Request) (Response, error) {

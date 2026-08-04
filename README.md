@@ -132,8 +132,11 @@ authentication uses repository-scoped installation tokens minted by a GitHub
 App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
 continues to use its existing token environment variables.
 
-Create a GitHub App owned by the organization, with no webhook, and grant these
-repository permissions:
+Create the real App only after both implementation PRs are merged, green, and
+the merged binary is ready to install. Register one App under a stable GitHub
+account and allow it to be installed by the other managed accounts. It needs no
+Marketplace listing, OAuth flow, callback, webhook, or organization permission.
+Grant only these repository permissions:
 
 - Contents: read and write
 - Pull requests: read and write
@@ -141,44 +144,67 @@ repository permissions:
 - Actions: read-only
 - Workflows: read and write
 
-Install it on either all organization repositories or selected repositories.
-Selected repositories give the smallest access scope; all repositories avoid a
-manual installation update whenever a repository is added. Organization
-rulesets and branch protection still apply. If the App must push to a protected
-branch, add the App to that rule's bypass list; `og` does not merge PRs or bypass
-rules by itself.
+Install it on selected repositories only in `tta-lab`, `GuionAI`, and
+`LamplitIsles`. Each installation owner must approve the permissions. Do not
+grant Administration, Members, Secrets, Deployments, or other organization
+access.
+
+Before testing writes, configure every managed default-branch ruleset to require
+a PR and required checks, restrict updates, and disallow force pushes and
+deletion. Keep the App out of every bypass list. `og` can reach `main` and its
+App token has Contents write permission, so GitHub rulesets are the hard merge
+and default-branch boundary.
 
 After downloading a private key, keep it outside the repository and configure
 the daemon:
 
 ```bash
-install -d -m 700 ~/.config/ttal
+install -d -m 700 ~/.config/ttal/og
 install -m 600 ~/Downloads/your-app.private-key.pem \
-  ~/.config/ttal/og-github-app.pem
+  ~/.config/ttal/og/github-app.pem
 cat <<'EOF' > ~/.config/ttal/og.toml
 [github_app]
 app_id = 123456
 key_source = "file"
-key_ref = "og-github-app.pem"
-allowed_owners = ["tta-lab"]
+key_ref = "og/github-app.pem"
+allowed_owners = ["tta-lab", "GuionAI", "LamplitIsles"]
 EOF
 chmod 600 ~/.config/ttal/og.toml
 
+make install
 og daemon restart
 og daemon health
-og auth status
-og pr view --json
-og git pull
 ```
 
-Run the rollout only after the version containing GitHub App support is
-installed. Keep the old PAT available but unused until the smoke checks pass,
-then remove it from `~/.config/ttal/.env`, shell startup files, and project/org
-configuration. To rotate the key, create and install a new App private key,
-update `key_ref` if its filename changed, restart the daemon, verify `og auth
-status`, and revoke the old key in GitHub. To roll back, restore the previous
-working App key/config and restart the daemon; legacy PAT authentication is not
-a fallback.
+Keep the migration PAT active during rollout. In one selected repository from
+each owner, run `og auth status` and require every permission to report ready.
+Then use a disposable feature branch to verify `og git push`, `og pr create`,
+`og pr view`, `og pr checks`, and `og pr comment`. Confirm GitHub attributes the
+push and PR activity to the App bot. Also verify that an SSH-configured origin
+is unchanged on disk, an uninstalled managed write fails without fallback, and
+a third-party public repository can pull anonymously but cannot write. Inspect
+daemon logs and local Git configuration for credential material without
+printing any secret values. Remove the downloaded key copy after this passes;
+GitHub can issue a replacement, so no private-key backup is required.
+
+Only after all three owners pass, remove local `github_token_env` keys and
+GitHub PAT variables from `~/.config/ttal/.env` and shell startup files. Restart
+the daemon, repeat a representative App-only push and PR check, and then revoke
+the migration PAT.
+
+Installation tokens are automatic, memory-only, repository-scoped, and expire
+after about one hour. The App private key is long-lived: it must never enter an
+agent environment or Git child process. Direct `git`, `gh`, and arbitrary API
+calls are outside the daemon credential boundary and may still use personal
+credentials; mandatory GitHub rulesets protect the default branch in those
+paths.
+
+For key rotation, create a replacement App key, install it with mode `0600`,
+restart the daemon, verify all owners with `og auth status`, and then revoke and
+remove the old key. Before PAT revocation, rollback means reinstalling the
+previous `og` binary and restarting its daemon with the existing migration PAT.
+After revocation, emergency rollback requires a new narrow temporary PAT; never
+reactivate or reuse the exposed migration PAT.
 
 ## Why
 
