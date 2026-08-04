@@ -84,6 +84,7 @@ path = "/home/neil/code/projects/tta-lab/organon"
 	}
 	if e == nil {
 		t.Fatal("expected entry, got nil")
+		return
 	}
 	if e.Path != "/home/neil/code/projects/tta-lab/organon" {
 		t.Errorf("unexpected path: %s", e.Path)
@@ -109,6 +110,7 @@ path = "/home/neil/code/projects/GuionAI/flick-backend/services/ai-processor"
 	}
 	if e == nil {
 		t.Fatal("expected entry, got nil")
+		return
 	}
 	if e.Alias != "fb.ap" {
 		t.Errorf("expected fb.ap, got %s", e.Alias)
@@ -120,6 +122,7 @@ path = "/home/neil/code/projects/GuionAI/flick-backend/services/ai-processor"
 	}
 	if e == nil {
 		t.Fatal("expected fallback entry, got nil")
+		return
 	}
 	if e.Alias != "fb" {
 		t.Errorf("expected fallback to fb, got %s", e.Alias)

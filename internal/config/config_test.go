@@ -27,6 +27,13 @@ func TestWebConfigPath(t *testing.T) {
 	}
 }
 
+func TestOGConfigPath(t *testing.T) {
+	p := OGConfigPath()
+	if !strings.HasSuffix(p, filepath.Join(".config", "ttal", "og.toml")) {
+		t.Errorf("unexpected path: %s", p)
+	}
+}
+
 func TestDefaultReferencesPath(t *testing.T) {
 	p := DefaultReferencesPath()
 	if !strings.HasSuffix(p, filepath.Join("code", "references")) {

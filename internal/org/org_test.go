@@ -46,6 +46,7 @@ github_token_env = "GITHUB_TOKEN"
 	}
 	if e == nil {
 		t.Fatal("expected entry, got nil")
+		return
 	}
 	if e.GitHubTokenEnv != "GITHUB_TOKEN" {
 		t.Errorf("unexpected token env: %s", e.GitHubTokenEnv)
