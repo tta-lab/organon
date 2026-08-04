@@ -38,7 +38,7 @@ func TestTokenEnvForIgnoresGitHubPATConfiguration(t *testing.T) {
 func TestCleanupMergedBranchSkipsMissingRemoteBranch(t *testing.T) {
 	repo := testGitRepoWithMissingRemoteFeature(t)
 
-	if err := cleanupMergedBranch(&repoContext{
+	if err := cleanupClosedPRBranch(&repoContext{
 		Provider:    gitprovider.ProviderForgejo,
 		WorkDir:     repo,
 		RemoteURL:   "file://" + filepath.Join(repo, "..", "origin.git"),
@@ -46,7 +46,7 @@ func TestCleanupMergedBranchSkipsMissingRemoteBranch(t *testing.T) {
 		DefaultBase: branchMain,
 		Branch:      "feature",
 	}); err != nil {
-		t.Fatalf("cleanupMergedBranch: %v", err)
+		t.Fatalf("cleanupClosedPRBranch: %v", err)
 	}
 
 	current := gitOut(t, repo, "branch", "--show-current")

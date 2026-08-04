@@ -250,3 +250,44 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 		t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
 	}
 }
+
+func TestGitPullClosedUnmergedBranchCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	featureSHA := gitOut(t, repo, "rev-parse", "feature/x")
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", featureSHA)
+	var calls [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index: 5, Head: "feature/x", Base: branchMain, State: "closed", Merged: false,
+				}, nil
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	resp, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo})
+	if err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	wantCalls := [][]string{
+		{"fetch", "--prune", remoteOrigin},
+		{"pull", "--ff-only", remoteOrigin, branchMain},
+		{"push", remoteOrigin, "--delete", "feature/x"},
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("git calls = %v, want %v", calls, wantCalls)
+	}
+	if !strings.Contains(resp.Message, "Closed PR") {
+		t.Fatalf("message = %q, want closed PR cleanup", resp.Message)
+	}
+}

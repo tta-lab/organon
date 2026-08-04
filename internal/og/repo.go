@@ -308,13 +308,13 @@ func localTagExists(workDir, tag string) bool {
 func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	out, err := gitOutput(ctxInfo.WorkDir, "status", "--porcelain")
 	if err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot verify worktree is clean: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot verify worktree is clean: %w", err)
 	}
 	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("refusing merged-branch cleanup: worktree has uncommitted changes")
+		return fmt.Errorf("refusing closed PR branch cleanup: worktree has uncommitted changes")
 	}
 	if err := runGitWithCreds(ctxInfo, githubapp.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot refresh origin: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot refresh origin: %w", err)
 	}
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
 	if err := runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
@@ -323,11 +323,11 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
 	ahead, err := gitOutput(ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
 	if err != nil {
-		return fmt.Errorf("refusing merged-branch cleanup: cannot check local commits: %w", err)
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot check local commits: %w", err)
 	}
 	if strings.TrimSpace(ahead) != "0" {
 		return fmt.Errorf(
-			"refusing merged-branch cleanup: %s has %s local commit(s) not on origin/%s",
+			"refusing closed PR branch cleanup: %s has %s local commit(s) not on origin/%s",
 			ctxInfo.Branch,
 			strings.TrimSpace(ahead),
 			ctxInfo.Branch,
@@ -336,7 +336,7 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext) error {
 	return nil
 }
 
-func cleanupMergedBranch(ctxInfo *repoContext) error {
+func cleanupClosedPRBranch(ctxInfo *repoContext) error {
 	if err := ensureCleanBranchForCleanup(ctxInfo); err != nil {
 		return err
 	}
