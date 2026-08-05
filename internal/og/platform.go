@@ -3,6 +3,7 @@ package og
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
@@ -225,6 +226,42 @@ func isLaunchdAlreadyBootstrappedError(err error) bool {
 		strings.Contains(msg, "36:")
 }
 
+var launchdProxyEnvironmentKeys = []string{
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"NO_PROXY",
+	"http_proxy",
+	"https_proxy",
+	"all_proxy",
+	"no_proxy",
+}
+
+func launchdProxyEnvironmentXML() string {
+	var result strings.Builder
+	for _, key := range launchdProxyEnvironmentKeys {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		fmt.Fprintf(
+			&result,
+			"\n        <key>%s</key>\n        <string>%s</string>",
+			escapeLaunchdXML(key),
+			escapeLaunchdXML(value),
+		)
+	}
+	return result.String()
+}
+
+func escapeLaunchdXML(value string) string {
+	var result bytes.Buffer
+	if err := xml.EscapeText(&result, []byte(value)); err != nil {
+		return ""
+	}
+	return result.String()
+}
+
 func buildLaunchdPlist(label, exe, dataDir, home string) string {
 	daemonPATH := "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:" +
 		home + "/.local/bin:" + home + "/go/bin:" +
@@ -259,11 +296,18 @@ func buildLaunchdPlist(label, exe, dataDir, home string) string {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>%s</string>
+        <string>%s</string>%s
     </dict>
 </dict>
 </plist>
-`, label, exe, logPath, logPath, daemonPATH)
+`,
+		escapeLaunchdXML(label),
+		escapeLaunchdXML(exe),
+		escapeLaunchdXML(logPath),
+		escapeLaunchdXML(logPath),
+		escapeLaunchdXML(daemonPATH),
+		launchdProxyEnvironmentXML(),
+	)
 }
 
 func waitForDaemonReady(goos string) error {

@@ -195,6 +195,9 @@ func TestInstallDaemonRemovesStaleSocketAfterBootout(t *testing.T) {
 func TestLaunchdPlistUsesTtalRuntimePattern(t *testing.T) {
 	home := t.TempDir()
 	dataDir := filepath.Join(home, ".local", "share", "ttal")
+	t.Setenv("HTTPS_PROXY", "http://proxy.example:7890/path?x=1&y=2")
+	t.Setenv("NO_PROXY", "localhost,127.0.0.1")
+	t.Setenv("GITHUB_TOKEN", "do-not-write-this")
 
 	plist := buildLaunchdPlist("io.guion.og.daemon", "/opt/bin/og", dataDir, home)
 
@@ -209,13 +212,19 @@ func TestLaunchdPlistUsesTtalRuntimePattern(t *testing.T) {
 		"<key>EnvironmentVariables</key>",
 		"<key>PATH</key>",
 		home + "/go/bin",
+		"<key>HTTPS_PROXY</key>",
+		"<string>http://proxy.example:7890/path?x=1&amp;y=2</string>",
+		"<key>NO_PROXY</key>",
+		"<string>localhost,127.0.0.1</string>",
 	} {
 		if !strings.Contains(plist, want) {
 			t.Fatalf("plist missing %q:\n%s", want, plist)
 		}
 	}
-	if strings.Contains(plist, "GITHUB_TOKEN") || strings.Contains(plist, "FORGEJO_TOKEN") {
-		t.Fatalf("plist should not bake credentials:\n%s", plist)
+	for _, forbidden := range []string{"GITHUB_TOKEN", "FORGEJO_TOKEN", "do-not-write-this"} {
+		if strings.Contains(plist, forbidden) {
+			t.Fatalf("plist should not bake %q:\n%s", forbidden, plist)
+		}
 	}
 }
 
