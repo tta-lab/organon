@@ -3,6 +3,7 @@ package og
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
@@ -83,8 +84,7 @@ func isLaunchdNotLoadedError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "Boot-out failed: 5") ||
-		strings.Contains(msg, "No such process") ||
+	return strings.Contains(msg, "No such process") ||
 		strings.Contains(msg, "Could not find service") ||
 		strings.Contains(msg, "service is not loaded")
 }
@@ -157,7 +157,9 @@ func installLaunchdDaemon() (string, error) {
 		return "", err
 	}
 
-	_ = stopLaunchdDaemon()
+	if err := stopLaunchdDaemon(); err != nil {
+		return "", err
+	}
 	_ = removeDaemonSocket()
 
 	path := launchdPlistPath()
@@ -204,11 +206,14 @@ func startLaunchdDaemon() error {
 }
 
 func stopLaunchdDaemon() error {
-	err := runCommand("launchctl", "bootout", launchdServiceTarget())
-	if err != nil && isLaunchdNotLoadedError(err) {
-		return nil
+	target := launchdServiceTarget()
+	if err := runCommand("launchctl", "print", target); err != nil {
+		if isLaunchdNotLoadedError(err) {
+			return nil
+		}
+		return err
 	}
-	return err
+	return runCommand("launchctl", "bootout", target)
 }
 
 func launchdServiceTarget() string {
@@ -223,6 +228,42 @@ func isLaunchdAlreadyBootstrappedError(err error) bool {
 	return strings.Contains(msg, "already bootstrapped") ||
 		strings.Contains(msg, "Bootstrap failed: 5") ||
 		strings.Contains(msg, "36:")
+}
+
+var launchdProxyEnvironmentKeys = []string{
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"NO_PROXY",
+	"http_proxy",
+	"https_proxy",
+	"all_proxy",
+	"no_proxy",
+}
+
+func launchdProxyEnvironmentXML() string {
+	var result strings.Builder
+	for _, key := range launchdProxyEnvironmentKeys {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		fmt.Fprintf(
+			&result,
+			"\n        <key>%s</key>\n        <string>%s</string>",
+			escapeLaunchdXML(key),
+			escapeLaunchdXML(value),
+		)
+	}
+	return result.String()
+}
+
+func escapeLaunchdXML(value string) string {
+	var result bytes.Buffer
+	if err := xml.EscapeText(&result, []byte(value)); err != nil {
+		return ""
+	}
+	return result.String()
 }
 
 func buildLaunchdPlist(label, exe, dataDir, home string) string {
@@ -259,11 +300,18 @@ func buildLaunchdPlist(label, exe, dataDir, home string) string {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>%s</string>
+        <string>%s</string>%s
     </dict>
 </dict>
 </plist>
-`, label, exe, logPath, logPath, daemonPATH)
+`,
+		escapeLaunchdXML(label),
+		escapeLaunchdXML(exe),
+		escapeLaunchdXML(logPath),
+		escapeLaunchdXML(logPath),
+		escapeLaunchdXML(daemonPATH),
+		launchdProxyEnvironmentXML(),
+	)
 }
 
 func waitForDaemonReady(goos string) error {

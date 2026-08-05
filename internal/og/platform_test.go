@@ -128,7 +128,14 @@ func TestStartDaemonReturnsHealthErrorAfterLaunchdStart(t *testing.T) {
 	}
 }
 
-func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
+func TestInstallDaemonRejectsUnsupportedOS(t *testing.T) {
+	_, err := installDaemonForOS("plan9")
+	if err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("installDaemonForOS() error = %v, want unsupported OS", err)
+	}
+}
+
+func TestInstallDaemonBootstrapsWhenLaunchdServiceIsNotLoaded(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	withDaemonHealth(t, func() error {
@@ -138,8 +145,8 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	var calls [][]string
 	withRunCommand(t, func(name string, args ...string) error {
 		calls = append(calls, append([]string{name}, args...))
-		if len(calls) == 1 {
-			return errors.New("launchctl bootout gui/501 /tmp/og.plist: exit status 5: Boot-out failed: 5: Input/output error")
+		if len(args) > 0 && args[0] == "print" {
+			return errors.New("Could not find service io.guion.og.daemon in domain for user")
 		}
 		return nil
 	})
@@ -158,9 +165,36 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
+		{"launchctl", "print", "gui/" + userIDString() + "/io.guion.og.daemon"},
 		{"launchctl", "bootstrap", "gui/" + userIDString(), wantPath},
 		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestInstallDaemonReturnsBootoutFailureForLoadedService(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var calls [][]string
+	withRunCommand(t, func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		if len(args) > 0 && args[0] == "bootout" {
+			return errors.New("launchctl bootout failed")
+		}
+		return nil
+	})
+
+	_, err := installDaemonForOS(osDarwin)
+	if err == nil || !strings.Contains(err.Error(), "launchctl bootout failed") {
+		t.Fatalf("installDaemonForOS() error = %v, want bootout failure", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + userIDString() + "/io.guion.og.daemon"},
+		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
@@ -195,6 +229,9 @@ func TestInstallDaemonRemovesStaleSocketAfterBootout(t *testing.T) {
 func TestLaunchdPlistUsesTtalRuntimePattern(t *testing.T) {
 	home := t.TempDir()
 	dataDir := filepath.Join(home, ".local", "share", "ttal")
+	t.Setenv("HTTPS_PROXY", "http://proxy.example:7890/path?x=1&y=2")
+	t.Setenv("NO_PROXY", "localhost,127.0.0.1")
+	t.Setenv("GITHUB_TOKEN", "do-not-write-this")
 
 	plist := buildLaunchdPlist("io.guion.og.daemon", "/opt/bin/og", dataDir, home)
 
@@ -209,13 +246,19 @@ func TestLaunchdPlistUsesTtalRuntimePattern(t *testing.T) {
 		"<key>EnvironmentVariables</key>",
 		"<key>PATH</key>",
 		home + "/go/bin",
+		"<key>HTTPS_PROXY</key>",
+		"<string>http://proxy.example:7890/path?x=1&amp;y=2</string>",
+		"<key>NO_PROXY</key>",
+		"<string>localhost,127.0.0.1</string>",
 	} {
 		if !strings.Contains(plist, want) {
 			t.Fatalf("plist missing %q:\n%s", want, plist)
 		}
 	}
-	if strings.Contains(plist, "GITHUB_TOKEN") || strings.Contains(plist, "FORGEJO_TOKEN") {
-		t.Fatalf("plist should not bake credentials:\n%s", plist)
+	for _, forbidden := range []string{"GITHUB_TOKEN", "FORGEJO_TOKEN", "do-not-write-this"} {
+		if strings.Contains(plist, forbidden) {
+			t.Fatalf("plist should not bake %q:\n%s", forbidden, plist)
+		}
 	}
 }
 
