@@ -84,8 +84,7 @@ func isLaunchdNotLoadedError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "Boot-out failed: 5") ||
-		strings.Contains(msg, "No such process") ||
+	return strings.Contains(msg, "No such process") ||
 		strings.Contains(msg, "Could not find service") ||
 		strings.Contains(msg, "service is not loaded")
 }
@@ -158,7 +157,9 @@ func installLaunchdDaemon() (string, error) {
 		return "", err
 	}
 
-	_ = stopLaunchdDaemon()
+	if err := stopLaunchdDaemon(); err != nil {
+		return "", err
+	}
 	_ = removeDaemonSocket()
 
 	path := launchdPlistPath()
@@ -205,11 +206,14 @@ func startLaunchdDaemon() error {
 }
 
 func stopLaunchdDaemon() error {
-	err := runCommand("launchctl", "bootout", launchdServiceTarget())
-	if err != nil && isLaunchdNotLoadedError(err) {
-		return nil
+	target := launchdServiceTarget()
+	if err := runCommand("launchctl", "print", target); err != nil {
+		if isLaunchdNotLoadedError(err) {
+			return nil
+		}
+		return err
 	}
-	return err
+	return runCommand("launchctl", "bootout", target)
 }
 
 func launchdServiceTarget() string {

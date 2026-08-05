@@ -128,7 +128,14 @@ func TestStartDaemonReturnsHealthErrorAfterLaunchdStart(t *testing.T) {
 	}
 }
 
-func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
+func TestInstallDaemonRejectsUnsupportedOS(t *testing.T) {
+	_, err := installDaemonForOS("plan9")
+	if err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("installDaemonForOS() error = %v, want unsupported OS", err)
+	}
+}
+
+func TestInstallDaemonBootstrapsWhenLaunchdServiceIsNotLoaded(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	withDaemonHealth(t, func() error {
@@ -138,8 +145,8 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	var calls [][]string
 	withRunCommand(t, func(name string, args ...string) error {
 		calls = append(calls, append([]string{name}, args...))
-		if len(calls) == 1 {
-			return errors.New("launchctl bootout gui/501 /tmp/og.plist: exit status 5: Boot-out failed: 5: Input/output error")
+		if len(args) > 0 && args[0] == "print" {
+			return errors.New("Could not find service io.guion.og.daemon in domain for user")
 		}
 		return nil
 	})
@@ -158,9 +165,36 @@ func TestInstallDaemonBootstrapsLaunchdService(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
+		{"launchctl", "print", "gui/" + userIDString() + "/io.guion.og.daemon"},
 		{"launchctl", "bootstrap", "gui/" + userIDString(), wantPath},
 		{"launchctl", "kickstart", "-k", "gui/" + userIDString() + "/io.guion.og.daemon"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestInstallDaemonReturnsBootoutFailureForLoadedService(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var calls [][]string
+	withRunCommand(t, func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		if len(args) > 0 && args[0] == "bootout" {
+			return errors.New("launchctl bootout failed")
+		}
+		return nil
+	})
+
+	_, err := installDaemonForOS(osDarwin)
+	if err == nil || !strings.Contains(err.Error(), "launchctl bootout failed") {
+		t.Fatalf("installDaemonForOS() error = %v, want bootout failure", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + userIDString() + "/io.guion.og.daemon"},
+		{"launchctl", "bootout", "gui/" + userIDString() + "/io.guion.og.daemon"},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("launchctl calls = %#v, want %#v", calls, want)
