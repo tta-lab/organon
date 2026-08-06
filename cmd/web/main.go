@@ -10,11 +10,23 @@ import (
 
 	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/docs"
-	"github.com/tta-lab/organon/internal/fetch"
-	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/search"
-	"github.com/tta-lab/organon/internal/sgraph"
+	webcore "github.com/tta-lab/organon/internal/web"
 )
+
+type webService interface {
+	Search(context.Context, string) (webcore.SearchResult, error)
+	Fetch(context.Context, webcore.FetchInput) (webcore.FetchResult, error)
+	DocsResolve(context.Context, string) (webcore.DocsResolveResult, error)
+	DocsFetch(context.Context, webcore.DocsFetchInput) (webcore.DocsFetchResult, error)
+	SGraphSearch(context.Context, webcore.SGraphInput) (webcore.SGraphResult, error)
+}
+
+type serviceFactory func(searchConfigPath string) (webService, error)
+
+func defaultServiceFactory(searchConfigPath string) (webService, error) {
+	return webcore.NewService(webcore.Options{SearchConfigPath: searchConfigPath})
+}
 
 func main() {
 	if err := loadTTALEnv(); err != nil {
@@ -49,12 +61,22 @@ func main() {
 }
 
 func newFetchCmd() *cobra.Command {
+	return newFetchCmdWithFactory(defaultServiceFactory)
+}
+
+func newFetchCmdWithFactory(factory serviceFactory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch <url> [flags]",
 		Short: "Fetch and read a web page as markdown",
 		Long:  helpFetch,
 		Args:  cobra.ExactArgs(1),
-		RunE:  runFetch,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, err := factory("")
+			if err != nil {
+				return err
+			}
+			return runFetch(cmd, args, service)
+		},
 	}
 	cmd.Flags().StringP("section-id", "s", "", "Section ID to read")
 	cmd.Flags().Bool("tree", false, "Force heading tree view")
@@ -64,89 +86,79 @@ func newFetchCmd() *cobra.Command {
 }
 
 func newSearchCmd() *cobra.Command {
+	return newSearchCmdWithFactory(defaultServiceFactory)
+}
+
+func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the web",
 		Long:  helpSearch,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := search.LoadConfig(config.WebConfigPath())
+			service, err := factory(config.WebConfigPath())
 			if err != nil {
 				return err
 			}
-			result, err := search.SearchWithConfig(context.Background(), args[0], cfg)
+			result, err := service.Search(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Print(result)
-			return nil
+			_, err = fmt.Fprint(cmd.OutOrStdout(), search.FormatResults(result.Results))
+			return err
 		},
 	}
 }
 
-func runFetch(cmd *cobra.Command, args []string) error {
+func runFetch(cmd *cobra.Command, args []string, service webService) error {
 	targetURL := args[0]
 	showTree, _ := cmd.Flags().GetBool("tree")
 	section, _ := cmd.Flags().GetString("section-id")
 	full, _ := cmd.Flags().GetBool("full")
 	treeThreshold, _ := cmd.Flags().GetInt("tree-threshold")
 
-	backend := fetch.Resolve()
-	content, err := backend.Fetch(context.Background(), targetURL)
-	if err != nil {
-		return fmt.Errorf("fetch %s: %w", targetURL, err)
-	}
-
-	// Backend-agnostic binary check: catches binary returned by any backend
-	// (defuddle checks Content-Type too, but gateway may not).
-	if fetch.IsBinaryBody([]byte(content)) {
-		return fetch.BinaryFetchError(targetURL, "")
-	}
-
-	result, err := markdown.RenderContent([]byte(content), showTree, section, full, treeThreshold)
+	result, err := service.Fetch(cmd.Context(), webcore.FetchInput{
+		URL:           targetURL,
+		ShowTree:      showTree,
+		SectionID:     section,
+		Full:          full,
+		TreeThreshold: treeThreshold,
+	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Print(result.Content)
-	return nil
-}
-
-// newDocsClient builds a Context7 client. CONTEXT7_API_KEY may be unset
-// (anonymous, lower limits) or set to a non-empty value. Set-but-empty
-// is rejected to surface misconfiguration early.
-func newDocsClient() (*docs.Client, error) {
-	key, set := os.LookupEnv("CONTEXT7_API_KEY")
-	if set && strings.TrimSpace(key) == "" {
-		return nil, fmt.Errorf("CONTEXT7_API_KEY is set but empty; provide a key or unset it")
-	}
-	return docs.NewClient(key), nil
+	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
+	return err
 }
 
 func newDocsResolveCmd() *cobra.Command {
+	return newDocsResolveCmdWithFactory(defaultServiceFactory)
+}
+
+func newDocsResolveCmdWithFactory(factory serviceFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "resolve <query>",
 		Short: "Resolve a library name to Context7 IDs",
 		Long:  helpDocsResolve,
 		Args:  cobra.ExactArgs(1),
-		RunE:  runDocsResolve,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, err := factory("")
+			if err != nil {
+				return err
+			}
+			return runDocsResolve(cmd, args, service)
+		},
 	}
 }
 
-func runDocsResolve(cmd *cobra.Command, args []string) error {
-	client, err := newDocsClient()
+func runDocsResolve(cmd *cobra.Command, args []string, service webService) error {
+	result, err := service.DocsResolve(cmd.Context(), args[0])
 	if err != nil {
 		return err
 	}
-	libs, err := client.Resolve(cmd.Context(), args[0])
-	if err != nil {
-		return err
-	}
-	if len(libs) == 0 {
-		return fmt.Errorf("no libraries found for %q", args[0])
-	}
-	fmt.Print(formatLibraries(libs))
-	return nil
+	_, err = fmt.Fprint(cmd.OutOrStdout(), formatLibraries(result.Libraries))
+	return err
 }
 
 func formatLibraries(libs []docs.Library) string {
@@ -165,19 +177,28 @@ func formatLibraries(libs []docs.Library) string {
 }
 
 func newDocsFetchCmd() *cobra.Command {
+	return newDocsFetchCmdWithFactory(defaultServiceFactory)
+}
+
+func newDocsFetchCmdWithFactory(factory serviceFactory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch <library-id> [topic]",
 		Short: "Fetch documentation for a resolved Context7 library ID",
 		Long:  helpDocsFetch,
 		Args:  cobra.RangeArgs(1, 2),
-		RunE:  runDocsFetch,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, err := factory("")
+			if err != nil {
+				return err
+			}
+			return runDocsFetch(cmd, args, service)
+		},
 	}
 	cmd.Flags().Int("tokens", 0, "Token budget (0 = backend default)")
 	return cmd
 }
 
-func runDocsFetch(cmd *cobra.Command, args []string) error {
-	id := normalizeLibraryID(args[0])
+func runDocsFetch(cmd *cobra.Command, args []string, service webService) error {
 	topic := ""
 	if len(args) == 2 {
 		topic = args[1]
@@ -187,32 +208,39 @@ func runDocsFetch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --tokens value: %w", err)
 	}
 
-	client, err := newDocsClient()
+	result, err := service.DocsFetch(cmd.Context(), webcore.DocsFetchInput{
+		LibraryID: args[0],
+		Topic:     topic,
+		Tokens:    tokens,
+	})
 	if err != nil {
 		return err
 	}
-	out, err := client.Docs(cmd.Context(), id, topic, tokens)
-	if err != nil {
-		return err
-	}
-	fmt.Print(out)
-	return nil
+	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
+	return err
 }
 
 func normalizeLibraryID(id string) string {
-	if id == "" || strings.HasPrefix(id, "/") {
-		return id
-	}
-	return "/" + id
+	return webcore.NormalizeLibraryID(id)
 }
 
 func newSgraphCmd() *cobra.Command {
+	return newSgraphCmdWithFactory(defaultServiceFactory)
+}
+
+func newSgraphCmdWithFactory(factory serviceFactory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sgraph <query>",
 		Short: "Search code across public repositories via Sourcegraph",
 		Long:  helpSgraph,
 		Args:  cobra.ExactArgs(1),
-		RunE:  runSgraph,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, err := factory("")
+			if err != nil {
+				return err
+			}
+			return runSgraph(cmd, args, service)
+		},
 	}
 	cmd.Flags().IntP("count", "c", 10, "Max results to return (10-20, default 10)")
 	cmd.Flags().IntP("context", "C", 10, "Lines of context around each match")
@@ -220,7 +248,7 @@ func newSgraphCmd() *cobra.Command {
 	return cmd
 }
 
-func runSgraph(cmd *cobra.Command, args []string) error {
+func runSgraph(cmd *cobra.Command, args []string, service webService) error {
 	count, err := cmd.Flags().GetInt("count")
 	if err != nil {
 		return fmt.Errorf("invalid --count value: %w", err)
@@ -233,10 +261,15 @@ func runSgraph(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid --timeout value: %w", err)
 	}
-	out, err := sgraph.Search(context.Background(), args[0], count, contextWindow, timeout)
+	result, err := service.SGraphSearch(cmd.Context(), webcore.SGraphInput{
+		Query:         args[0],
+		Count:         count,
+		ContextWindow: contextWindow,
+		Timeout:       timeout,
+	})
 	if err != nil {
 		return err
 	}
-	fmt.Print(out)
-	return nil
+	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
+	return err
 }
