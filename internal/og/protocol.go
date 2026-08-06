@@ -1,16 +1,18 @@
 package og
 
+import "time"
+
 // Request is the typed local daemon request.
 type Request struct {
-	WorkDir string `json:"work_dir"`
-	Force   bool   `json:"force,omitempty"`
-	Tag     string `json:"tag,omitempty"`
-	Bump    string `json:"bump,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Body    string `json:"body,omitempty"`
-	Index   int64  `json:"index,omitempty"`
-	State   string `json:"state,omitempty"`
-	Tail    int    `json:"tail,omitempty"`
+	WorkDir string  `json:"work_dir"`
+	Force   bool    `json:"force,omitempty"`
+	Tag     string  `json:"tag,omitempty"`
+	Bump    string  `json:"bump,omitempty"`
+	Title   *string `json:"title,omitempty"`
+	Body    *string `json:"body,omitempty"`
+	Index   int64   `json:"index,omitempty"`
+	State   string  `json:"state,omitempty"`
+	Tail    int     `json:"tail,omitempty"`
 }
 
 // Response is the typed local daemon response.
@@ -19,7 +21,41 @@ type Response struct {
 	Error   string       `json:"error,omitempty"`
 	Message string       `json:"message,omitempty"`
 	PR      *PullRequest `json:"pr,omitempty"`
+	Comment *Comment     `json:"comment,omitempty"`
+	Auth    *AuthStatus  `json:"auth,omitempty"`
 	Lines   []string     `json:"lines,omitempty"`
+}
+
+// Comment is the stable comment shape returned by the daemon.
+type Comment struct {
+	ID        int64     `json:"id"`
+	PRID      int64     `json:"pr_id"`
+	Body      string    `json:"body"`
+	URL       string    `json:"url"`
+	User      string    `json:"user,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+// AuthStatus is the stable, secret-free authentication status for one repository.
+type AuthStatus struct {
+	Project     string             `json:"project"`
+	Provider    string             `json:"provider"`
+	Host        string             `json:"host"`
+	Owner       string             `json:"owner"`
+	Repo        string             `json:"repo"`
+	AuthMode    string             `json:"auth_mode"`
+	Ready       bool               `json:"ready"`
+	TokenEnv    string             `json:"token_env,omitempty"`
+	TokenSet    bool               `json:"token_set,omitempty"`
+	Permissions []PermissionStatus `json:"permissions,omitempty"`
+}
+
+// PermissionStatus reports one required provider permission without secrets.
+type PermissionStatus struct {
+	Name     string `json:"name"`
+	Required string `json:"required"`
+	Actual   string `json:"actual,omitempty"`
+	Ready    bool   `json:"ready"`
 }
 
 // PullRequest is the stable PR shape returned to the CLI.

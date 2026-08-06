@@ -146,6 +146,7 @@ func TestTopLevelGitCommandHelpIncludesFlags(t *testing.T) {
 }
 
 func TestTopLevelGitCommandsAreImplemented(t *testing.T) {
+	useFailingDaemon(t)
 	tests := [][]string{
 		{"push", "--force"},
 		{"pull"},
@@ -158,8 +159,8 @@ func TestTopLevelGitCommandsAreImplemented(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if !strings.Contains(err.Error(), "daemon call") {
-			t.Fatalf("runOG(%v) error = %v, want daemon routing error", args, err)
+		if !strings.Contains(err.Error(), "test daemon unavailable") {
+			t.Fatalf("runOG(%v) error = %v, want isolated daemon error", args, err)
 		}
 	}
 }
@@ -172,6 +173,7 @@ func TestGitCommandGroupIsRemoved(t *testing.T) {
 }
 
 func TestPRCommandsAreImplemented(t *testing.T) {
+	useFailingDaemon(t)
 	tests := [][]string{
 		{"pr", "create", "feat: add forge CLI"},
 		{"pr", "view", "--json"},
@@ -190,8 +192,8 @@ func TestPRCommandsAreImplemented(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runOG(%v) expected an environment error outside a git repo", args)
 		}
-		if !strings.Contains(err.Error(), "daemon call") {
-			t.Fatalf("runOG(%v) error = %v, want daemon routing error", args, err)
+		if !strings.Contains(err.Error(), "test daemon unavailable") {
+			t.Fatalf("runOG(%v) error = %v, want isolated daemon error", args, err)
 		}
 	}
 
@@ -199,8 +201,8 @@ func TestPRCommandsAreImplemented(t *testing.T) {
 	if err == nil {
 		t.Fatal("runOG([pr comment]) expected an environment error outside a git repo")
 	}
-	if !strings.Contains(err.Error(), "daemon call") {
-		t.Fatalf("runOG([pr comment]) error = %v, want daemon routing error", err)
+	if !strings.Contains(err.Error(), "test daemon unavailable") {
+		t.Fatalf("runOG([pr comment]) error = %v, want isolated daemon error", err)
 	}
 }
 
@@ -376,6 +378,61 @@ func TestPRLogRoutesToLogEndpoint(t *testing.T) {
 	}
 }
 
+func TestPRCommandsSendExplicitPRIDToDaemon(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		input string
+		args  []string
+	}{
+		{name: "comment", path: "/pr/comment", input: "review note", args: []string{"pr", "comment", "--pr-id", "41"}},
+		{name: "checks", path: "/pr/checks", args: []string{"pr", "checks", "--pr-id", "41"}},
+		{name: "status", path: "/pr/checks", args: []string{"pr", "status", "--pr-id", "41"}},
+		{name: "log", path: "/pr/log", args: []string{"pr", "log", "--pr-id", "41"}},
+		{name: "failures", path: "/pr/failures", args: []string{"pr", "failures", "--pr-id", "41"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got og.Request
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					t.Fatalf("path = %s, want %s", r.URL.Path, tt.path)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "ok", Lines: []string{"ok"}})
+			}))
+			defer server.Close()
+			t.Setenv("OG_DAEMON_URL", server.URL)
+
+			if _, err := runOGWithInput(t, tt.input, tt.args...); err != nil {
+				t.Fatalf("runOGWithInput: %v", err)
+			}
+			if got.Index != 41 {
+				t.Fatalf("request index = %d, want 41", got.Index)
+			}
+		})
+	}
+}
+
+func TestPRCommandsRejectNonPositiveExplicitPRID(t *testing.T) {
+	for _, args := range [][]string{
+		{"pr", "modify", "--title", "new title", "--pr-id", "0"},
+		{"pr", "comment", "--pr-id", "-1"},
+		{"pr", "checks", "--pr-id", "0"},
+		{"pr", "status", "--pr-id", "-1"},
+		{"pr", "log", "--pr-id", "0"},
+		{"pr", "failures", "--pr-id", "-1"},
+	} {
+		_, err := runOGWithInput(t, "review note", args...)
+		if err == nil || !strings.Contains(err.Error(), "must be positive") {
+			t.Fatalf("runOG(%v) error = %v, want positive PR ID error", args, err)
+		}
+	}
+}
+
 func TestDaemonRejectsUnregisteredProject(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -433,4 +490,14 @@ func initGitRepo(t *testing.T, dir string) {
 
 var execCommand = func(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)
+}
+
+func useFailingDaemon(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(og.Response{Error: "test daemon unavailable"})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OG_DAEMON_URL", server.URL)
 }

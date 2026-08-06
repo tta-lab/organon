@@ -42,6 +42,35 @@ func TestBraveSearcher_Search(t *testing.T) {
 	assert.Equal(t, 1, results[0].Position)
 }
 
+type fixedSearcher struct {
+	results []SearchResult
+	err     error
+}
+
+func (s fixedSearcher) Search(context.Context, string) ([]SearchResult, error) {
+	return s.results, s.err
+}
+
+func TestSearchResultsWithProviderReturnsTypedProviderAndResults(t *testing.T) {
+	results := []SearchResult{{Title: "Typed", Link: "https://example.com", Position: 1}}
+
+	got, err := searchResultsWithProvider(context.Background(), "query", "Brave", fixedSearcher{results: results})
+	require.NoError(t, err)
+	assert.Equal(t, "Brave", got.Provider)
+	assert.Equal(t, results, got.Results)
+}
+
+func TestSearchResultsWithProviderWrapsProviderError(t *testing.T) {
+	_, err := searchResultsWithProvider(
+		context.Background(),
+		"query",
+		"Brave",
+		fixedSearcher{err: errors.New("offline")},
+	)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "search failed with Brave provider")
+}
+
 func TestBraveSearcher_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -238,7 +267,7 @@ func TestCleanDuckDuckGoURL_WithExtraParams(t *testing.T) {
 }
 
 func TestFormatSearchResults_Empty(t *testing.T) {
-	out := formatSearchResults(nil)
+	out := FormatResults(nil)
 	assert.Contains(t, out, "No results found")
 }
 
@@ -247,7 +276,7 @@ func TestFormatSearchResults_WithResults(t *testing.T) {
 		{Title: "Go Blog", Link: "https://go.dev/blog", Snippet: "The Go programming language blog.", Position: 1},
 		{Title: "Go Docs", Link: "https://pkg.go.dev", Snippet: "Go package documentation.", Position: 2},
 	}
-	out := formatSearchResults(results)
+	out := FormatResults(results)
 	assert.Contains(t, out, "Found 2 search results")
 	assert.Contains(t, out, "Go Blog")
 	assert.Contains(t, out, "https://go.dev/blog")

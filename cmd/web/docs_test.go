@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tta-lab/organon/internal/docs"
+	webcore "github.com/tta-lab/organon/internal/web"
 )
 
 func TestNormalizeLibraryID(t *testing.T) {
@@ -91,9 +92,9 @@ func TestFormatLibraries_Empty(t *testing.T) {
 	}
 }
 
-func TestNewDocsClient_EmptyKeySet(t *testing.T) {
+func TestNewDocsClientFromEnvironment_EmptyKeySet(t *testing.T) {
 	t.Setenv("CONTEXT7_API_KEY", "")
-	_, err := newDocsClient()
+	_, err := webcore.NewDocsClientFromEnvironment()
 	if err == nil {
 		t.Error("expected error for empty CONTEXT7_API_KEY")
 	}
@@ -102,17 +103,17 @@ func TestNewDocsClient_EmptyKeySet(t *testing.T) {
 	}
 }
 
-func TestNewDocsClient_KeyUnset(t *testing.T) {
+func TestNewDocsClientFromEnvironment_KeyUnset(t *testing.T) {
 	_ = os.Unsetenv("CONTEXT7_API_KEY")
-	_, err := newDocsClient()
+	_, err := webcore.NewDocsClientFromEnvironment()
 	if err != nil {
 		t.Errorf("expected no error for unset CONTEXT7_API_KEY, got: %v", err)
 	}
 }
 
-func TestNewDocsClient_KeyPresent(t *testing.T) {
+func TestNewDocsClientFromEnvironment_KeyPresent(t *testing.T) {
 	t.Setenv("CONTEXT7_API_KEY", "ctx7sk-abc")
-	_, err := newDocsClient()
+	_, err := webcore.NewDocsClientFromEnvironment()
 	if err != nil {
 		t.Errorf("expected no error for set CONTEXT7_API_KEY, got: %v", err)
 	}

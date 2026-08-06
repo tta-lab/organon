@@ -1,13 +1,8 @@
 package project
 
 import (
-	"fmt"
-	"os"
+	"errors"
 	"path/filepath"
-	"sort"
-	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 // Entry represents a project from projects.toml.
@@ -17,152 +12,57 @@ type Entry struct {
 	Path         string `toml:"path"             json:"path,omitempty"`
 	K8sApp       string `toml:"k8s_app"          json:"k8s_app,omitempty"`
 	K8sNamespace string `toml:"k8s_namespace"    json:"k8s_namespace,omitempty"`
+	Org          string `toml:"-"                json:"org,omitempty"`
 }
 
-// Load reads projects.toml from path. Returns empty if the file doesn't exist.
-// Handles the current ttal format: top-level keys are either projects
-// (with name/path) or group tables with sub-projects.
+// Load reads and validates projects.toml from path.
 func Load(path string) ([]Entry, error) {
-	data, err := os.ReadFile(path)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading projects file: %w", err)
+		return nil, err
 	}
-
-	var raw map[string]any
-	if err := toml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parsing projects file: %w", err)
-	}
-
-	entries := flattenEntries(raw, "")
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Alias < entries[j].Alias
-	})
-
-	return entries, nil
-}
-
-// flattenEntries recursively extracts project entries from nested TOML tables.
-func flattenEntries(m map[string]any, prefix string) []Entry {
-	var entries []Entry
-	for key, val := range m {
-		if key == "archived" {
-			continue
-		}
-		fullKey := key
-		if prefix != "" {
-			fullKey = prefix + "." + key
-		}
-
-		sub, ok := val.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Check if this is a leaf project (has name or path)
-		_, hasName := sub["name"]
-		_, hasPath := sub["path"]
-		if hasName || hasPath {
-			e := Entry{Alias: fullKey}
-			if n, ok := sub["name"].(string); ok {
-				e.Name = n
-			}
-			if p, ok := sub["path"].(string); ok {
-				e.Path = p
-			}
-			if k, ok := sub["k8s_app"].(string); ok {
-				e.K8sApp = k
-			}
-			if kn, ok := sub["k8s_namespace"].(string); ok {
-				e.K8sNamespace = kn
-			}
-			entries = append(entries, e)
-		}
-
-		// Recurse into sub-tables (like [fb] containing [fb.ap])
-		subEntries := flattenEntries(sub, fullKey)
-		entries = append(entries, subEntries...)
-	}
-	return entries
+	return catalog.List(""), nil
 }
 
 // Get returns a project by exact alias. Returns nil if not found.
 func Get(path, alias string) (*Entry, error) {
-	entries, err := Load(path)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
 		return nil, err
 	}
-	for i := range entries {
-		if entries[i].Alias == alias {
-			return &entries[i], nil
+	entry, err := catalog.GetExact(alias)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
 		}
+		return nil, err
 	}
-	return nil, nil
+	return &entry, nil
 }
 
 // GetByPath returns a project by exact filesystem path. Returns nil if not found.
 func GetByPath(projectsPath, targetPath string) (*Entry, error) {
-	entries, err := Load(projectsPath)
+	catalog, err := OpenCatalog(projectsPath)
 	if err != nil {
 		return nil, err
 	}
-	for i := range entries {
-		if entries[i].Path == targetPath {
-			return &entries[i], nil
+	entry, err := catalog.GetByPath(targetPath)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
 		}
+		return nil, err
 	}
-	return nil, nil
-}
-
-// Resolve returns a project by alias with hierarchical fallback.
-// "fb.ap" tries "fb.ap", then "fb". Returns nil if not found.
-func Resolve(path, alias string) (*Entry, error) {
-	candidates := []string{alias}
-	parts := strings.Split(alias, ".")
-	for i := len(parts) - 1; i >= 1; i-- {
-		candidates = append(candidates, strings.Join(parts[:i], "."))
-	}
-
-	for _, candidate := range candidates {
-		e, err := Get(path, candidate)
-		if err != nil {
-			return nil, err
-		}
-		if e != nil && e.Path != "" {
-			return e, nil
-		}
-	}
-
-	return nil, nil
+	return &entry, nil
 }
 
 // ListFiltered returns all projects, optionally filtered by org derived from path.
 func ListFiltered(path, orgFilter string) ([]Entry, error) {
-	entries, err := Load(path)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
 		return nil, err
 	}
-	if orgFilter != "" {
-		filtered := make([]Entry, 0)
-		for _, e := range entries {
-			if DeriveOrg(e.Path) == orgFilter {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		orgI := DeriveOrg(entries[i].Path)
-		orgJ := DeriveOrg(entries[j].Path)
-		if orgI != orgJ {
-			return orgI < orgJ
-		}
-		return entries[i].Alias < entries[j].Alias
-	})
-	return entries, nil
+	return catalog.List(orgFilter), nil
 }
 
 // DeriveOrg extracts the org name from a project or reference path.

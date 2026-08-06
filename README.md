@@ -206,6 +206,37 @@ previous `og` binary and restarting its daemon with the existing migration PAT.
 After revocation, emergency rollback requires a new narrow temporary PAT; never
 reactivate or reuse the exposed migration PAT.
 
+## MCP servers
+
+`project`, `og`, and `web` each provide a typed stdio MCP server. Configure
+them as separate processes so clients can grant only the tools a session needs:
+
+```json
+{
+  "mcpServers": {
+    "organon-project": { "command": "project", "args": ["mcp"] },
+    "organon-og": { "command": "og", "args": ["mcp"] },
+    "organon-web": { "command": "web", "args": ["mcp"] }
+  }
+}
+```
+
+Use `project_get` or `project_list` to discover an exact registered project
+alias. Active aliases are single-layer names and cannot contain dots. The `og`
+tools accept only that alias; they do not accept a filesystem path, working
+directory, MCP root, file URI, or credential. The `og` daemon must already be
+running, resolves the registered repository, and owns forge credentials.
+
+`og mcp` mirrors the CLI push, pull, PR create, find, and current-PR view
+workflows against the registered checkout's current branch. Force push uses
+force-with-lease and is rejected on the default branch. Pull retains the CLI's
+guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
+operation; `pr_get`, modify, comment, checks, log, and failures use the current
+branch when the ID is omitted. Tag remains CLI-only. Restart a long-running MCP
+server after changing project, org, or web configuration. Run
+`project mcp --help`, `og mcp --help`, or `web mcp --help` for the tool lists and
+configuration details.
+
 ## Why
 
 AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.
@@ -226,6 +257,8 @@ brew install tta-lab/ttal/organon
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/web@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/project@latest
+CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/og@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/nd-playlist@latest
 ```
 
@@ -240,7 +273,9 @@ temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
 │   ├── web    ← web search and page reading
-│   └── skill  ← skill discovery
+│   ├── skill  ← skill discovery
+│   ├── project ← registered project discovery
+│   └── og     ← guarded Git and forge operations
 ├── standard tools (cat, ls, grep)
 └── user code
 
@@ -253,7 +288,9 @@ logos (agent loop)
 
 ## Design
 
-- **Stateless** — no daemon, no config, no session files. Parse, act, exit.
+- **Small cores, thin adapters** — CLI and MCP commands share typed internal
+  services instead of duplicating business rules. Most commands parse, act,
+  and exit; `og` uses a local credential-owning daemon.
 - **Stdin for content** — new code goes through heredoc. One multiline arg, not two.
 - **2-char IDs** — base62 identifiers for symbols/sections, same system as [flicknote](https://github.com/tta-lab/flicknote).
 - **Tree-sitter** — syntax-level AST parsing. No LSP server needed.

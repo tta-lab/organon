@@ -10,3 +10,6 @@ var helpPR string
 
 //go:embed help/daemon.md
 var helpDaemon string
+
+//go:embed help/mcp.md
+var helpMCP string

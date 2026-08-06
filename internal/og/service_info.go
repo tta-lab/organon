@@ -27,7 +27,7 @@ var requiredGitHubPermissions = []requiredGitHubPermission{
 }
 
 func (s Service) AuthStatus(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -38,7 +38,12 @@ func (s Service) AuthStatus(req Request) (Response, error) {
 	if ctx.Token != "" {
 		status = "set"
 	}
-	return success(Response{Message: fmt.Sprintf(
+	auth := &AuthStatus{
+		Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
+		Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "token", Ready: ctx.Token != "",
+		TokenEnv: ctx.TokenEnv, TokenSet: ctx.Token != "",
+	}
+	return success(Response{Auth: auth, Message: fmt.Sprintf(
 		"provider: %s\nhost: %s\nrepo: %s/%s\nproject: %s\ntoken_env: %s (%s)",
 		ctx.Provider, ctx.Host, ctx.Owner, ctx.Repo, ctx.ProjectAlias, ctx.TokenEnv, status,
 	)}), nil
@@ -64,8 +69,13 @@ func (s Service) githubAuthStatus(ctx *repoContext) (Response, error) {
 		"key_source: file",
 	}
 	missing := false
+	permissions := make([]PermissionStatus, 0, len(requiredGitHubPermissions))
 	for _, required := range requiredGitHubPermissions {
-		ready := permissionSatisfies(status.Permissions[required.name], required.access)
+		actual := status.Permissions[required.name]
+		ready := permissionSatisfies(actual, required.access)
+		permissions = append(permissions, PermissionStatus{
+			Name: required.name, Required: required.access, Actual: actual, Ready: ready,
+		})
 		state := "missing"
 		if ready {
 			state = "ready"
@@ -81,7 +91,14 @@ func (s Service) githubAuthStatus(ctx *repoContext) (Response, error) {
 			message,
 		)
 	}
-	return success(Response{Message: message}), nil
+	return success(Response{
+		Message: message,
+		Auth: &AuthStatus{
+			Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
+			Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "github-app", Ready: true,
+			Permissions: permissions,
+		},
+	}), nil
 }
 
 func permissionSatisfies(actual, required string) bool {

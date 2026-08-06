@@ -14,6 +14,12 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if req.Force && !ctx.DefaultBaseKnown {
+		return Response{}, fmt.Errorf("refusing to force push because the default branch is unknown")
+	}
+	if req.Force && ctx.Branch == ctx.DefaultBase {
+		return Response{}, fmt.Errorf("refusing to force push default branch %q", ctx.Branch)
+	}
 	gitArgs := []string{"push", "-u", remoteOrigin, ctx.Branch}
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")

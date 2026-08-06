@@ -1,4 +1,5 @@
 Manage registered projects — list, get, resolve, and navigate.
+Registered project aliases are exact, single-layer names and cannot contain dots.
 
 ## List
   project list                 # all projects
@@ -18,3 +19,6 @@ Manage registered projects — list, get, resolve, and navigate.
 ## Org
   project org list             # list all orgs
   project org get <name>       # show a single org
+
+## MCP
+  project mcp                  # serve typed project/org discovery over stdio

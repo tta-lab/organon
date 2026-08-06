@@ -146,13 +146,7 @@ func (p *GitHubProvider) FindPRByCommit(owner, repo, sha string) (*PullRequest, 
 }
 
 func (p *GitHubProvider) EditPR(owner, repo string, index int64, title, body string) (*PullRequest, error) {
-	opt := &github.PullRequest{}
-	if title != "" {
-		opt.Title = &title
-	}
-	if body != "" {
-		opt.Body = &body
-	}
+	opt := &github.PullRequest{Title: &title, Body: &body}
 
 	pr, _, err := p.client.PullRequests.Edit(context.Background(), owner, repo, int(index), opt)
 	if err != nil {
@@ -179,7 +173,9 @@ func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body str
 		return nil, fmt.Errorf("failed to comment on PR #%d: %w", index, err)
 	}
 
-	return toGitHubComment(comment), nil
+	result := toGitHubComment(comment)
+	result.PRID = index
+	return result, nil
 }
 
 func (p *GitHubProvider) ListComments(owner, repo string, index int64) ([]*Comment, error) {
@@ -191,6 +187,7 @@ func (p *GitHubProvider) ListComments(owner, repo string, index int64) ([]*Comme
 	result := make([]*Comment, len(comments))
 	for i, c := range comments {
 		result[i] = toGitHubComment(c)
+		result[i].PRID = index
 	}
 	return result, nil
 }

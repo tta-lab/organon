@@ -13,10 +13,12 @@ Behavior:
 - `og pr get <index> --json` fetches a PR by index.
 - `og pr modify --title <title> --pr-id <id>` updates title/body, with body read
   from stdin.
+- `og pr comment`, `checks`, `status`, `log`, and `failures` accept an optional
+  positive `--pr-id`; when omitted they use the pull request for the current
+  branch.
 - `og pr checks` and `og pr status` report CI status without exposing arbitrary
-  provider API paths.
-- `og pr failures --tail <lines>` and `og pr log --tail <lines>` show CI failure
-  detail.
+  provider API paths. `og pr failures --tail <lines>` and
+  `og pr log --tail <lines>` show CI failure detail.
 
 GitHub API calls use a repository-scoped App installation token minted by the
 daemon. GitHub tokens supplied through the environment or request payload are

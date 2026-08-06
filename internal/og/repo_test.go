@@ -35,6 +35,45 @@ func TestTokenEnvForIgnoresGitHubPATConfiguration(t *testing.T) {
 	}
 }
 
+func TestResolveRemoteRepoContextRejectsNestedRegisteredProjectPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	nested := filepath.Join(repo, "nested")
+	if err := os.Mkdir(nested, 0755); err != nil {
+		t.Fatalf("mkdir nested project: %v", err)
+	}
+	projects := "[outer]\npath = " + quoteTOMLString(repo) +
+		"\n[nested]\npath = " + quoteTOMLString(nested) + "\n"
+	projectsPath := filepath.Join(home, ".config", "ttal", "projects.toml")
+	if err := os.WriteFile(projectsPath, []byte(projects), 0644); err != nil {
+		t.Fatalf("write projects.toml: %v", err)
+	}
+
+	_, err := resolveRemoteRepoContextFor(nested)
+	if err == nil || !strings.Contains(err.Error(), "must be the Git top-level") {
+		t.Fatalf("resolveRemoteRepoContextFor error = %v, want registered-path mismatch", err)
+	}
+}
+
+func TestResolveRemoteRepoContextAllowsUnregisteredSubdirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	subdir := filepath.Join(repo, "subdir")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	ctx, err := resolveRemoteRepoContextFor(subdir)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.WorkDir != repo || ctx.ProjectAlias != "test" {
+		t.Fatalf("context = workdir %q alias %q, want %q and test", ctx.WorkDir, ctx.ProjectAlias, repo)
+	}
+}
+
 func TestCleanupMergedBranchSkipsMissingRemoteBranch(t *testing.T) {
 	repo := testGitRepoWithMissingRemoteFeature(t)
 

@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,42 +66,117 @@ path = "/home/neil/code/projects/tta-lab/organon"
 	}
 }
 
-func TestResolveHierarchical(t *testing.T) {
+func TestCatalogGetExactDoesNotFallBackToParentAlias(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "projects.toml")
 	os.WriteFile(p, []byte(`
 [fb]
 name = "FlickNote Backend"
 path = "/home/neil/code/projects/GuionAI/flick-backend"
-
-[fb.ap]
-name = "Ai Processor"
-path = "/home/neil/code/projects/GuionAI/flick-backend/services/ai-processor"
 `), 0644)
 
-	e, err := Resolve(p, "fb.ap")
+	catalog, err := OpenCatalog(p)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("OpenCatalog: %v", err)
 	}
-	if e == nil {
-		t.Fatal("expected entry, got nil")
-		return
+	if _, err := catalog.GetExact("fb.zz"); !errors.Is(err, ErrInvalidAlias) {
+		t.Fatalf("GetExact(fb.zz) error = %v, want ErrInvalidAlias", err)
 	}
-	if e.Alias != "fb.ap" {
-		t.Errorf("expected fb.ap, got %s", e.Alias)
-	}
+}
 
-	e, err = Resolve(p, "fb.zz")
+func TestOpenCatalogRejectsInvalidActiveAliases(t *testing.T) {
+	tests := map[string]string{
+		"quoted dotted key": `["fse.gw"]
+path = "/projects/fse-gw"
+`,
+		"nested active table": `[fse.gw]
+path = "/projects/fse-gw"
+`,
+		"slash": `["fse/gw"]
+path = "/projects/fse-gw"
+`,
+		"whitespace": `["fse gw"]
+path = "/projects/fse-gw"
+`,
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := writeProjectFile(t, content)
+			if _, err := OpenCatalog(path); !errors.Is(err, ErrInvalidAlias) {
+				t.Fatalf("OpenCatalog error = %v, want ErrInvalidAlias", err)
+			}
+		})
+	}
+}
+
+func TestOpenCatalogSkipsArchivedNamespace(t *testing.T) {
+	path := writeProjectFile(t, `[active]
+name = "Active"
+path = "/projects/active"
+
+[archived.fse.gw]
+name = "Archived gateway"
+path = "/projects/fse-gw"
+`)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("OpenCatalog: %v", err)
 	}
-	if e == nil {
-		t.Fatal("expected fallback entry, got nil")
-		return
+	entries := catalog.List("")
+	if len(entries) != 1 || entries[0].Alias != "active" {
+		t.Fatalf("List = %+v, want only active", entries)
 	}
-	if e.Alias != "fb" {
-		t.Errorf("expected fallback to fb, got %s", e.Alias)
+}
+
+func TestOpenCatalogValidatesPathsAndUniqueness(t *testing.T) {
+	tests := map[string]string{
+		"empty": `[one]
+path = ""
+`,
+		"relative": `[one]
+path = "projects/one"
+`,
+		"duplicate cleaned": `[one]
+path = "/projects/shared/../repo"
+
+[two]
+path = "/projects/repo"
+`,
 	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := writeProjectFile(t, content)
+			if _, err := OpenCatalog(path); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("OpenCatalog error = %v, want ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
+func TestCatalogGetByPathUsesCleanedAbsolutePath(t *testing.T) {
+	path := writeProjectFile(t, `[one]
+path = "/projects/shared/../one"
+`)
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		t.Fatalf("OpenCatalog: %v", err)
+	}
+	entry, err := catalog.GetByPath("/projects/one/.")
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+	if entry.Alias != "one" || entry.Path != "/projects/one" {
+		t.Fatalf("entry = %+v", entry)
+	}
+}
+
+func writeProjectFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write projects file: %v", err)
+	}
+	return path
 }
 
 func TestDeriveOrg(t *testing.T) {

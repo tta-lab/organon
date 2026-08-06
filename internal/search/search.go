@@ -14,10 +14,16 @@ type WebSearcher interface {
 
 // SearchResult represents a single search result.
 type SearchResult struct {
-	Title    string
-	Link     string
-	Snippet  string
-	Position int
+	Title    string `json:"title"`
+	Link     string `json:"link"`
+	Snippet  string `json:"snippet"`
+	Position int    `json:"position"`
+}
+
+// Response is a structured web-search result with the selected provider.
+type Response struct {
+	Provider string         `json:"provider"`
+	Results  []SearchResult `json:"results"`
 }
 
 const (
@@ -35,27 +41,50 @@ func Search(ctx context.Context, query string) (string, error) {
 // SearchWithConfig performs a search using the configured provider. An empty
 // provider preserves automatic selection based on available API keys.
 func SearchWithConfig(ctx context.Context, query string, cfg Config) (string, error) {
+	response, err := SearchResultsWithConfig(ctx, query, cfg)
+	if err != nil {
+		return "", err
+	}
+	return FormatResults(response.Results), nil
+}
+
+// SearchResultsWithConfig performs a search and returns the selected provider
+// together with structured results.
+func SearchResultsWithConfig(ctx context.Context, query string, cfg Config) (Response, error) {
 	if query == "" {
-		return "", fmt.Errorf("query is required")
+		return Response{}, fmt.Errorf("query is required")
 	}
 
 	provider, searcher, err := resolveConfiguredSearchProvider(cfg.Search.Provider)
 	if err != nil {
-		return "", err
+		return Response{}, err
 	}
-	return searchWithProvider(ctx, query, provider, searcher)
+	return searchResultsWithProvider(ctx, query, provider, searcher)
 }
 
 func searchWithProvider(ctx context.Context, query, provider string, searcher WebSearcher) (string, error) {
+	response, err := searchResultsWithProvider(ctx, query, provider, searcher)
+	if err != nil {
+		return "", err
+	}
+	return FormatResults(response.Results), nil
+}
+
+func searchResultsWithProvider(
+	ctx context.Context,
+	query string,
+	provider string,
+	searcher WebSearcher,
+) (Response, error) {
 	if query == "" {
-		return "", fmt.Errorf("query is required")
+		return Response{}, fmt.Errorf("query is required")
 	}
 
 	results, err := searcher.Search(ctx, query)
 	if err != nil {
-		return "", fmt.Errorf("search failed with %s provider: %w", provider, err)
+		return Response{}, fmt.Errorf("search failed with %s provider: %w", provider, err)
 	}
-	return formatSearchResults(results), nil
+	return Response{Provider: provider, Results: results}, nil
 }
 
 // resolveSearcher returns the best available search backend.
@@ -110,7 +139,8 @@ func resolveConfiguredSearchProvider(configured string) (string, WebSearcher, er
 	}
 }
 
-func formatSearchResults(results []SearchResult) string {
+// FormatResults renders structured results in the established CLI format.
+func FormatResults(results []SearchResult) string {
 	if len(results) == 0 {
 		return "No results found. Try rephrasing your search.\n"
 	}

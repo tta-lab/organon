@@ -114,7 +114,9 @@ func (p *ForgejoProvider) CreateComment(owner, repo string, index int64, body st
 		return nil, fmt.Errorf("failed to comment on PR #%d: %w", index, err)
 	}
 
-	return toComment(comment), nil
+	result := toComment(comment)
+	result.PRID = index
+	return result, nil
 }
 
 func (p *ForgejoProvider) ListComments(owner, repo string, index int64) ([]*Comment, error) {
@@ -126,6 +128,7 @@ func (p *ForgejoProvider) ListComments(owner, repo string, index int64) ([]*Comm
 	result := make([]*Comment, len(comments))
 	for i, c := range comments {
 		result[i] = toComment(c)
+		result[i].PRID = index
 	}
 	return result, nil
 }

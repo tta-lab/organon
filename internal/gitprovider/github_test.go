@@ -1,6 +1,7 @@
 package gitprovider
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,33 @@ import (
 
 	"github.com/google/go-github/v88/github"
 )
+
+func TestGitHubProviderEditPRSendsEmptyBody(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/pulls/7" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"number":7,"title":"new title","body":"","state":"open"}`))
+	}))
+	t.Cleanup(server.Close)
+	baseURL := server.URL + "/"
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &GitHubProvider{client: client}
+
+	if _, err := provider.EditPR("o", "r", 7, "new title", ""); err != nil {
+		t.Fatalf("EditPR: %v", err)
+	}
+	if body, ok := got["body"]; !ok || body != "" {
+		t.Fatalf("request body = %#v, want explicit empty body", got)
+	}
+}
 
 const testGitHubBaseBranch = "main"
 

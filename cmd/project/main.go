@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -35,6 +36,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newResolveCmd())
 	cmd.AddCommand(newJumpCmd())
 	cmd.AddCommand(newOrgCmd())
+	cmd.AddCommand(newMCPCmd())
 
 	return cmd
 }
@@ -101,16 +103,18 @@ func newGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
-			e, err := project.Resolve(config.ProjectsPath(), alias)
-			if err != nil {
-				return err
-			}
-			if e != nil {
-				if jsonOut {
-					return json.NewEncoder(os.Stdout).Encode(e)
+			if !strings.Contains(alias, "/") {
+				e, err := project.Get(config.ProjectsPath(), alias)
+				if err != nil {
+					return err
 				}
-				fmt.Printf("%s\n", e.Path)
-				return nil
+				if e != nil {
+					if jsonOut {
+						return json.NewEncoder(os.Stdout).Encode(e)
+					}
+					fmt.Printf("%s\n", e.Path)
+					return nil
+				}
 			}
 
 			// Fall back to reference repos
@@ -146,8 +150,9 @@ func newResolveCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 
-			// If it looks like a path (contains /), resolve by path first.
-			if strings.Contains(target, "/") {
+			// Absolute paths are catalog lookups; org/repo targets go directly
+			// to reference resolution instead of alias validation.
+			if filepath.IsAbs(target) {
 				e, err := project.GetByPath(config.ProjectsPath(), target)
 				if err != nil {
 					return err
@@ -157,14 +162,14 @@ func newResolveCmd() *cobra.Command {
 				}
 			}
 
-			// Resolve by alias.
-			e, err := project.Resolve(config.ProjectsPath(), target)
-			if err != nil {
-				return err
-			}
-
-			if e != nil {
-				return json.NewEncoder(os.Stdout).Encode(e)
+			if !strings.Contains(target, "/") {
+				e, err := project.Get(config.ProjectsPath(), target)
+				if err != nil {
+					return err
+				}
+				if e != nil {
+					return json.NewEncoder(os.Stdout).Encode(e)
+				}
 			}
 
 			// Fall back to reference repos
@@ -199,14 +204,17 @@ func newJumpCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 
-			// 1. Try project alias
-			e, err := project.Resolve(config.ProjectsPath(), target)
-			if err != nil {
-				return err
-			}
-			if e != nil {
-				fmt.Println(e.Path)
-				return nil
+			// 1. Try a bare project alias. org/repo targets go directly to
+			// reference resolution so strict alias validation cannot reject them.
+			if !strings.Contains(target, "/") {
+				e, err := project.Get(config.ProjectsPath(), target)
+				if err != nil {
+					return err
+				}
+				if e != nil {
+					fmt.Println(e.Path)
+					return nil
+				}
 			}
 
 			// 2. Try reference repo

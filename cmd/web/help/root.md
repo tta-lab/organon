@@ -6,3 +6,4 @@ Subcommands:
   fetch    Fetch a web page as markdown
   docs     Look up library documentation via Context7
   sgraph   Search public code on Sourcegraph
+  mcp      Serve typed web tools over stdio MCP

@@ -13,12 +13,12 @@ import (
 
 // Library represents a Context7 library result.
 type Library struct {
-	ID            string
-	Title         string
-	Description   string
-	TrustScore    float64
-	TotalSnippets int
-	Versions      []string
+	ID            string   `json:"id"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	TrustScore    float64  `json:"trust_score"`
+	TotalSnippets int      `json:"total_snippets"`
+	Versions      []string `json:"versions,omitempty"`
 }
 
 // Client is a Context7 API client.
