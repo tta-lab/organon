@@ -41,6 +41,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/search/` — web search backends (Exa, Brave, DuckDuckGo)
 - `internal/docs/` — Context7 documentation client
 - `internal/sgraph/` — Sourcegraph public GraphQL code search
+- `internal/web/` — shared typed web application service used by CLI and MCP adapters
 
 ## Testing
 
