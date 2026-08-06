@@ -68,13 +68,9 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if title == "" && body == "" {
 		return fmt.Errorf("nothing to update: provide --title and/or pipe body via stdin")
 	}
-	prID, _ := cmd.Flags().GetString("pr-id")
-	var index int64
-	if prID != "" {
-		index, err = strconv.ParseInt(prID, 10, 64)
-		if err != nil {
-			return fmt.Errorf("invalid --pr-id %q: %w", prID, err)
-		}
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
 	}
 	var titleInput, bodyInput *string
 	if cmd.Flags().Changed("title") {
@@ -106,7 +102,11 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	if body == "" {
 		return fmt.Errorf("comment body is required on stdin")
 	}
-	resp, err := daemonCall("/pr/comment", og.Request{WorkDir: workDir, Body: &body})
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := daemonCall("/pr/comment", og.Request{WorkDir: workDir, Index: index, Body: &body})
 	if err != nil {
 		return err
 	}
@@ -115,15 +115,42 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 }
 
 func runPRChecks(cmd *cobra.Command, args []string) error {
-	return runLinesDaemon(cmd, "/pr/checks", og.Request{State: stateAll})
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	return runLinesDaemon(cmd, "/pr/checks", og.Request{Index: index, State: stateAll})
 }
 
 func runPRLog(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
-	return runLinesDaemon(cmd, "/pr/log", og.Request{State: stateAll, Tail: tail})
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	return runLinesDaemon(cmd, "/pr/log", og.Request{Index: index, State: stateAll, Tail: tail})
 }
 
 func runPRFailures(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
-	return runLinesDaemon(cmd, "/pr/failures", og.Request{State: stateAll, Tail: tail})
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	return runLinesDaemon(cmd, "/pr/failures", og.Request{Index: index, State: stateAll, Tail: tail})
+}
+
+func optionalPRID(cmd *cobra.Command) (int64, error) {
+	raw, _ := cmd.Flags().GetString("pr-id")
+	if raw == "" {
+		return 0, nil
+	}
+	index, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --pr-id %q: %w", raw, err)
+	}
+	if index <= 0 {
+		return 0, fmt.Errorf("--pr-id must be positive")
+	}
+	return index, nil
 }

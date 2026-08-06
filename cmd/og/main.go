@@ -50,8 +50,8 @@ func newPRCmd() *cobra.Command {
 	cmd.AddCommand(newPRGetCmd())
 	cmd.AddCommand(newPRModifyCmd())
 	cmd.AddCommand(newPRCommentCmd())
-	cmd.AddCommand(newRunnableCmd("checks", "Show pull request checks", runPRChecks))
-	cmd.AddCommand(newRunnableCmd(cmdStatus, "Show pull request status", runPRChecks))
+	cmd.AddCommand(newPRChecksCmd("checks", "Show pull request checks"))
+	cmd.AddCommand(newPRChecksCmd(cmdStatus, "Show pull request status"))
 	cmd.AddCommand(newPRFailuresCmd("failures"))
 	cmd.AddCommand(newPRLogCmd())
 	return cmd
@@ -104,29 +104,43 @@ func newPRModifyCmd() *cobra.Command {
 Replace the PR body with this text.
 EOF`
 	cmd.Flags().String("title", "", "New PR title")
-	cmd.Flags().String("pr-id", "", "PR number override")
+	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRCommentCmd() *cobra.Command {
 	cmd := newRunnableCmd("comment", "Comment on a pull request", runPRComment)
-	cmd.Long = "Comment on the pull request for the current branch. The comment is read from stdin."
-	cmd.Example = `cat <<'EOF' | og pr comment
+	cmd.Long = "Comment on an explicit pull request or the pull request for the current branch. " +
+		"The comment is read from stdin."
+	cmd.Example = `cat <<'EOF' | og pr comment --pr-id 123
 Tests now pass. Please review again.
 EOF`
+	addOptionalPRIDFlag(cmd)
+	return cmd
+}
+
+func newPRChecksCmd(use, short string) *cobra.Command {
+	cmd := newRunnableCmd(use, short, runPRChecks)
+	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRLogCmd() *cobra.Command {
 	cmd := newRunnableCmd("log", "Show CI status and failure logs for the current PR", runPRLog)
 	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRFailuresCmd(use string) *cobra.Command {
 	cmd := newRunnableCmd(use, "Show CI failure logs for the current PR", runPRFailures)
 	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	addOptionalPRIDFlag(cmd)
 	return cmd
+}
+
+func addOptionalPRIDFlag(cmd *cobra.Command) {
+	cmd.Flags().String("pr-id", "", "PR number override")
 }
 
 func newGitPushCmd() *cobra.Command {

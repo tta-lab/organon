@@ -636,6 +636,40 @@ func TestExplicitPROperationsValidateIDsAndReturnPRIdentity(t *testing.T) {
 	}
 }
 
+func TestExplicitPRChecksRejectInvalidProviderSnapshotBeforeCI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+
+	for _, tt := range []struct {
+		name string
+		pr   *gitprovider.PullRequest
+	}{
+		{name: "nil snapshot", pr: nil},
+		{name: "wrong ID", pr: &gitprovider.PullRequest{Index: 99, HeadSHA: "wrong"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+				return fakeProvider{
+					getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+						return tt.pr, nil
+					},
+					getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+						t.Fatal("CI lookup must not run for an invalid PR snapshot")
+						return nil, nil
+					},
+				}, nil
+			})
+			defer restoreProvider()
+
+			_, err := NewService(&recordingBroker{}).PRChecks(Request{WorkDir: repo, Index: 12})
+			if err == nil || !strings.Contains(err.Error(), "invalid PR") {
+				t.Fatalf("PRChecks error = %v, want invalid PR snapshot", err)
+			}
+		})
+	}
+}
+
 func joinArgs(args []string) string {
 	out := ""
 	for i, arg := range args {

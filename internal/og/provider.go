@@ -70,6 +70,9 @@ func getPR(ctx *repoContext, index int64) (*PullRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+	if pr == nil || pr.Index != index {
+		return nil, fmt.Errorf("provider returned invalid PR snapshot for #%d", index)
+	}
 	return fromProviderPR(pr), nil
 }
 
