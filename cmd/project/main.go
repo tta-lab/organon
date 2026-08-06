@@ -101,7 +101,7 @@ func newGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
-			e, err := project.Resolve(config.ProjectsPath(), alias)
+			e, err := project.Get(config.ProjectsPath(), alias)
 			if err != nil {
 				return err
 			}
@@ -158,7 +158,7 @@ func newResolveCmd() *cobra.Command {
 			}
 
 			// Resolve by alias.
-			e, err := project.Resolve(config.ProjectsPath(), target)
+			e, err := project.Get(config.ProjectsPath(), target)
 			if err != nil {
 				return err
 			}
@@ -200,7 +200,7 @@ func newJumpCmd() *cobra.Command {
 			target := args[0]
 
 			// 1. Try project alias
-			e, err := project.Resolve(config.ProjectsPath(), target)
+			e, err := project.Get(config.ProjectsPath(), target)
 			if err != nil {
 				return err
 			}

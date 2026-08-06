@@ -113,3 +113,24 @@ func TestProjectList_Empty(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty message", stdout)
 	}
 }
+
+func TestProjectGetRejectsDottedAliasWithoutReferenceFallback(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `
+[fse]
+name = "FSE"
+path = "/projects/fse"
+`)
+
+	stdout, err := runProject(t, []string{"get", "fse.gw", "--json"})
+	if err == nil {
+		t.Fatal("expected dotted alias error")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(err.Error(), "invalid project alias") {
+		t.Fatalf("error = %v, want invalid project alias", err)
+	}
+}

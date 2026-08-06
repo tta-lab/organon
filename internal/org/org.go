@@ -1,60 +1,36 @@
 package org
 
 import (
-	"fmt"
-	"os"
-	"sort"
-
-	"github.com/BurntSushi/toml"
+	"errors"
 )
 
 // Entry represents a single org from orgs.toml.
 type Entry struct {
-	Name string `toml:"-"`
-}
-
-// File is the on-disk TOML structure.
-type File struct {
-	Orgs map[string]struct{} `toml:"-"`
+	Name           string `toml:"-" json:"name"`
+	GitHubTokenEnv string `toml:"github_token_env" json:"github_token_env,omitempty"`
 }
 
 // Load reads orgs.toml from path. Returns empty if the file doesn't exist.
 func Load(path string) ([]Entry, error) {
-	data, err := os.ReadFile(path)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading orgs file: %w", err)
+		return nil, err
 	}
-
-	var raw map[string]struct{}
-	if err := toml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parsing orgs file: %w", err)
-	}
-
-	entries := make([]Entry, 0, len(raw))
-	for name := range raw {
-		entries = append(entries, Entry{Name: name})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name < entries[j].Name
-	})
-
-	return entries, nil
+	return catalog.List(), nil
 }
 
 // Get returns a single org by name. Returns nil if not found.
 func Get(path, name string) (*Entry, error) {
-	entries, err := Load(path)
+	catalog, err := OpenCatalog(path)
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if e.Name == name {
-			return &e, nil
+	entry, err := catalog.GetExact(name)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
 		}
+		return nil, err
 	}
-	return nil, nil
+	return &entry, nil
 }

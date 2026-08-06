@@ -1,4 +1,5 @@
 Manage registered projects — list, get, resolve, and navigate.
+Registered project aliases are exact, single-layer names and cannot contain dots.
 
 ## List
   project list                 # all projects

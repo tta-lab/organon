@@ -1,7 +1,7 @@
 Resolve and print a path suitable for cd.
 
 Resolution order:
-  1. Exact alias in projects.toml (with hierarchical fallback: fb.ap → fb.ap, then fb)
+  1. Exact, single-layer alias in projects.toml
   2. org/repo pattern → clone from GitHub if missing
   3. Bare name → find unique match in references directory
 
