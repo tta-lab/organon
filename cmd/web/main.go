@@ -53,6 +53,7 @@ func main() {
 		newFetchCmd(),
 		docsCmd,
 		newSgraphCmd(),
+		newWebMCPCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

@@ -22,3 +22,6 @@ var helpDocsFetch string
 
 //go:embed help/sgraph.md
 var helpSgraph string
+
+//go:embed help/mcp.md
+var helpMCP string
