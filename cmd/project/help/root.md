@@ -19,3 +19,6 @@ Registered project aliases are exact, single-layer names and cannot contain dots
 ## Org
   project org list             # list all orgs
   project org get <name>       # show a single org
+
+## MCP
+  project mcp                  # serve typed project/org discovery over stdio
