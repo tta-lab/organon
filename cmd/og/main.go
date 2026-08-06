@@ -30,6 +30,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newGitTagCmd())
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newDaemonCmd())
+	cmd.AddCommand(newOGMCPCmd())
 
 	return cmd
 }
