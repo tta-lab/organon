@@ -46,11 +46,6 @@ type ogPRFindInput struct {
 	State   string `json:"state,omitempty" jsonschema:"pull request state: open, closed, or all"`
 }
 
-type ogPRGetInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
-	PRID    int64  `json:"pr_id" jsonschema:"positive pull request ID"`
-}
-
 type ogPRInput struct {
 	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
@@ -209,25 +204,21 @@ func newOGMCPServer(projects *project.Catalog, caller ogDaemonCaller) *mcp.Serve
 		"Find a pull request for the registered checkout's current branch by state.", true, false, true,
 	), false), prFindHandler(projects, caller))
 
-	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
-		"pr_view", "View current branch pull request",
-		"View the pull request and CI status for the registered checkout's current branch.", true, false, true,
+	mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(
+		"pr_get", "Get pull request",
+		"Get by positive PR ID, or view the registered checkout's current branch pull request and CI when omitted.",
+		true, false, true,
 	), false), func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
-		input ogProjectInput,
+		input ogPRInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
-		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/view", og.Request{State: "all"})
-	})
-
-	mcp.AddTool(server, setInputSchema[ogPRGetInput](ogTool(
-		"pr_get", "Get pull request", "Get one pull request by explicit positive ID.", true, false, true,
-	), false), func(
-		ctx context.Context,
-		_ *mcp.CallToolRequest,
-		input ogPRGetInput,
-	) (*mcp.CallToolResult, ogPROutput, error) {
-		return callPRTool(ctx, projects, caller, input.Project, "/pr/get", input.PRID)
+		if input.PRID == nil {
+			return callWorktreePRTool(
+				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: stateAll},
+			)
+		}
+		return callPRTool(ctx, projects, caller, input.Project, "/pr/get", *input.PRID)
 	})
 
 	mcp.AddTool(server, setInputSchema[ogPRModifyInput](ogTool(

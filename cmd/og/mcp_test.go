@@ -74,7 +74,7 @@ func TestOGMCPListsCLIParityTools(t *testing.T) {
 	}
 	wantNames := []string{
 		"auth_status", "pr_checks", "pr_comment", "pr_create", "pr_failures", "pr_find", "pr_get",
-		"pr_log", "pr_modify", "pr_view", "pull", "push",
+		"pr_log", "pr_modify", "pull", "push",
 	}
 	gotNames := make([]string, 0, len(result.Tools))
 	for _, tool := range result.Tools {
@@ -161,10 +161,10 @@ func assertRequiredInput(t *testing.T, tool *mcp.Tool) {
 	for _, name := range schema.Required {
 		required[name] = true
 	}
-	if !required["project"] || (tool.Name == "pr_get" && !required["pr_id"]) {
+	if !required["project"] {
 		t.Fatalf("tool %q required inputs = %v", tool.Name, schema.Required)
 	}
-	if tool.Name != "pr_get" && required["pr_id"] {
+	if required["pr_id"] {
 		t.Fatalf("tool %q unexpectedly requires pr_id: %v", tool.Name, schema.Required)
 	}
 	if tool.Name == "pr_create" && !required["title"] {
@@ -284,7 +284,7 @@ func TestOGMCPRoutesWorktreeToolsThroughRegisteredAlias(t *testing.T) {
 		{name: "pull", args: map[string]any{"project": "organon"}, key: "message"},
 		{name: "pr_create", args: map[string]any{"project": "organon", "title": "typed MCP", "body": "body"}, key: "pr"},
 		{name: "pr_find", args: map[string]any{"project": "organon"}, key: "pr"},
-		{name: "pr_view", args: map[string]any{"project": "organon"}, key: "pr"},
+		{name: "pr_get", args: map[string]any{"project": "organon"}, key: "pr"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -302,6 +302,11 @@ func TestOGMCPCurrentBranchPRToolsAllowOmittedPRID(t *testing.T) {
 			t.Fatalf("request = %+v", req)
 		}
 		switch path {
+		case "/pr/view":
+			if req.State != "all" {
+				t.Fatalf("view state = %q, want all", req.State)
+			}
+			return og.Response{OK: true, PR: pr}, nil
 		case "/pr/modify":
 			return og.Response{OK: true, PR: pr}, nil
 		case "/pr/comment":
@@ -319,6 +324,7 @@ func TestOGMCPCurrentBranchPRToolsAllowOmittedPRID(t *testing.T) {
 		args map[string]any
 		key  string
 	}{
+		{name: "pr_get", args: map[string]any{"project": "organon"}, key: "pr"},
 		{name: "pr_modify", args: map[string]any{"project": "organon", "title": "current branch"}, key: "pr"},
 		{name: "pr_comment", args: map[string]any{"project": "organon", "body": commentBody}, key: "comment"},
 		{name: "pr_checks", args: map[string]any{"project": "organon"}, key: "lines"},
@@ -540,6 +546,7 @@ func TestOGMCPRejectsExplicitZeroOptionalPRID(t *testing.T) {
 		name string
 		args map[string]any
 	}{
+		{name: "pr_get", args: map[string]any{"project": "organon", "pr_id": 0}},
 		{name: "pr_modify", args: map[string]any{"project": "organon", "pr_id": 0, "title": "title"}},
 		{name: "pr_comment", args: map[string]any{"project": "organon", "pr_id": 0, "body": "body"}},
 		{name: "pr_checks", args: map[string]any{"project": "organon", "pr_id": 0}},
@@ -640,7 +647,7 @@ func TestOGMCPAcceptsWorktreePRWithoutDisplayURL(t *testing.T) {
 	}}
 	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "pr_view", Arguments: map[string]any{"project": "organon"},
+		Name: "pr_get", Arguments: map[string]any{"project": "organon"},
 	})
 	if err != nil {
 		t.Fatalf("protocol error: %v", err)
@@ -716,6 +723,13 @@ func newOGMCPTestDaemon(t *testing.T) *httptest.Server {
 			_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
 				Index: 31, Title: "stdio", State: "open", URL: "https://forge/pr/31",
 			}})
+		case "/pr/view":
+			if req["state"] != "all" {
+				t.Errorf("request = %#v", req)
+			}
+			_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
+				Index: 32, Title: "current branch", State: "open", URL: "https://forge/pr/32",
+			}})
 		case "/git/push":
 			if req["force"] != true {
 				t.Errorf("request = %#v", req)
@@ -731,7 +745,7 @@ func newOGMCPTestDaemon(t *testing.T) *httptest.Server {
 func assertOGCommandSession(t *testing.T, session *mcp.ClientSession) {
 	t.Helper()
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil || len(tools.Tools) != 12 {
+	if err != nil || len(tools.Tools) != 11 {
 		t.Fatalf("tools = %#v, err = %v", tools, err)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -742,6 +756,15 @@ func assertOGCommandSession(t *testing.T, session *mcp.ClientSession) {
 	}
 	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "stdio") {
 		t.Fatalf("result = %#v", result)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_get", Arguments: map[string]any{"project": "organon"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "current branch") {
+		t.Fatalf("current branch result = %#v", result)
 	}
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "push", Arguments: map[string]any{"project": "organon", "force": true},

@@ -227,14 +227,15 @@ tools accept only that alias; they do not accept a filesystem path, working
 directory, MCP root, file URI, or credential. The `og` daemon must already be
 running, resolves the registered repository, and owns forge credentials.
 
-`og mcp` mirrors the CLI push, pull, PR create, find, and view workflows against
-the registered checkout's current branch. Force push uses force-with-lease and
-is rejected on the default branch. Pull retains the CLI's guarded closed-PR
-branch cleanup. Explicit positive PR IDs select branch-free remote operations;
-modify, comment, checks, log, and failures use the current branch when the ID is
-omitted. Tag remains CLI-only. Restart a long-running MCP server after changing
-project, org, or web configuration. Run `project mcp --help`, `og mcp --help`,
-or `web mcp --help` for the tool lists and configuration details.
+`og mcp` mirrors the CLI push, pull, PR create, find, and current-PR view
+workflows against the registered checkout's current branch. Force push uses
+force-with-lease and is rejected on the default branch. Pull retains the CLI's
+guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
+operation; `pr_get`, modify, comment, checks, log, and failures use the current
+branch when the ID is omitted. Tag remains CLI-only. Restart a long-running MCP
+server after changing project, org, or web configuration. Run
+`project mcp --help`, `og mcp --help`, or `web mcp --help` for the tool lists and
+configuration details.
 
 ## Why
 
