@@ -120,6 +120,26 @@ func TestGitPushPassesForceWithLease(t *testing.T) {
 	}
 }
 
+func TestGitPushRejectsForceOnDefaultBranch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	called := false
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		called = true
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(&recordingBroker{}).GitPush(Request{WorkDir: repo, Force: true})
+	if err == nil || !strings.Contains(err.Error(), "refusing to force push default branch") {
+		t.Fatalf("GitPush error = %v, want default-branch refusal", err)
+	}
+	if called {
+		t.Fatal("GitPush called git after rejecting force push to default branch")
+	}
+}
+
 func TestGitPullDefaultBranch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

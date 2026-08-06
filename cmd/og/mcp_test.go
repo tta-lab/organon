@@ -63,7 +63,7 @@ func connectOGMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
 	return session
 }
 
-func TestOGMCPListsOnlyExplicitRemoteTools(t *testing.T) {
+func TestOGMCPListsCLIParityTools(t *testing.T) {
 	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
 		return og.Response{}, nil
 	}}
@@ -72,7 +72,10 @@ func TestOGMCPListsOnlyExplicitRemoteTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNames := []string{"auth_status", "pr_checks", "pr_comment", "pr_failures", "pr_get", "pr_log", "pr_modify"}
+	wantNames := []string{
+		"auth_status", "pr_checks", "pr_comment", "pr_create", "pr_failures", "pr_find", "pr_get",
+		"pr_log", "pr_modify", "pr_view", "pull", "push",
+	}
 	gotNames := make([]string, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		gotNames = append(gotNames, tool.Name)
@@ -101,12 +104,46 @@ func assertOGToolContract(t *testing.T, tool *mcp.Tool) {
 			t.Fatalf("tool %q exposes forbidden input %q", tool.Name, forbidden)
 		}
 	}
-	if tool.Name != "auth_status" && properties["pr_id"] == nil {
+	if ogToolHasPRID(tool.Name) && properties["pr_id"] == nil {
 		t.Fatalf("tool %q input lacks pr_id", tool.Name)
 	}
+	if !ogToolHasPRID(tool.Name) && properties["pr_id"] != nil {
+		t.Fatalf("tool %q unexpectedly exposes pr_id", tool.Name)
+	}
+	if prID := properties["pr_id"]; prID != nil {
+		if prID.Minimum == nil || *prID.Minimum != 1 {
+			t.Fatalf("tool %q pr_id minimum = %#v, want 1", tool.Name, prID.Minimum)
+		}
+	}
 	assertRequiredInput(t, tool)
+	assertOGToolDefaults(t, tool, properties)
+}
+
+func assertOGToolDefaults(t *testing.T, tool *mcp.Tool, properties map[string]*jsonschema.Schema) {
+	t.Helper()
 	if tool.Name == "pr_log" || tool.Name == "pr_failures" {
 		assertTailSchema(t, tool.Name, properties["tail"])
+	}
+	if tool.Name == "push" {
+		if force := properties["force"]; force == nil || string(force.Default) != "false" {
+			t.Fatalf("tool %q force schema = %#v", tool.Name, force)
+		}
+	}
+	if tool.Name == "pr_find" {
+		state := properties["state"]
+		if state == nil || string(state.Default) != `"open"` ||
+			!reflect.DeepEqual(state.Enum, []any{"open", "closed", "all"}) {
+			t.Fatalf("tool %q state schema = %#v", tool.Name, state)
+		}
+	}
+}
+
+func ogToolHasPRID(name string) bool {
+	switch name {
+	case "pr_get", "pr_modify", "pr_comment", "pr_checks", "pr_log", "pr_failures":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -124,8 +161,14 @@ func assertRequiredInput(t *testing.T, tool *mcp.Tool) {
 	for _, name := range schema.Required {
 		required[name] = true
 	}
-	if !required["project"] || (tool.Name != "auth_status" && !required["pr_id"]) {
+	if !required["project"] || (tool.Name == "pr_get" && !required["pr_id"]) {
 		t.Fatalf("tool %q required inputs = %v", tool.Name, schema.Required)
+	}
+	if tool.Name != "pr_get" && required["pr_id"] {
+		t.Fatalf("tool %q unexpectedly requires pr_id: %v", tool.Name, schema.Required)
+	}
+	if tool.Name == "pr_create" && !required["title"] {
+		t.Fatalf("tool %q required inputs = %v, want title", tool.Name, schema.Required)
 	}
 }
 
@@ -136,10 +179,10 @@ func assertOGToolAnnotations(t *testing.T, tool *mcp.Tool) {
 		t.Fatalf("tool %q annotations = %#v, want open-world", tool.Name, annotations)
 	}
 	wantReadOnly, wantDestructive, wantIdempotent := true, false, true
-	if tool.Name == "pr_modify" {
+	if tool.Name == "pr_modify" || tool.Name == "push" || tool.Name == "pull" {
 		wantReadOnly, wantDestructive = false, true
 	}
-	if tool.Name == "pr_comment" {
+	if tool.Name == "pr_comment" || tool.Name == "pr_create" {
 		wantReadOnly, wantIdempotent = false, false
 	}
 	if annotations.ReadOnlyHint != wantReadOnly || annotations.IdempotentHint != wantIdempotent ||
@@ -186,6 +229,101 @@ func TestOGMCPResolvesAliasAndReturnsStructuredResults(t *testing.T) {
 		{name: "pr_log", args: map[string]any{"project": "organon", "pr_id": 17}, key: "lines"},
 		{name: "pr_failures", args: map[string]any{"project": "organon", "pr_id": 17}, key: "lines"},
 		{name: "pr_comment", args: map[string]any{"project": "organon", "pr_id": 17, "body": comment.Body}, key: "comment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertStructuredOGCall(t, session, tt.name, tt.args, tt.key)
+		})
+	}
+}
+
+func TestOGMCPRoutesWorktreeToolsThroughRegisteredAlias(t *testing.T) {
+	pr := &og.PullRequest{
+		Index: 17, Title: "typed MCP", Body: "body", State: "open", URL: "https://forge/pr/17",
+		Head: "feature/mcp", Base: "main",
+	}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		if req.WorkDir != "/work/code/projects/tta-lab/organon" {
+			t.Fatalf("work_dir = %q", req.WorkDir)
+		}
+		switch path {
+		case "/git/push":
+			if !req.Force {
+				t.Fatal("force = false, want true")
+			}
+			return og.Response{OK: true, Message: "force-pushed feature/mcp"}, nil
+		case "/git/pull":
+			return og.Response{OK: true, Message: "Merged PR. Pulled main. Deleted feature/mcp locally and remotely"}, nil
+		case "/pr/create":
+			if req.Title == nil || *req.Title != "typed MCP" || req.Body == nil || *req.Body != "body" {
+				t.Fatalf("create request = %+v", req)
+			}
+			return og.Response{OK: true, PR: pr}, nil
+		case "/pr/find":
+			if req.State != "open" {
+				t.Fatalf("find state = %q, want open", req.State)
+			}
+			return og.Response{OK: true, PR: pr}, nil
+		case "/pr/view":
+			if req.State != "all" {
+				t.Fatalf("view state = %q, want all", req.State)
+			}
+			return og.Response{OK: true, PR: pr}, nil
+		default:
+			t.Fatalf("unexpected daemon path %q", path)
+			return og.Response{}, nil
+		}
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	tests := []struct {
+		name string
+		args map[string]any
+		key  string
+	}{
+		{name: "push", args: map[string]any{"project": "organon", "force": true}, key: "message"},
+		{name: "pull", args: map[string]any{"project": "organon"}, key: "message"},
+		{name: "pr_create", args: map[string]any{"project": "organon", "title": "typed MCP", "body": "body"}, key: "pr"},
+		{name: "pr_find", args: map[string]any{"project": "organon"}, key: "pr"},
+		{name: "pr_view", args: map[string]any{"project": "organon"}, key: "pr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertStructuredOGCall(t, session, tt.name, tt.args, tt.key)
+		})
+	}
+}
+
+func TestOGMCPCurrentBranchPRToolsAllowOmittedPRID(t *testing.T) {
+	pr := &og.PullRequest{Index: 17, Title: "current branch", URL: "https://forge/pr/17"}
+	commentBody := "current branch comment"
+	comment := &og.Comment{ID: 3, PRID: 17, Body: commentBody, URL: "https://forge/pr/17#comment-3"}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		if req.WorkDir != "/work/code/projects/tta-lab/organon" || req.Index != 0 {
+			t.Fatalf("request = %+v", req)
+		}
+		switch path {
+		case "/pr/modify":
+			return og.Response{OK: true, PR: pr}, nil
+		case "/pr/comment":
+			return og.Response{OK: true, Comment: comment}, nil
+		case "/pr/checks", "/pr/log", "/pr/failures":
+			return og.Response{OK: true, PR: pr, Lines: []string{"line"}}, nil
+		default:
+			t.Fatalf("unexpected daemon path %q", path)
+			return og.Response{}, nil
+		}
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	tests := []struct {
+		name string
+		args map[string]any
+		key  string
+	}{
+		{name: "pr_modify", args: map[string]any{"project": "organon", "title": "current branch"}, key: "pr"},
+		{name: "pr_comment", args: map[string]any{"project": "organon", "body": commentBody}, key: "comment"},
+		{name: "pr_checks", args: map[string]any{"project": "organon"}, key: "lines"},
+		{name: "pr_log", args: map[string]any{"project": "organon"}, key: "lines"},
+		{name: "pr_failures", args: map[string]any{"project": "organon"}, key: "lines"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -358,11 +496,16 @@ func TestOGMCPRejectsInvalidInputsAndDaemonFailuresAsToolErrors(t *testing.T) {
 		{name: "pr_get", args: map[string]any{"project": "/work/code/projects/tta-lab/organon", "pr_id": 1}},
 		{name: "pr_get", args: map[string]any{"project": "missing", "pr_id": 1}},
 		{name: "pr_get", args: map[string]any{"project": "organon", "pr_id": 0}},
+		{name: "pr_modify", args: map[string]any{"project": "organon", "pr_id": -1, "title": "title"}},
+		{name: "pr_comment", args: map[string]any{"project": "organon", "pr_id": -1, "body": "body"}},
+		{name: "pr_checks", args: map[string]any{"project": "organon", "pr_id": -1}},
 		{name: "pr_modify", args: map[string]any{"project": "organon", "pr_id": 1}},
 		{name: "pr_modify", args: map[string]any{"project": "organon", "pr_id": 1, "title": "  "}},
 		{name: "pr_comment", args: map[string]any{"project": "organon", "pr_id": 1, "body": " \n"}},
 		{name: "pr_log", args: map[string]any{"project": "organon", "pr_id": 1, "tail": 1001}},
 		{name: "pr_failures", args: map[string]any{"project": "organon", "pr_id": 1, "tail": -1}},
+		{name: "pr_create", args: map[string]any{"project": "organon", "title": "  "}},
+		{name: "pr_find", args: map[string]any{"project": "organon", "state": "merged"}},
 		{name: "pr_get", args: map[string]any{"project": "organon", "pr_id": 1, "work_dir": "/tmp"}},
 		{name: "auth_status", args: map[string]any{"project": "organon"}},
 	}
@@ -374,6 +517,43 @@ func TestOGMCPRejectsInvalidInputsAndDaemonFailuresAsToolErrors(t *testing.T) {
 			}
 			if !result.IsError {
 				t.Fatalf("result = %#v, want tool error", result)
+			}
+		})
+	}
+}
+
+func TestOGMCPRejectsExplicitZeroOptionalPRID(t *testing.T) {
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		switch path {
+		case "/pr/modify":
+			return og.Response{OK: true, PR: &og.PullRequest{Index: 22, Title: *req.Title}}, nil
+		case "/pr/comment":
+			return og.Response{OK: true, Comment: &og.Comment{
+				ID: 3, PRID: 22, Body: *req.Body, URL: "https://forge/pr/22#comment-3",
+			}}, nil
+		default:
+			return og.Response{OK: true, PR: &og.PullRequest{Index: 22}}, nil
+		}
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "pr_modify", args: map[string]any{"project": "organon", "pr_id": 0, "title": "title"}},
+		{name: "pr_comment", args: map[string]any{"project": "organon", "pr_id": 0, "body": "body"}},
+		{name: "pr_checks", args: map[string]any{"project": "organon", "pr_id": 0}},
+		{name: "pr_log", args: map[string]any{"project": "organon", "pr_id": 0}},
+		{name: "pr_failures", args: map[string]any{"project": "organon", "pr_id": 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
+			if err != nil {
+				t.Fatalf("protocol error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("result = %#v, want explicit zero PR ID tool error", result)
 			}
 		})
 	}
@@ -423,6 +603,53 @@ func TestOGMCPRejectsMismatchedDaemonIdentity(t *testing.T) {
 	}
 }
 
+func TestOGMCPRejectsInvalidWorktreeDaemonResults(t *testing.T) {
+	tests := []struct {
+		name string
+		resp og.Response
+	}{
+		{name: "push", resp: og.Response{OK: true}},
+		{name: "pull", resp: og.Response{OK: true, Message: " \n"}},
+		{name: "pr_create", resp: og.Response{OK: true}},
+		{name: "pr_find", resp: og.Response{OK: true, PR: &og.PullRequest{URL: "https://forge/pr/0"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
+				return tt.resp, nil
+			}}
+			session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+			args := map[string]any{"project": "organon"}
+			if tt.name == "pr_create" {
+				args["title"] = "title"
+			}
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: args})
+			if err != nil {
+				t.Fatalf("protocol error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("result = %#v, want invalid daemon result tool error", result)
+			}
+		})
+	}
+}
+
+func TestOGMCPAcceptsWorktreePRWithoutDisplayURL(t *testing.T) {
+	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
+		return og.Response{OK: true, PR: &og.PullRequest{Index: 7, Title: "feature"}}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_view", Arguments: map[string]any{"project": "organon"},
+	})
+	if err != nil {
+		t.Fatalf("protocol error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("result = %#v, want positive PR identity accepted", result)
+	}
+}
+
 func TestOGMCPCommandHelper(_ *testing.T) {
 	if os.Getenv("GO_WANT_OG_MCP_HELPER") != "1" {
 		return
@@ -469,14 +696,11 @@ func writeOGMCPConfig(t *testing.T, home string) {
 func newOGMCPTestDaemon(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pr/get" {
-			t.Errorf("path = %s", r.URL.Path)
-		}
 		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
-		if req["work_dir"] != "/work/code/projects/tta-lab/organon" || req["index"] != float64(31) {
+		if req["work_dir"] != "/work/code/projects/tta-lab/organon" {
 			t.Errorf("request = %#v", req)
 		}
 		for _, forbidden := range []string{"token", "token_env"} {
@@ -484,16 +708,30 @@ func newOGMCPTestDaemon(t *testing.T) *httptest.Server {
 				t.Errorf("request includes %s", forbidden)
 			}
 		}
-		_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
-			Index: 31, Title: "stdio", State: "open", URL: "https://forge/pr/31",
-		}})
+		switch r.URL.Path {
+		case "/pr/get":
+			if req["index"] != float64(31) {
+				t.Errorf("request = %#v", req)
+			}
+			_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
+				Index: 31, Title: "stdio", State: "open", URL: "https://forge/pr/31",
+			}})
+		case "/git/push":
+			if req["force"] != true {
+				t.Errorf("request = %#v", req)
+			}
+			_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "pushed with force-with-lease"})
+		default:
+			t.Errorf("path = %s", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusNotFound)
+		}
 	}))
 }
 
 func assertOGCommandSession(t *testing.T, session *mcp.ClientSession) {
 	t.Helper()
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil || len(tools.Tools) != 7 {
+	if err != nil || len(tools.Tools) != 12 {
 		t.Fatalf("tools = %#v, err = %v", tools, err)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -504,5 +742,14 @@ func assertOGCommandSession(t *testing.T, session *mcp.ClientSession) {
 	}
 	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "stdio") {
 		t.Fatalf("result = %#v", result)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "push", Arguments: map[string]any{"project": "organon", "force": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "force-with-lease") {
+		t.Fatalf("push result = %#v", result)
 	}
 }

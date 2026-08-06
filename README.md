@@ -223,16 +223,18 @@ them as separate processes so clients can grant only the tools a session needs:
 
 Use `project_get` or `project_list` to discover an exact registered project
 alias. Active aliases are single-layer names and cannot contain dots. The `og`
-tools accept only that alias and, for pull request operations, an explicit
-positive PR ID. They do not accept a filesystem path, working directory, MCP
-root, file URI, or credential. The `og` daemon must already be running; it
-resolves the registered repository and owns forge credentials.
+tools accept only that alias; they do not accept a filesystem path, working
+directory, MCP root, file URI, or credential. The `og` daemon must already be
+running, resolves the registered repository, and owns forge credentials.
 
-Git and worktree-dependent operations, including push, pull, tag, PR create,
-find, and view, remain CLI operations run from the target shell working
-directory. Restart a long-running MCP server after changing project, org, or
-web configuration. Run `project mcp --help`, `og mcp --help`, or
-`web mcp --help` for the tool lists and configuration details.
+`og mcp` mirrors the CLI push, pull, PR create, find, and view workflows against
+the registered checkout's current branch. Force push uses force-with-lease and
+is rejected on the default branch. Pull retains the CLI's guarded closed-PR
+branch cleanup. Explicit positive PR IDs select branch-free remote operations;
+modify, comment, checks, log, and failures use the current branch when the ID is
+omitted. Tag remains CLI-only. Restart a long-running MCP server after changing
+project, org, or web configuration. Run `project mcp --help`, `og mcp --help`,
+or `web mcp --help` for the tool lists and configuration details.
 
 ## Why
 
