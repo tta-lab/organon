@@ -32,12 +32,17 @@ func NewClientFromEnv() Client {
 }
 
 func (c Client) Call(path string, req Request) (Response, error) {
+	return c.CallContext(context.Background(), path, req)
+}
+
+// CallContext sends a daemon request bound to the caller's cancellation and deadline.
+func (c Client) CallContext(ctx context.Context, path string, req Request) (Response, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return Response{}, err
 	}
 	httpReq, err := http.NewRequestWithContext(
-		context.Background(),
+		ctx,
 		http.MethodPost,
 		strings.TrimRight(c.base, "/")+path,
 		bytes.NewReader(data),

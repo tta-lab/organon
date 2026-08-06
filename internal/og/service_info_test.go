@@ -11,6 +11,7 @@ func TestAuthStatusReportsGitHubAppPermissions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature")
+	gitRun(t, repo, "checkout", "--detach")
 	broker := &recordingBroker{status: githubapp.InstallationStatus{
 		AppID:          12345,
 		InstallationID: 41,
@@ -24,6 +25,9 @@ func TestAuthStatusReportsGitHubAppPermissions(t *testing.T) {
 	resp, err := NewService(broker).AuthStatus(Request{WorkDir: repo})
 	if err != nil {
 		t.Fatalf("AuthStatus: %v", err)
+	}
+	if resp.Auth == nil || !resp.Auth.Ready || resp.Auth.Project != "test" || resp.Auth.AuthMode != "github-app" {
+		t.Fatalf("structured auth = %+v", resp.Auth)
 	}
 	for _, want := range []string{
 		"provider: github", "repo: tta-lab/example", "auth: github-app",

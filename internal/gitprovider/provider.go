@@ -38,6 +38,7 @@ type PullRequest struct {
 
 type Comment struct {
 	ID        int64
+	PRID      int64
 	Body      string
 	User      string
 	CreatedAt time.Time

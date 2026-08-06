@@ -23,10 +23,12 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read PR body: %w", err)
 	}
+	title := strings.Join(args, " ")
+	bodyText := strings.TrimRight(string(body), "\n")
 	resp, err := daemonCall("/pr/create", og.Request{
 		WorkDir: workDir,
-		Title:   strings.Join(args, " "),
-		Body:    strings.TrimRight(string(body), "\n"),
+		Title:   &title,
+		Body:    &bodyText,
 	})
 	if err != nil {
 		return err
@@ -74,7 +76,16 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid --pr-id %q: %w", prID, err)
 		}
 	}
-	resp, err := daemonCall("/pr/modify", og.Request{WorkDir: workDir, Index: index, Title: title, Body: body})
+	var titleInput, bodyInput *string
+	if cmd.Flags().Changed("title") {
+		titleInput = &title
+	}
+	if body != "" {
+		bodyInput = &body
+	}
+	resp, err := daemonCall("/pr/modify", og.Request{
+		WorkDir: workDir, Index: index, Title: titleInput, Body: bodyInput,
+	})
 	if err != nil {
 		return err
 	}
@@ -95,7 +106,7 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	if body == "" {
 		return fmt.Errorf("comment body is required on stdin")
 	}
-	resp, err := daemonCall("/pr/comment", og.Request{WorkDir: workDir, Body: body})
+	resp, err := daemonCall("/pr/comment", og.Request{WorkDir: workDir, Body: &body})
 	if err != nil {
 		return err
 	}

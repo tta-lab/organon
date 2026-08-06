@@ -16,7 +16,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
-	pr, err := createPR(ctx, req.Title, req.Body)
+	pr, err := createPR(ctx, stringValue(req.Title), stringValue(req.Body))
 	if err != nil {
 		return Response{}, err
 	}
@@ -53,7 +53,10 @@ func (s Service) PRFind(req Request) (Response, error) {
 }
 
 func (s Service) PRGet(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index <= 0 {
+		return Response{}, fmt.Errorf("PR ID must be positive")
+	}
+	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
@@ -65,7 +68,16 @@ func (s Service) PRGet(req Request) (Response, error) {
 }
 
 func (s Service) PRModify(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	if req.Title == nil && req.Body == nil {
+		return Response{}, fmt.Errorf("nothing to update: provide title and/or body")
+	}
+	if req.Title != nil && strings.TrimSpace(*req.Title) == "" {
+		return Response{}, fmt.Errorf("PR title must not be blank")
+	}
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
@@ -85,26 +97,40 @@ func (s Service) PRModify(req Request) (Response, error) {
 }
 
 func (s Service) PRComment(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	if req.Body == nil || strings.TrimSpace(*req.Body) == "" {
+		return Response{}, fmt.Errorf("comment body must not be blank")
+	}
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
-	pr, err := findPR(ctx, stateAll)
+	index := req.Index
+	if index == 0 {
+		pr, err := findPR(ctx, stateAll)
+		if err != nil {
+			return Response{}, err
+		}
+		index = pr.Index
+	}
+	comment, err := commentPR(ctx, index, *req.Body)
 	if err != nil {
 		return Response{}, err
 	}
-	if err := commentPR(ctx, pr.Index, req.Body); err != nil {
-		return Response{}, err
-	}
-	return success(Response{Message: fmt.Sprintf("Commented on PR #%d", pr.Index)}), nil
+	return success(Response{Message: fmt.Sprintf("Commented on PR #%d", index), Comment: comment}), nil
 }
 
 func (s Service) PRChecks(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
-	pr, err := findPR(ctx, stateAll)
+	pr, err := getRequestedPR(ctx, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
@@ -115,7 +141,7 @@ func (s Service) PRChecks(req Request) (Response, error) {
 	if len(lines) == 0 {
 		lines = []string{"No checks found."}
 	}
-	return success(Response{Lines: lines}), nil
+	return success(Response{PR: pr, Lines: lines}), nil
 }
 
 func attachCIStatus(ctx *repoContext, pr *PullRequest) {
@@ -131,11 +157,14 @@ func attachCIStatus(ctx *repoContext, pr *PullRequest) {
 }
 
 func (s Service) PRFailures(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
-	pr, err := findPR(ctx, stateAll)
+	pr, err := getRequestedPR(ctx, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
@@ -146,15 +175,18 @@ func (s Service) PRFailures(req Request) (Response, error) {
 	if len(lines) == 0 {
 		lines = []string{"No failing checks found."}
 	}
-	return success(Response{Lines: lines}), nil
+	return success(Response{PR: pr, Lines: lines}), nil
 }
 
 func (s Service) PRLog(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
-	pr, err := findPR(ctx, stateAll)
+	pr, err := getRequestedPR(ctx, req.Index)
 	if err != nil {
 		return Response{}, err
 	}
@@ -164,7 +196,7 @@ func (s Service) PRLog(req Request) (Response, error) {
 	}
 	lines := formatCIStatusLines(pr.SHA, ci)
 	if !hasCIFailures(ci) {
-		return success(Response{Lines: lines}), nil
+		return success(Response{PR: pr, Lines: lines}), nil
 	}
 	tail := req.Tail
 	if tail < 0 {
@@ -173,11 +205,32 @@ func (s Service) PRLog(req Request) (Response, error) {
 	failures, err := getCIFailureDetails(ctx, pr, tail)
 	if err != nil {
 		lines = append(lines, "warning: could not fetch failure logs: "+err.Error())
-		return success(Response{Lines: lines}), nil
+		return success(Response{PR: pr, Lines: lines}), nil
 	}
 	lines = append(lines, "")
 	lines = append(lines, formatPRLogFailureDetails(failures)...)
-	return success(Response{Lines: lines}), nil
+	return success(Response{PR: pr, Lines: lines}), nil
+}
+
+func (s Service) resolvePRContext(workDir string, index int64) (*repoContext, error) {
+	if index > 0 {
+		return s.resolveRemoteRepoContextFor(workDir)
+	}
+	return s.resolveRepoContextFor(workDir)
+}
+
+func getRequestedPR(ctx *repoContext, index int64) (*PullRequest, error) {
+	if index > 0 {
+		return getPR(ctx, index)
+	}
+	return findPR(ctx, stateAll)
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func formatCIStatusLines(sha string, ci *CIStatusResponse) []string {

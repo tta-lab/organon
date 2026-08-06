@@ -26,3 +26,12 @@ func (s Service) resolveRepoContextFor(workDir string) (*repoContext, error) {
 	ctx.githubBroker = s.githubBroker
 	return ctx, nil
 }
+
+func (s Service) resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
+	ctx, err := resolveRemoteRepoContextFor(workDir)
+	if err != nil {
+		return nil, err
+	}
+	ctx.githubBroker = s.githubBroker
+	return ctx, nil
+}

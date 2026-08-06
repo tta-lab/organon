@@ -73,25 +73,59 @@ func getPR(ctx *repoContext, index int64) (*PullRequest, error) {
 	return fromProviderPR(pr), nil
 }
 
-func updatePR(ctx *repoContext, index int64, title, body string) (*PullRequest, error) {
+func updatePR(ctx *repoContext, index int64, title, body *string) (*PullRequest, error) {
 	provider, err := newProvider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	pr, err := provider.EditPR(ctx.Owner, ctx.Repo, index, title, body)
+	current, err := provider.GetPR(ctx.Owner, ctx.Repo, index)
 	if err != nil {
 		return nil, err
+	}
+	if current == nil || current.Index != index {
+		return nil, fmt.Errorf("provider returned invalid current PR ID for #%d", index)
+	}
+	desiredTitle, desiredBody := current.Title, current.Body
+	if title != nil {
+		desiredTitle = *title
+	}
+	if body != nil {
+		desiredBody = *body
+	}
+	pr, err := provider.EditPR(ctx.Owner, ctx.Repo, index, desiredTitle, desiredBody)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil || pr.Index != index {
+		return nil, fmt.Errorf("provider returned invalid PR ID after updating #%d", index)
+	}
+	if title != nil && pr.Title != *title {
+		return nil, fmt.Errorf(
+			"provider returned title %q after updating PR #%d, want %q", pr.Title, index, *title,
+		)
+	}
+	if body != nil && pr.Body != *body {
+		return nil, fmt.Errorf("provider returned body that does not match update for PR #%d", index)
 	}
 	return fromProviderPR(pr), nil
 }
 
-func commentPR(ctx *repoContext, index int64, body string) error {
+func commentPR(ctx *repoContext, index int64, body string) (*Comment, error) {
 	provider, err := newProvider(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = provider.CreateComment(ctx.Owner, ctx.Repo, index, body)
-	return err
+	comment, err := provider.CreateComment(ctx.Owner, ctx.Repo, index, body)
+	if err != nil {
+		return nil, err
+	}
+	if comment == nil || comment.ID <= 0 || comment.PRID != index || comment.Body != body || comment.HTMLURL == "" {
+		return nil, fmt.Errorf("provider returned invalid comment after commenting on PR #%d", index)
+	}
+	return &Comment{
+		ID: comment.ID, PRID: index, Body: comment.Body, URL: comment.HTMLURL,
+		User: comment.User, CreatedAt: comment.CreatedAt,
+	}, nil
 }
 
 func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {

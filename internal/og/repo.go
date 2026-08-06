@@ -49,6 +49,23 @@ type repoContext struct {
 }
 
 func resolveRepoContextFor(workDir string) (*repoContext, error) {
+	ctxInfo, err := resolveRemoteRepoContextFor(workDir)
+	if err != nil {
+		return nil, err
+	}
+	branch, err := gitOutput(ctxInfo.WorkDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("get current branch: %w", err)
+	}
+	if branch == headRefName || branch == "" {
+		return nil, fmt.Errorf("not on a named branch")
+	}
+	ctxInfo.DefaultBase = defaultBranch(ctxInfo.WorkDir)
+	ctxInfo.Branch = branch
+	return ctxInfo, nil
+}
+
+func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
 	if workDir == "" {
 		var err error
 		workDir, err = os.Getwd()
@@ -75,14 +92,6 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	branch, err := gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("get current branch: %w", err)
-	}
-	if branch == headRefName || branch == "" {
-		return nil, fmt.Errorf("not on a named branch")
-	}
-	base := defaultBranch(root)
 	tokenEnv := tokenEnvFor(info.Provider)
 	token := ""
 	if tokenEnv != "" {
@@ -99,8 +108,6 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 		RemoteURL:    remote,
 		TokenEnv:     tokenEnv,
 		Token:        token,
-		DefaultBase:  base,
-		Branch:       branch,
 	}, nil
 }
 
