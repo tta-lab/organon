@@ -134,3 +134,67 @@ path = "/projects/fse"
 		t.Fatalf("error = %v, want invalid project alias", err)
 	}
 }
+
+func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoPath := filepath.Join(tmpHome, "code", "references", "github.com", "tta-lab", "demo")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("mkdir reference repo: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want func(t *testing.T, stdout string)
+	}{
+		{
+			name: "get",
+			args: []string{"get", "tta-lab/demo", "--json"},
+			want: func(t *testing.T, stdout string) {
+				t.Helper()
+				var got map[string]any
+				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+					t.Fatalf("decode get output: %v", err)
+				}
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+					t.Fatalf("get output = %#v", got)
+				}
+			},
+		},
+		{
+			name: "resolve",
+			args: []string{"resolve", "tta-lab/demo"},
+			want: func(t *testing.T, stdout string) {
+				t.Helper()
+				var got map[string]any
+				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+					t.Fatalf("decode resolve output: %v", err)
+				}
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+					t.Fatalf("resolve output = %#v", got)
+				}
+			},
+		},
+		{
+			name: "jump",
+			args: []string{"jump", "tta-lab/demo"},
+			want: func(t *testing.T, stdout string) {
+				t.Helper()
+				if stdout != repoPath+"\n" {
+					t.Fatalf("jump output = %q, want %q", stdout, repoPath+"\n")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, err := runProject(t, tt.args)
+			if err != nil {
+				t.Fatalf("run project %v: %v", tt.args, err)
+			}
+			tt.want(t, stdout)
+		})
+	}
+}
