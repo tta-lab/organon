@@ -104,6 +104,7 @@ func TestGitPushPassesForceWithLease(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	var got []string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		got = append([]string(nil), args...)
@@ -124,6 +125,7 @@ func TestGitPushRejectsForceOnDefaultBranch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	called := false
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
 		called = true
@@ -137,6 +139,26 @@ func TestGitPushRejectsForceOnDefaultBranch(t *testing.T) {
 	}
 	if called {
 		t.Fatal("GitPush called git after rejecting force push to default branch")
+	}
+}
+
+func TestGitPushRejectsForceWhenDefaultBranchIsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMaster)
+	called := false
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		called = true
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(&recordingBroker{}).GitPush(Request{WorkDir: repo, Force: true})
+	if err == nil || !strings.Contains(err.Error(), "default branch is unknown") {
+		t.Fatalf("GitPush error = %v, want unknown-default refusal", err)
+	}
+	if called {
+		t.Fatal("GitPush called git when force-push safety could not identify the default branch")
 	}
 }
 

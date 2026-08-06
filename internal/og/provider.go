@@ -17,6 +17,9 @@ func createPR(ctx *repoContext, title, body string) (*PullRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !validProviderPRIdentity(pr, 0) {
+		return nil, fmt.Errorf("provider returned invalid PR after creating it")
+	}
 	return fromProviderPR(pr), nil
 }
 
@@ -39,6 +42,9 @@ func findPR(ctx *repoContext, state string) (*PullRequest, error) {
 			}
 			pr, err := finder.FindPRByCommit(ctx.Owner, ctx.Repo, sha)
 			if err == nil && pr != nil && pr.Head == ctx.Branch && prMatches(pr, ctx.DefaultBase, state) {
+				if !validProviderPRIdentity(pr, 0) {
+					return nil, fmt.Errorf("provider returned invalid PR while finding by commit")
+				}
 				return fromProviderPR(pr), nil
 			}
 		}
@@ -46,6 +52,9 @@ func findPR(ctx *repoContext, state string) (*PullRequest, error) {
 	pr, err := provider.FindPRByState(ctx.Owner, ctx.Repo, ctx.Branch, ctx.DefaultBase, state)
 	if err != nil {
 		return nil, err
+	}
+	if !validProviderPRIdentity(pr, 0) {
+		return nil, fmt.Errorf("provider returned invalid PR while finding by branch")
 	}
 	return fromProviderPR(pr), nil
 }
@@ -61,6 +70,10 @@ func prMatches(pr *gitprovider.PullRequest, base, state string) bool {
 	return state == "" || state == "all" || pr.State == state
 }
 
+func validProviderPRIdentity(pr *gitprovider.PullRequest, expectedIndex int64) bool {
+	return pr != nil && pr.Index > 0 && (expectedIndex <= 0 || pr.Index == expectedIndex)
+}
+
 func getPR(ctx *repoContext, index int64) (*PullRequest, error) {
 	provider, err := newProvider(ctx)
 	if err != nil {
@@ -70,7 +83,7 @@ func getPR(ctx *repoContext, index int64) (*PullRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pr == nil || pr.Index != index {
+	if !validProviderPRIdentity(pr, index) {
 		return nil, fmt.Errorf("provider returned invalid PR snapshot for #%d", index)
 	}
 	return fromProviderPR(pr), nil
@@ -85,7 +98,7 @@ func updatePR(ctx *repoContext, index int64, title, body *string) (*PullRequest,
 	if err != nil {
 		return nil, err
 	}
-	if current == nil || current.Index != index {
+	if !validProviderPRIdentity(current, index) {
 		return nil, fmt.Errorf("provider returned invalid current PR ID for #%d", index)
 	}
 	desiredTitle, desiredBody := current.Title, current.Body
@@ -99,7 +112,7 @@ func updatePR(ctx *repoContext, index int64, title, body *string) (*PullRequest,
 	if err != nil {
 		return nil, err
 	}
-	if pr == nil || pr.Index != index {
+	if !validProviderPRIdentity(pr, index) {
 		return nil, fmt.Errorf("provider returned invalid PR ID after updating #%d", index)
 	}
 	if title != nil && pr.Title != *title {

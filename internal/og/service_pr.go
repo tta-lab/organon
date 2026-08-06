@@ -9,6 +9,10 @@ import (
 )
 
 func (s Service) PRCreate(req Request) (Response, error) {
+	title := stringValue(req.Title)
+	if strings.TrimSpace(title) == "" {
+		return Response{}, fmt.Errorf("PR title must not be blank")
+	}
 	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
@@ -16,7 +20,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
-	pr, err := createPR(ctx, stringValue(req.Title), stringValue(req.Body))
+	pr, err := createPR(ctx, title, stringValue(req.Body))
 	if err != nil {
 		return Response{}, err
 	}

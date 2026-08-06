@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,19 +34,20 @@ var (
 )
 
 type repoContext struct {
-	WorkDir      string
-	ProjectAlias string
-	Provider     gitprovider.ProviderType
-	Host         string
-	BaseURL      string
-	Owner        string
-	Repo         string
-	RemoteURL    string
-	TokenEnv     string
-	Token        string
-	DefaultBase  string
-	Branch       string
-	githubBroker githubapp.CredentialBroker
+	WorkDir          string
+	ProjectAlias     string
+	Provider         gitprovider.ProviderType
+	Host             string
+	BaseURL          string
+	Owner            string
+	Repo             string
+	RemoteURL        string
+	TokenEnv         string
+	Token            string
+	DefaultBase      string
+	DefaultBaseKnown bool
+	Branch           string
+	githubBroker     githubapp.CredentialBroker
 }
 
 func resolveRepoContextFor(workDir string) (*repoContext, error) {
@@ -60,7 +62,7 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 	if branch == headRefName || branch == "" {
 		return nil, fmt.Errorf("not on a named branch")
 	}
-	ctxInfo.DefaultBase = defaultBranch(ctxInfo.WorkDir)
+	ctxInfo.DefaultBase, ctxInfo.DefaultBaseKnown = defaultBranch(ctxInfo.WorkDir)
 	ctxInfo.Branch = branch
 	return ctxInfo, nil
 }
@@ -73,16 +75,35 @@ func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
 			return nil, fmt.Errorf("get working directory: %w", err)
 		}
 	}
+	requestedPath, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve working directory: %w", err)
+	}
 	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("not in a git repository: %w", err)
 	}
-	e, err := project.GetByPath(config.ProjectsPath(), root)
+	root = filepath.Clean(root)
+	catalog, err := project.OpenCatalog(config.ProjectsPath())
 	if err != nil {
 		return nil, err
 	}
-	if e == nil {
+	registeredInput, inputErr := catalog.GetByPath(requestedPath)
+	if inputErr == nil && registeredInput.Path != root {
+		return nil, fmt.Errorf(
+			"registered project %q path %q must be the Git top-level %q",
+			registeredInput.Alias, registeredInput.Path, root,
+		)
+	}
+	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
+		return nil, inputErr
+	}
+	e, err := catalog.GetByPath(root)
+	if errors.Is(err, project.ErrNotFound) {
 		return nil, fmt.Errorf("workdir %q is not inside a registered project", root)
+	}
+	if err != nil {
+		return nil, err
 	}
 	remote, err := gitOutput(root, "remote", "get-url", remoteOrigin)
 	if err != nil {
@@ -211,14 +232,14 @@ func confirmedGitAuthenticationFailure(err error) bool {
 		strings.Contains(message, "requested url returned error: 403")
 }
 
-func defaultBranch(workDir string) string {
+func defaultBranch(workDir string) (string, bool) {
 	out, err := gitOutput(workDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err == nil {
 		if _, branch, ok := strings.Cut(out, "origin/"); ok && branch != "" {
-			return branch
+			return branch, true
 		}
 	}
-	return branchMain
+	return branchMain, false
 }
 
 func latestTag(workDir string) (string, error) {

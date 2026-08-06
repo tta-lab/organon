@@ -59,6 +59,83 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	}
 }
 
+func TestPRCreateRejectsBlankTitleBeforeSideEffects(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	var calls []string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		calls = append(calls, "push")
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		calls = append(calls, "provider")
+		return fakeProvider{createPR: func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error) {
+			calls = append(calls, "create")
+			return &gitprovider.PullRequest{Index: 7}, nil
+		}}, nil
+	})
+	defer restoreProvider()
+
+	blank := " \t\n"
+	_, err := NewService(&recordingBroker{}).PRCreate(Request{WorkDir: repo, Title: &blank})
+	if err == nil || !strings.Contains(err.Error(), "title must not be blank") {
+		t.Fatalf("PRCreate error = %v, want blank-title rejection", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("PRCreate side-effect calls = %v, want none", calls)
+	}
+}
+
+func TestCreatePRRejectsInvalidProviderResult(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		pr   *gitprovider.PullRequest
+	}{
+		{name: "nil"},
+		{name: "non-positive ID", pr: &gitprovider.PullRequest{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+				return fakeProvider{createPR: func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error) {
+					return tt.pr, nil
+				}}, nil
+			})
+			defer restoreProvider()
+
+			_, err := createPR(&repoContext{}, "title", "body")
+			if err == nil || !strings.Contains(err.Error(), "invalid PR") {
+				t.Fatalf("createPR error = %v, want invalid provider PR", err)
+			}
+		})
+	}
+}
+
+func TestFindPRRejectsInvalidProviderResult(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		pr   *gitprovider.PullRequest
+	}{
+		{name: "nil"},
+		{name: "non-positive ID", pr: &gitprovider.PullRequest{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+				return fakeProvider{findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+					return tt.pr, nil
+				}}, nil
+			})
+			defer restoreProvider()
+
+			_, err := findPR(&repoContext{Provider: gitprovider.ProviderForgejo}, stateAll)
+			if err == nil || !strings.Contains(err.Error(), "invalid PR") {
+				t.Fatalf("findPR error = %v, want invalid provider PR", err)
+			}
+		})
+	}
+}
+
 func TestFindPRUsesCommitLookupForGitHub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
