@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,47 @@ func TestListSkills_FollowsDeployedDirectorySymlink(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].Description != "current" || skills[0].Body != "new body" {
 		t.Fatalf("skills = %#v, want current symlink target to shadow backup", skills)
+	}
+}
+
+func TestListSkillsContainedRejectsProjectSymlinkEscapes(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		linkSkill bool
+	}{
+		{name: "directory"},
+		{name: "skill file", linkSkill: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			base := filepath.Join(projectRoot, ".agents", "skills")
+			outsideRoot := t.TempDir()
+			writeSkill(t, outsideRoot, "external", "escaped", "outside", "tool", "outside body")
+			outsideSkillDir := filepath.Join(outsideRoot, "external", "escaped")
+			if err := os.MkdirAll(base, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if test.linkSkill {
+				insideDir := filepath.Join(base, "escaped")
+				if err := os.MkdirAll(insideDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				outsideSkill := filepath.Join(outsideSkillDir, "SKILL.md")
+				if err := os.Symlink(outsideSkill, filepath.Join(insideDir, "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Symlink(outsideSkillDir, filepath.Join(base, "escaped")); err != nil {
+				t.Fatal(err)
+			}
+
+			skills, err := ListSkillsContained([]string{base}, projectRoot)
+			if err == nil || !strings.Contains(err.Error(), "outside project root") {
+				t.Fatalf("ListSkillsContained error = %v", err)
+			}
+			if len(skills) != 0 {
+				t.Fatalf("skills = %#v, want none", skills)
+			}
+		})
 	}
 }
 

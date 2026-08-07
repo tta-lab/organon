@@ -110,12 +110,23 @@ func readTextFile(resolved resolvedFile, cleanPath string) ([]byte, error) {
 	if info.Size() > maximumSourceBytes {
 		return nil, fmt.Errorf("project file %q exceeds the 16 MiB source limit", cleanPath)
 	}
-	source, err := io.ReadAll(file)
+	source, err := readBoundedSource(file)
 	if err != nil {
 		return nil, fmt.Errorf("read project file %q: %w", cleanPath, err)
 	}
 	if !utf8.Valid(source) || bytes.IndexByte(source, 0) >= 0 {
 		return nil, fmt.Errorf("project file %q is not UTF-8 text", cleanPath)
+	}
+	return source, nil
+}
+
+func readBoundedSource(reader io.Reader) ([]byte, error) {
+	source, err := io.ReadAll(io.LimitReader(reader, maximumSourceBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(source) > maximumSourceBytes {
+		return nil, fmt.Errorf("source exceeds the 16 MiB source limit")
 	}
 	return source, nil
 }

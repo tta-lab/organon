@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -69,6 +72,13 @@ type skillMCPService struct {
 	projects skillProjectGetter
 }
 
+type skillDiscovery struct {
+	projectRoot  string
+	projectPaths []string
+	globalPaths  []string
+	sources      map[string]skillSource
+}
+
 func skillBoolPointer(value bool) *bool { return &value }
 
 func skillTool(name, title, description string) *mcp.Tool {
@@ -86,13 +96,13 @@ func skillTool(name, title, description string) *mcp.Tool {
 	}
 }
 
-func (s skillMCPService) discovery(projectAlias string) ([]string, map[string]skillSource, error) {
-	paths := make([]string, 0, 8)
+func (s skillMCPService) discovery(projectAlias string) (skillDiscovery, error) {
+	discovery := skillDiscovery{}
 	sources := make(map[string]skillSource, 8)
-	add := func(scope string, discoveryPaths []string) {
+	add := func(scope string, target *[]string, discoveryPaths []string) {
 		labels := []string{".agents", ".crush", ".claude", ".cursor"}
 		for i, path := range discoveryPaths {
-			paths = append(paths, path)
+			*target = append(*target, path)
 			sources[filepath.Clean(path)] = skillSource{scope: scope, name: scope + ":" + labels[i]}
 		}
 	}
@@ -101,24 +111,47 @@ func (s skillMCPService) discovery(projectAlias string) ([]string, map[string]sk
 	if projectAlias != "" {
 		entry, err := s.projects.Get(projectAlias)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get project %q: %w", projectAlias, err)
+			return skillDiscovery{}, fmt.Errorf("get project %q: %w", projectAlias, err)
 		}
-		add("project", skill.ProjectDiscoveryPaths(entry.Path))
+		discovery.projectRoot = entry.Path
+		add("project", &discovery.projectPaths, skill.ProjectDiscoveryPaths(entry.Path))
 	}
-	add("global", skill.GlobalDiscoveryPaths(s.home))
-	return paths, sources, nil
+	add("global", &discovery.globalPaths, skill.GlobalDiscoveryPaths(s.home))
+	discovery.sources = sources
+	return discovery, nil
 }
 
 func (s skillMCPService) list(projectAlias string) ([]skill.Skill, map[string]skillSource, error) {
-	paths, sources, err := s.discovery(projectAlias)
+	discovery, err := s.discovery(projectAlias)
 	if err != nil {
 		return nil, nil, err
 	}
-	skills, err := skill.ListSkills(paths)
-	if err != nil {
+	projectSkills := []skill.Skill(nil)
+	var projectErr error
+	if discovery.projectRoot != "" {
+		projectSkills, projectErr = skill.ListSkillsContained(discovery.projectPaths, discovery.projectRoot)
+	}
+	globalSkills, globalErr := skill.ListSkills(discovery.globalPaths)
+	if err := errors.Join(projectErr, globalErr); err != nil {
 		return nil, nil, err
 	}
-	return skills, sources, nil
+	return mergeSkillPriority(projectSkills, globalSkills), discovery.sources, nil
+}
+
+func mergeSkillPriority(groups ...[]skill.Skill) []skill.Skill {
+	seen := make(map[string]bool)
+	merged := make([]skill.Skill, 0)
+	for _, group := range groups {
+		for _, candidate := range group {
+			if seen[candidate.Name] {
+				continue
+			}
+			seen[candidate.Name] = true
+			merged = append(merged, candidate)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Name < merged[j].Name })
+	return merged
 }
 
 func skillSummaries(skills []skill.Skill, sources map[string]skillSource) []skillSummaryOutput {
@@ -163,14 +196,11 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if len(keywords) == 0 {
 			return nil, skillListOutput{}, fmt.Errorf("keywords must contain at least one non-blank value")
 		}
-		paths, sources, err := service.discovery(input.Project)
+		skills, sources, err := service.list(input.Project)
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
 		}
-		skills, err := skill.FindSkills(paths, keywords)
-		if err != nil {
-			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
-		}
+		skills = skill.FilterSkills(skills, keywords)
 		return nil, skillListOutput{Skills: skillSummaries(skills, sources)}, nil
 	})
 
@@ -183,13 +213,19 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if name == "" {
 			return nil, skillGetOutput{}, fmt.Errorf("name must not be blank")
 		}
-		paths, sources, err := service.discovery(input.Project)
+		skills, sources, err := service.list(input.Project)
 		if err != nil {
 			return nil, skillGetOutput{}, fmt.Errorf("get skill: %w", err)
 		}
-		found, err := skill.GetSkill(paths, name)
-		if err != nil {
-			return nil, skillGetOutput{}, fmt.Errorf("get skill %q: %w", name, err)
+		var found *skill.Skill
+		for i := range skills {
+			if skills[i].Name == name {
+				found = &skills[i]
+				break
+			}
+		}
+		if found == nil {
+			return nil, skillGetOutput{}, fmt.Errorf("get skill %q: %w", name, fs.ErrNotExist)
 		}
 		source := sources[filepath.Clean(found.Source)]
 		return nil, skillGetOutput{Skill: skillDetailOutput{

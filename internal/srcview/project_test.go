@@ -1,6 +1,7 @@
 package srcview
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,5 +76,12 @@ func TestProjectServiceRejectsOversizedFileBeforeReading(t *testing.T) {
 	service := NewProjectService(fixedProjects{"ko": {Alias: "ko", Path: root}})
 	if _, err := service.ReadFile("ko", "generated.txt"); err == nil || !strings.Contains(err.Error(), "16 MiB") {
 		t.Fatalf("ReadFile oversized error = %v", err)
+	}
+}
+
+func TestReadBoundedSourceRejectsOverflowWithoutMetadata(t *testing.T) {
+	reader := bytes.NewReader(make([]byte, maximumSourceBytes+1))
+	if _, err := readBoundedSource(reader); err == nil || !strings.Contains(err.Error(), "16 MiB") {
+		t.Fatalf("readBoundedSource error = %v", err)
 	}
 }

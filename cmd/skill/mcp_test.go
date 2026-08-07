@@ -161,6 +161,41 @@ func TestSkillMCPRejectsUnknownProject(t *testing.T) {
 	}
 }
 
+func TestSkillMCPAllowsGlobalLinksButRejectsProjectLinkEscapes(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	targetRoot := t.TempDir()
+	writeSkillAt(t, targetRoot, "linked", "linked skill", "tool", "linked body")
+	target := filepath.Join(targetRoot, ".agents", "skills", "linked")
+	globalBase := filepath.Join(home, ".agents", "skills")
+	projectBase := filepath.Join(root, ".agents", "skills")
+	for _, base := range []string{globalBase, projectBase} {
+		if err := os.MkdirAll(base, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(base, "linked")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registry := writeSkillProjects(t, home,
+		"[ko]\npath = "+strconvQuote(root)+"\nremote = \"https://example.com/tta/ko.git\"\n")
+	session := connectSkillMCP(t, newSkillMCPServer(home, project.NewStore(registry)))
+
+	global := callSkillTool(t, session, "skill_get", map[string]any{"name": "linked"})
+	if got := global["skill"].(map[string]any); got["source"] != "global:.agents" {
+		t.Fatalf("global linked skill = %#v", got)
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "skill_get", Arguments: map[string]any{"project": "ko", "name": "linked"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatalf("project escape result = %#v, want tool error", result)
+	}
+}
+
 func TestSkillMCPCommandHelper(_ *testing.T) {
 	if os.Getenv("GO_WANT_SKILL_MCP_HELPER") != "1" {
 		return
