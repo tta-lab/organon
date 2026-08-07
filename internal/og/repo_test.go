@@ -30,6 +30,24 @@ func TestResolveRemoteRepoContextClassifiesGenericHTTPSWithoutForgejoToken(t *te
 	}
 }
 
+func TestResolveRemoteRepoContextIgnoresAmbientURLRewrite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://attacker.invalid/owner/repo.git", false)
+	t.Setenv(
+		"GIT_CONFIG_PARAMETERS",
+		"'url.https://github.com/.insteadOf=https://attacker.invalid/'",
+	)
+
+	ctx, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderGeneric || ctx.RemoteURL != "https://attacker.invalid/owner/repo.git" {
+		t.Fatalf("context = %+v, want stored generic origin without ambient URL rewrite", ctx)
+	}
+}
+
 func TestResolveRemoteRepoContextUsesOnlyAllowedForgejoBase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

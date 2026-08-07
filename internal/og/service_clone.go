@@ -339,7 +339,7 @@ func validateClonedRepository(directory string, source cloneSource) error {
 	if filepath.Clean(root) != filepath.Clean(directory) {
 		return fmt.Errorf("cloned repository top-level %q does not match destination %q", root, directory)
 	}
-	remote, err := gitOutput(directory, "remote", "get-url", remoteOrigin)
+	remote, err := controlledGitOutput(directory, "remote", "get-url", remoteOrigin)
 	if err != nil {
 		return fmt.Errorf("validate cloned origin: %w", err)
 	}

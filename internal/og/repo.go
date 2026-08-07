@@ -90,7 +90,7 @@ func resolveRemoteRepoContextWith(
 	if err != nil {
 		return nil, err
 	}
-	remote, err := gitOutput(root, "remote", "get-url", remoteOrigin)
+	remote, err := controlledGitOutput(root, "remote", "get-url", remoteOrigin)
 	if err != nil {
 		return nil, fmt.Errorf("get origin remote: %w", err)
 	}
@@ -171,9 +171,20 @@ func tokenEnvFor(provider gitprovider.ProviderType) string {
 }
 
 func gitOutput(workDir string, args ...string) (string, error) {
+	return gitOutputWithEnv(workDir, nil, args...)
+}
+
+func controlledGitOutput(workDir string, args ...string) (string, error) {
+	return gitOutputWithEnv(workDir, gitutil.AnonymousGitEnv(os.Environ()), args...)
+}
+
+func gitOutputWithEnv(workDir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
+	if env != nil {
+		cmd.Env = env
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
