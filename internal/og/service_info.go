@@ -34,6 +34,18 @@ func (s Service) AuthStatus(req Request) (Response, error) {
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		return s.githubAuthStatus(ctx)
 	}
+	if ctx.Provider == gitprovider.ProviderGeneric {
+		return success(Response{
+			Auth: &AuthStatus{
+				Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
+				Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "anonymous", Ready: true,
+			},
+			Message: fmt.Sprintf(
+				"provider: generic\nhost: %s\nrepo: %s/%s\nproject: %s\nauth: anonymous\nremote: read-only",
+				ctx.Host, ctx.Owner, ctx.Repo, ctx.ProjectAlias,
+			),
+		}), nil
+	}
 	status := "unset"
 	if ctx.Token != "" {
 		status = "set"

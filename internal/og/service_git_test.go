@@ -183,6 +183,137 @@ func TestGitPullDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestGitPullArchivedDefaultBranchIsReadOnlyFastForward(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://github.com/tta-lab/example.git", true)
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	var calls [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		t.Fatal("archived pull must not call provider API")
+		return nil, nil
+	})
+	defer restoreProvider()
+
+	if _, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	want := [][]string{{"pull", "--ff-only", remoteOrigin, branchMain}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("git calls = %v, want %v", calls, want)
+	}
+}
+
+func TestGitPullArchivedRepositoryRejectsUnsafeCheckout(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		setDefault bool
+		want       string
+	}{
+		{"feature branch", "feature/x", true, "default branch"},
+		{"unknown default", branchMain, false, "default branch is unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, tt.branch, "https://github.com/tta-lab/example.git", true)
+			if tt.setDefault {
+				gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+			}
+			called := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				called = true
+				return nil
+			})
+			defer restoreGit()
+
+			_, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GitPull error = %v, want containing %q", err, tt.want)
+			}
+			if called {
+				t.Fatal("GitPull reached the network after archived checkout refusal")
+			}
+		})
+	}
+}
+
+func TestGenericGitPullSkipsProviderAndBranchCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "must-not-leak")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://codeberg.org/forgejo/forgejo.git", false)
+	var gotAuth gitAuthentication
+	var gotArgs []string
+	restoreGit := stubRunGitWithAuthentication(t, func(
+		_ *repoContext, auth gitAuthentication, args ...string,
+	) error {
+		gotAuth = auth
+		gotArgs = append([]string(nil), args...)
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		t.Fatal("generic pull must not call provider API")
+		return nil, nil
+	})
+	defer restoreProvider()
+
+	if _, err := NewService(nil).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	if gotAuth.token != "" {
+		t.Fatalf("generic pull token = %q, want anonymous", gotAuth.token)
+	}
+	want := []string{"pull", "--ff-only", remoteOrigin, "feature/x"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("git args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestArchivedAndGenericRepositoriesRejectGitWrites(t *testing.T) {
+	tests := []struct {
+		name     string
+		remote   string
+		archived bool
+	}{
+		{"archived GitHub", "https://github.com/tta-lab/example.git", true},
+		{"generic HTTPS", "https://codeberg.org/forgejo/forgejo.git", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, "feature/x", tt.remote, tt.archived)
+			called := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				called = true
+				return nil
+			})
+			defer restoreGit()
+
+			for name, call := range map[string]func() error{
+				"push": func() error { _, err := NewService(nil).GitPush(Request{WorkDir: repo}); return err },
+				"tag":  func() error { _, err := NewService(nil).GitTag(Request{WorkDir: repo, Tag: "v1.0.0"}); return err },
+			} {
+				if err := call(); err == nil || !strings.Contains(err.Error(), "read-only") {
+					t.Fatalf("%s error = %v, want read-only refusal", name, err)
+				}
+			}
+			if called {
+				t.Fatal("Git write reached network after policy refusal")
+			}
+		})
+	}
+}
+
 func TestGitPullFeatureBranchFallsBackToBranchPullWhenNoPR(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

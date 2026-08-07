@@ -88,6 +88,56 @@ func TestPRCreateRejectsBlankTitleBeforeSideEffects(t *testing.T) {
 	}
 }
 
+func TestArchivedAndGenericRepositoriesRejectPRWrites(t *testing.T) {
+	tests := []struct {
+		name     string
+		remote   string
+		archived bool
+	}{
+		{"archived GitHub", "https://github.com/tta-lab/example.git", true},
+		{"generic HTTPS", "https://codeberg.org/forgejo/forgejo.git", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, "feature/x", tt.remote, tt.archived)
+			gitCalled := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				gitCalled = true
+				return nil
+			})
+			defer restoreGit()
+			providerCalled := false
+			restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+				providerCalled = true
+				return fakeProvider{}, nil
+			})
+			defer restoreProvider()
+			title, body := "title", "body"
+			calls := map[string]func() error{
+				"create": func() error { _, err := NewService(nil).PRCreate(Request{WorkDir: repo, Title: &title}); return err },
+				"modify": func() error {
+					_, err := NewService(nil).PRModify(Request{WorkDir: repo, Index: 7, Title: &title})
+					return err
+				},
+				"comment": func() error {
+					_, err := NewService(nil).PRComment(Request{WorkDir: repo, Index: 7, Body: &body})
+					return err
+				},
+			}
+			for name, call := range calls {
+				if err := call(); err == nil || !strings.Contains(err.Error(), "read-only") {
+					t.Fatalf("%s error = %v, want read-only refusal", name, err)
+				}
+			}
+			if gitCalled || providerCalled {
+				t.Fatalf("PR write reached side effect: git=%v provider=%v", gitCalled, providerCalled)
+			}
+		})
+	}
+}
+
 func TestCreatePRRejectsInvalidProviderResult(t *testing.T) {
 	for _, tt := range []struct {
 		name string

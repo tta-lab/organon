@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const forgejoTokenEnv = "FORGEJO_TOKEN"
+
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
 // credential source of truth and must not re-resolve from ambient env vars.
@@ -32,10 +34,42 @@ func GitCredEnvWithToken(token string) []string {
 	)
 }
 
+// AnonymousGitEnv returns a complete child environment with credential sources disabled.
+func AnonymousGitEnv(baseEnv []string) []string {
+	clean := filterCredentialEnv(baseEnv)
+	return append(clean,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=core.askPass",
+		"GIT_CONFIG_VALUE_1=",
+	)
+}
+
+// ForgejoGitEnv returns a complete child environment using only the resolved token.
+func ForgejoGitEnv(baseEnv []string, token string) []string {
+	env := filterCredentialEnv(baseEnv)
+	env = append(env,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=core.askPass",
+		"GIT_CONFIG_VALUE_1=",
+		"GIT_CONFIG_KEY_2=credential.helper",
+		"GIT_CONFIG_VALUE_2=!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
+	)
+	if token != "" {
+		env = append(env, "GIT_TOKEN_INJECT="+token)
+	}
+	return env
+}
+
 // GitHubAppGitEnv returns a complete child-process environment that routes a
 // GitHub origin through canonical HTTPS and uses only the supplied App token.
 func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
-	env := filterControlledGitEnv(baseEnv)
+	env := filterCredentialEnv(baseEnv)
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
 
 	type configPair struct{ key, value string }
@@ -80,6 +114,20 @@ func filterControlledGitEnv(baseEnv []string) []string {
 	return filtered
 }
 
+func filterCredentialEnv(baseEnv []string) []string {
+	filtered := filterControlledGitEnv(baseEnv)
+	clean := filtered[:0]
+	for _, entry := range filtered {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "GITHUB_TOKEN", "GH_TOKEN", forgejoTokenEnv, "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN":
+			continue
+		}
+		clean = append(clean, entry)
+	}
+	return clean
+}
+
 // RemoteURL returns the origin remote URL for the given directory.
 func RemoteURL(dir string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -94,12 +142,12 @@ func RemoteURL(dir string) (string, error) {
 // ForgeTokenEnv returns the first configured token environment variable for
 // Forgejo/Gitea-compatible remotes.
 func ForgeTokenEnv() string {
-	for _, name := range []string{"FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
+	for _, name := range []string{forgejoTokenEnv, "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
 		if os.Getenv(name) != "" {
 			return name
 		}
 	}
-	return "FORGEJO_TOKEN"
+	return forgejoTokenEnv
 }
 
 // ForgeToken returns the configured token for Forgejo/Gitea-compatible remotes.

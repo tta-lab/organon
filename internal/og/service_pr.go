@@ -17,6 +17,9 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if err := requireRemoteWrite(ctx, "create pull request"); err != nil {
+		return Response{}, err
+	}
 	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
@@ -85,6 +88,9 @@ func (s Service) PRModify(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if err := requireRemoteWrite(ctx, "modify pull request"); err != nil {
+		return Response{}, err
+	}
 	index := req.Index
 	if index == 0 {
 		pr, err := findPR(ctx, stateAll)
@@ -109,6 +115,9 @@ func (s Service) PRComment(req Request) (Response, error) {
 	}
 	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
+		return Response{}, err
+	}
+	if err := requireRemoteWrite(ctx, "comment on pull request"); err != nil {
 		return Response{}, err
 	}
 	index := req.Index

@@ -124,9 +124,9 @@ func TestDetectProviderFromHost(t *testing.T) {
 		{"github.com", ProviderGitHub},
 		{"GitHub.com", ProviderGitHub},
 		{"GITHUB.COM", ProviderGitHub},
-		{"git.guion.io", ProviderForgejo},
-		{"git.example.com", ProviderForgejo},
-		{"codeberg.org", ProviderForgejo},
+		{"git.guion.io", ProviderGeneric},
+		{"git.example.com", ProviderGeneric},
+		{"codeberg.org", ProviderGeneric},
 	}
 
 	for _, tt := range tests {
@@ -219,6 +219,7 @@ func TestNewProviderWithTokenUsesRemoteBaseURL(t *testing.T) {
 	defer server.Close()
 
 	repo := mustParseRemoteURL(t, server.URL+"/GuionAI/flick-backend.git")
+	repo.Provider = ProviderForgejo
 	provider, err := NewProviderWithToken(repo, "unused")
 	if err != nil {
 		t.Fatalf("NewProviderWithToken(): %v", err)

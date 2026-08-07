@@ -226,6 +226,9 @@ func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
 }
 
 func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
+	if ctx.Provider == gitprovider.ProviderGeneric {
+		return nil, fmt.Errorf("generic HTTPS repository has no provider API")
+	}
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		if ctx.githubBroker == nil {
 			return nil, fmt.Errorf("GitHub App authentication is not configured")

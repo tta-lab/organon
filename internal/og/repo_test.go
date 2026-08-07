@@ -8,9 +8,58 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/ogconfig"
+	"github.com/tta-lab/organon/internal/project"
 )
+
+func TestResolveRemoteRepoContextClassifiesGenericHTTPSWithoutForgejoToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "must-not-leak")
+	repo := testRegisteredRepo(t, home, branchMain, "https://codeberg.org/forgejo/forgejo.git", false)
+
+	ctx, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderGeneric || ctx.Token != "" || ctx.TokenEnv != "" {
+		t.Fatalf("context = %+v, want generic provider without token metadata", ctx)
+	}
+}
+
+func TestResolveRemoteRepoContextUsesOnlyAllowedForgejoBase(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "forge-token")
+	repo := testRegisteredRepo(
+		t, home, branchMain, "http://forgejo.localhost:17480/GuionAI/flicknote.git", false,
+	)
+	service := NewServiceWithConfig(nil, project.NewStore(config.ProjectsPath()), ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"http://forgejo.localhost:17480"}},
+	})
+
+	ctx, err := service.resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderForgejo || ctx.Token != "forge-token" {
+		t.Fatalf("context = %+v, want allowed Forgejo token routing", ctx)
+	}
+}
+
+func TestResolveRemoteRepoContextRejectsUnlistedHTTP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "http://forge.example/owner/repo.git", false)
+
+	_, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("resolveRemoteRepoContextFor error = %v, want unlisted HTTP refusal", err)
+	}
+}
 
 func TestTokenEnvForUsesForgejoConfiguration(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "")
@@ -290,6 +339,12 @@ func testGitRepoWithRemote(t *testing.T) string {
 }
 
 func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
+	return testRegisteredRepo(t, home, branch, "https://github.com/tta-lab/example.git", false)
+}
+
+func testRegisteredRepo(
+	t *testing.T, home, branch, remote string, archived bool,
+) string {
 	t.Helper()
 
 	repo := filepath.Join(t.TempDir(), "repo")
@@ -298,13 +353,17 @@ func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
 	gitRun(t, repo, "config", "user.name", "Test User")
 	gitRun(t, repo, "switch", "-c", branch)
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "initial")
-	gitRun(t, repo, "remote", "add", remoteOrigin, "https://github.com/tta-lab/example.git")
+	gitRun(t, repo, "remote", "add", remoteOrigin, remote)
 
 	configDir := filepath.Join(home, ".config", "ttal")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
-	content := "[test]\npath = " + quoteTOMLString(repo) + "\n"
+	header := "[test]"
+	if archived {
+		header = "[archived.test]"
+	}
+	content := header + "\npath = " + quoteTOMLString(repo) + "\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
 	}

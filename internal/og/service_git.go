@@ -14,6 +14,9 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if err := requireRemoteWrite(ctx, "push"); err != nil {
+		return Response{}, err
+	}
 	if req.Force && !ctx.DefaultBaseKnown {
 		return Response{}, fmt.Errorf("refusing to force push because the default branch is unknown")
 	}
@@ -35,13 +38,39 @@ func (s Service) GitPull(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if ctx.Archived {
+		return pullArchived(ctx)
+	}
+	if ctx.Provider == gitprovider.ProviderGeneric {
+		return pullNamedBranch(ctx, ctx.Branch)
+	}
+	return pullActive(ctx)
+}
+
+func pullArchived(ctx *repoContext) (Response, error) {
+	if !ctx.DefaultBaseKnown {
+		return Response{}, fmt.Errorf("refusing archived pull because the default branch is unknown")
+	}
+	if ctx.Branch != ctx.DefaultBase {
+		return Response{}, fmt.Errorf(
+			"refusing archived pull outside the default branch %q", ctx.DefaultBase,
+		)
+	}
+	return pullNamedBranch(ctx, ctx.DefaultBase)
+}
+
+func pullNamedBranch(ctx *repoContext, branch string) (Response, error) {
+	if err := runGitWithCreds(
+		ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, branch,
+	); err != nil {
+		return Response{}, err
+	}
+	return success(Response{Message: "Pulled " + branch}), nil
+}
+
+func pullActive(ctx *repoContext) (Response, error) {
 	if ctx.Branch == ctx.DefaultBase {
-		if err := runGitWithCreds(
-			ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.DefaultBase,
-		); err != nil {
-			return Response{}, err
-		}
-		return success(Response{Message: "Pulled " + ctx.DefaultBase}), nil
+		return pullNamedBranch(ctx, ctx.DefaultBase)
 	}
 
 	pr, err := findPR(ctx, stateAll)
@@ -64,10 +93,7 @@ func (s Service) GitPull(req Request) (Response, error) {
 		}), nil
 	}
 
-	if err := runGitWithCreds(ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctx.Branch); err != nil {
-		return Response{}, err
-	}
-	return success(Response{Message: "Pulled " + ctx.Branch}), nil
+	return pullNamedBranch(ctx, ctx.Branch)
 }
 
 func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
@@ -78,6 +104,9 @@ func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
 func (s Service) GitTag(req Request) (Response, error) {
 	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
+		return Response{}, err
+	}
+	if err := requireRemoteWrite(ctx, "tag"); err != nil {
 		return Response{}, err
 	}
 	if req.Bump != "" && req.Tag != "" {

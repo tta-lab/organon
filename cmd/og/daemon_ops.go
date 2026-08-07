@@ -12,6 +12,8 @@ import (
 	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/og"
+	"github.com/tta-lab/organon/internal/ogconfig"
+	"github.com/tta-lab/organon/internal/project"
 )
 
 const cmdStatus = "status"
@@ -35,22 +37,36 @@ func runDaemonRun(cmd *cobra.Command, args []string) error {
 }
 
 func loadDaemonService(configPath, configDir string) (og.Service, error) {
-	cfg, err := githubapp.LoadConfig(configPath)
+	cfg, err := ogconfig.Load(configPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return og.NewService(nil), nil
-	}
-	if err != nil {
+		cfg = ogconfig.Config{}
+	} else if err != nil {
 		return og.Service{}, err
 	}
-	keySource, err := githubapp.NewKeySource(cfg, configDir)
-	if err != nil {
-		return og.Service{}, err
+	var broker githubapp.CredentialBroker
+	if cfg.GitHubApp != nil {
+		keySource, err := githubapp.NewKeySource(*cfg.GitHubApp, configDir)
+		if err != nil {
+			return og.Service{}, err
+		}
+		broker, err = githubapp.NewBroker(*cfg.GitHubApp, keySource)
+		if err != nil {
+			return og.Service{}, err
+		}
 	}
-	broker, err := githubapp.NewBroker(cfg, keySource)
+	return og.NewServiceWithConfig(broker, project.NewStore(config.ProjectsPath()), cfg), nil
+}
+
+func runDaemonValidate(cmd *cobra.Command, args []string) error {
+	service, err := loadDaemonService(config.OGConfigPath(), config.DefaultConfigDir())
 	if err != nil {
-		return og.Service{}, err
+		return err
 	}
-	return og.NewService(broker), nil
+	if err := service.Validate(); err != nil {
+		return err
+	}
+	cmd.Println("ok")
+	return nil
 }
 
 func runDaemonInstall(cmd *cobra.Command, args []string) error {

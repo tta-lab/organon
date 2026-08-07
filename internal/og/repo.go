@@ -16,6 +16,7 @@ import (
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/gitutil"
+	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -36,6 +37,7 @@ var (
 type repoContext struct {
 	WorkDir          string
 	ProjectAlias     string
+	Archived         bool
 	Provider         gitprovider.ProviderType
 	Host             string
 	BaseURL          string
@@ -51,7 +53,15 @@ type repoContext struct {
 }
 
 func resolveRepoContextFor(workDir string) (*repoContext, error) {
-	ctxInfo, err := resolveRemoteRepoContextFor(workDir)
+	return resolveRepoContextWith(
+		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+	)
+}
+
+func resolveRepoContextWith(
+	workDir string, projects *project.Store, cfg ogconfig.Config,
+) (*repoContext, error) {
+	ctxInfo, err := resolveRemoteRepoContextWith(workDir, projects, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -68,40 +78,15 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 }
 
 func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
-	}
-	requestedPath, err := filepath.Abs(workDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve working directory: %w", err)
-	}
-	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return nil, fmt.Errorf("not in a git repository: %w", err)
-	}
-	root = filepath.Clean(root)
-	catalog, err := project.OpenCatalog(config.ProjectsPath())
-	if err != nil {
-		return nil, err
-	}
-	registeredInput, inputErr := catalog.GetByPath(requestedPath)
-	if inputErr == nil && registeredInput.Path != root {
-		return nil, fmt.Errorf(
-			"registered project %q path %q must be the Git top-level %q",
-			registeredInput.Alias, registeredInput.Path, root,
-		)
-	}
-	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
-		return nil, inputErr
-	}
-	e, err := catalog.GetByPath(root)
-	if errors.Is(err, project.ErrNotFound) {
-		return nil, fmt.Errorf("workdir %q is not inside a registered project", root)
-	}
+	return resolveRemoteRepoContextWith(
+		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+	)
+}
+
+func resolveRemoteRepoContextWith(
+	workDir string, projects *project.Store, cfg ogconfig.Config,
+) (*repoContext, error) {
+	root, entry, err := resolveRegisteredRepo(workDir, projects)
 	if err != nil {
 		return nil, err
 	}
@@ -113,14 +98,20 @@ func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokenEnv := tokenEnvFor(info.Provider)
+	provider, err := cfg.ClassifyRemote(info)
+	if err != nil {
+		return nil, fmt.Errorf("classify origin remote: %w", err)
+	}
+	info.Provider = provider
+	tokenEnv := tokenEnvFor(provider)
 	token := ""
 	if tokenEnv != "" {
 		token = os.Getenv(tokenEnv)
 	}
 	return &repoContext{
 		WorkDir:      root,
-		ProjectAlias: e.Alias,
+		ProjectAlias: entry.Alias,
+		Archived:     entry.Archived,
 		Provider:     info.Provider,
 		Host:         info.Host,
 		BaseURL:      info.BaseURL,
@@ -132,8 +123,48 @@ func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
 	}, nil
 }
 
+func resolveRegisteredRepo(workDir string, projects *project.Store) (string, project.Entry, error) {
+	if workDir == "" {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return "", project.Entry{}, fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	requestedPath, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", project.Entry{}, fmt.Errorf("resolve working directory: %w", err)
+	}
+	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", project.Entry{}, fmt.Errorf("not in a git repository: %w", err)
+	}
+	root = filepath.Clean(root)
+	if projects == nil {
+		return "", project.Entry{}, fmt.Errorf("project store is not configured")
+	}
+	registeredInput, inputErr := projects.GetByPath(requestedPath)
+	if inputErr == nil && registeredInput.Path != root {
+		return "", project.Entry{}, fmt.Errorf(
+			"registered project %q path %q must be the Git top-level %q",
+			registeredInput.Alias, registeredInput.Path, root,
+		)
+	}
+	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
+		return "", project.Entry{}, inputErr
+	}
+	entry, err := projects.GetByPath(root)
+	if errors.Is(err, project.ErrNotFound) {
+		return "", project.Entry{}, fmt.Errorf("workdir %q is not inside a registered project", root)
+	}
+	if err != nil {
+		return "", project.Entry{}, err
+	}
+	return root, entry, nil
+}
+
 func tokenEnvFor(provider gitprovider.ProviderType) string {
-	if provider == gitprovider.ProviderGitHub {
+	if provider != gitprovider.ProviderForgejo {
 		return ""
 	}
 	return gitutil.ForgeTokenEnv()
@@ -186,7 +217,13 @@ func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...st
 }
 
 func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitAuthentication, error) {
-	if ctxInfo.Provider != gitprovider.ProviderGitHub {
+	if ctxInfo.Provider == gitprovider.ProviderGeneric {
+		if purpose != githubapp.PurposeGitRead {
+			return gitAuthentication{}, fmt.Errorf("generic HTTPS repository is read-only")
+		}
+		return gitAuthentication{}, nil
+	}
+	if ctxInfo.Provider == gitprovider.ProviderForgejo {
 		if err := requireToken(ctxInfo); err != nil {
 			return gitAuthentication{}, err
 		}
@@ -206,16 +243,29 @@ func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitA
 	return gitAuthentication{token: token}, nil
 }
 
+func requireRemoteWrite(ctxInfo *repoContext, operation string) error {
+	if ctxInfo.Archived {
+		return fmt.Errorf("archived repository is read-only: refusing %s", operation)
+	}
+	if ctxInfo.Provider == gitprovider.ProviderGeneric {
+		return fmt.Errorf("generic HTTPS repository is read-only: refusing %s", operation)
+	}
+	return nil
+}
+
 func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
-	if ctxInfo.Provider == gitprovider.ProviderGitHub {
+	switch ctxInfo.Provider {
+	case gitprovider.ProviderGitHub:
 		cmd.Env = gitutil.GitHubAppGitEnv(
 			os.Environ(), ctxInfo.RemoteURL, ctxInfo.Owner, ctxInfo.Repo, auth.token,
 		)
-	} else {
-		cmd.Env = append(os.Environ(), gitutil.GitCredEnvWithToken(auth.token)...)
+	case gitprovider.ProviderGeneric:
+		cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
+	default:
+		cmd.Env = gitutil.ForgejoGitEnv(os.Environ(), auth.token)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

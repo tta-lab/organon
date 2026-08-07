@@ -191,6 +191,7 @@ func newDaemonCmd() *cobra.Command {
 		RunE:  showHelp,
 	}
 	cmd.AddCommand(newRunnableCmd("run", "Run the daemon in the foreground", runDaemonRun))
+	cmd.AddCommand(newRunnableCmd("validate", "Validate daemon configuration without starting it", runDaemonValidate))
 	cmd.AddCommand(newRunnableCmd("install", "Install the daemon user service", runDaemonInstall))
 	cmd.AddCommand(newRunnableCmd("uninstall", "Remove the daemon user service", runDaemonUninstall))
 	cmd.AddCommand(newRunnableCmd("start", "Start the daemon user service", runDaemonStart))

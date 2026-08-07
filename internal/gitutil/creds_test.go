@@ -38,6 +38,11 @@ func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 	base := []string{
 		"PATH=/bin",
+		"GITHUB_TOKEN=ambient-github",
+		"GH_TOKEN=ambient-gh",
+		"FORGEJO_TOKEN=ambient-forgejo",
+		"FORGEJO_ACCESS_TOKEN=ambient-forgejo-access",
+		"GITEA_TOKEN=ambient-gitea",
 		"GIT_TERMINAL_PROMPT=1",
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=credential.helper",
@@ -57,6 +62,13 @@ func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 	for _, name := range []string{"GIT_ASKPASS", "SSH_ASKPASS", "GCM_INTERACTIVE"} {
 		if envValue(env, name) != "" {
 			t.Fatalf("anonymous environment retained %s: %v", name, env)
+		}
+	}
+	for _, name := range []string{
+		"GITHUB_TOKEN", "GH_TOKEN", "FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN",
+	} {
+		if envValue(env, name) != "" {
+			t.Fatalf("GitHub App environment retained %s: %v", name, env)
 		}
 	}
 	configs := gitConfigPairs(t, env)
@@ -105,5 +117,61 @@ func TestGitCredEnvWithTokenUsesExplicitToken(t *testing.T) {
 	}
 	if env[6] != "GIT_TOKEN_INJECT=resolved-token" {
 		t.Fatalf("env[6] = %q, want explicit resolved token", env[6])
+	}
+}
+
+func TestForgejoGitEnvUsesOnlyResolvedToken(t *testing.T) {
+	base := []string{
+		"PATH=/bin",
+		"GITHUB_TOKEN=ambient-github",
+		"FORGEJO_TOKEN=ambient-forgejo",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=store",
+	}
+	env := ForgejoGitEnv(base, "resolved-token")
+	if envValue(env, "PATH") != "/bin" || envValue(env, "GIT_TOKEN_INJECT") != "resolved-token" {
+		t.Fatalf("environment = %v", env)
+	}
+	for _, name := range []string{"GITHUB_TOKEN", "FORGEJO_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS"} {
+		if envValue(env, name) != "" {
+			t.Fatalf("Forgejo environment retained %s: %v", name, env)
+		}
+	}
+	configs := gitConfigPairs(t, env)
+	if configs["credential.helper"] == "" || !strings.Contains(configs["credential.helper"], "GIT_TOKEN_INJECT") {
+		t.Fatalf("Forgejo git configs = %#v, want explicit credential helper", configs)
+	}
+}
+
+func TestAnonymousGitEnvClearsAmbientCredentials(t *testing.T) {
+	base := []string{
+		"PATH=/bin",
+		"GITHUB_TOKEN=github-secret",
+		"GH_TOKEN=gh-secret",
+		"FORGEJO_TOKEN=forgejo-secret",
+		"FORGEJO_ACCESS_TOKEN=forgejo-access-secret",
+		"GITEA_TOKEN=gitea-secret",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=store",
+		"GIT_ASKPASS=/tmp/helper",
+		"SSH_ASKPASS=/tmp/ssh-helper",
+	}
+	env := AnonymousGitEnv(base)
+	if envValue(env, "PATH") != "/bin" || envValue(env, "GIT_TERMINAL_PROMPT") != "0" {
+		t.Fatalf("environment = %v", env)
+	}
+	for _, name := range []string{
+		"GITHUB_TOKEN", "GH_TOKEN", "FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN",
+		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_TOKEN_INJECT",
+	} {
+		if envValue(env, name) != "" {
+			t.Fatalf("anonymous environment retained %s: %v", name, env)
+		}
+	}
+	configs := gitConfigPairs(t, env)
+	if configs["credential.helper"] != "" || configs["core.askPass"] != "" {
+		t.Fatalf("anonymous git configs = %#v, want credential helpers cleared", configs)
 	}
 }

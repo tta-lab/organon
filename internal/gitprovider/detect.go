@@ -158,7 +158,7 @@ func detectProviderFromHost(host string) ProviderType {
 	if host == "github.com" || strings.HasSuffix(host, ".github.com") {
 		return ProviderGitHub
 	}
-	return ProviderForgejo
+	return ProviderGeneric
 }
 
 // NewProviderByNameWithToken creates a provider by name with an optional GitHub token override.
