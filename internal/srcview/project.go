@@ -14,6 +14,8 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
+const maximumSourceBytes = 16 * 1024 * 1024
+
 type projectGetter interface {
 	Get(alias string) (project.Entry, error)
 }
@@ -104,6 +106,9 @@ func readTextFile(resolved resolvedFile, cleanPath string) ([]byte, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("project path %q is not a regular file", cleanPath)
+	}
+	if info.Size() > maximumSourceBytes {
+		return nil, fmt.Errorf("project file %q exceeds the 16 MiB source limit", cleanPath)
 	}
 	source, err := io.ReadAll(file)
 	if err != nil {

@@ -76,10 +76,19 @@ func ListSkills(paths []string) ([]Skill, error) {
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			skillDir := filepath.Join(base, entry.Name())
+			info, err := os.Stat(skillDir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				errs = append(errs, fmt.Errorf("stat skill directory %q: %w", skillDir, err))
 				continue
 			}
-			skillPath := filepath.Join(base, entry.Name(), "SKILL.md")
+			if !info.IsDir() {
+				continue
+			}
+			skillPath := filepath.Join(skillDir, "SKILL.md")
 			data, err := os.ReadFile(skillPath)
 			if err != nil {
 				if os.IsNotExist(err) {

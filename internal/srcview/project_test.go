@@ -57,3 +57,23 @@ func TestProjectServiceAllowsOnlyUTF8RegularFilesInsideRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectServiceRejectsOversizedFileBeforeReading(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "generated.txt")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maximumSourceBytes + 1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	service := NewProjectService(fixedProjects{"ko": {Alias: "ko", Path: root}})
+	if _, err := service.ReadFile("ko", "generated.txt"); err == nil || !strings.Contains(err.Error(), "16 MiB") {
+		t.Fatalf("ReadFile oversized error = %v", err)
+	}
+}

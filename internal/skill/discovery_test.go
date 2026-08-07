@@ -80,6 +80,25 @@ func TestListSkills_AllPathsMissing(t *testing.T) {
 	}
 }
 
+func TestListSkills_FollowsDeployedDirectorySymlink(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, ".agents", "skills")
+	target := filepath.Join(root, "managed", "current", "skill-dir")
+	writeSkillFile(t, filepath.Join(root, "managed"), "current", "skill-dir", "shared", "current", "tool", "new body")
+	writeSkillFile(t, root, ".agents/skills", "shared.hm-backup", "shared", "stale", "tool", "old body")
+	if err := os.Symlink(target, filepath.Join(base, "shared")); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := ListSkills([]string{base})
+	if err != nil {
+		t.Fatalf("ListSkills: %v", err)
+	}
+	if len(skills) != 1 || skills[0].Description != "current" || skills[0].Body != "new body" {
+		t.Fatalf("skills = %#v, want current symlink target to shadow backup", skills)
+	}
+}
+
 func TestListSkills_SinglePath_MultipleSkills(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "zebra", "a zebra skill", "animals", "zebra body")
