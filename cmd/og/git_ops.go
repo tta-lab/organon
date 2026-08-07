@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,9 +17,18 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 	if reference && alias != "" {
 		return fmt.Errorf("--alias cannot be used with --reference")
 	}
-	resp, err := og.NewClientFromEnv().CallContext(cmd.Context(), "/git/clone", og.Request{
-		URL: args[0], Alias: alias, Reference: reference,
-	})
+	selector := args[0]
+	req := og.Request{Alias: alias, Reference: reference}
+	isURL := strings.HasPrefix(selector, "http://") || strings.HasPrefix(selector, "https://")
+	if isURL {
+		req.URL = selector
+	} else {
+		if alias != "" || reference {
+			return fmt.Errorf("project clone does not accept --alias or --reference")
+		}
+		req.Project = selector
+	}
+	resp, err := og.NewClientFromEnv().CallContext(cmd.Context(), "/git/clone", req)
 	if err != nil {
 		return err
 	}

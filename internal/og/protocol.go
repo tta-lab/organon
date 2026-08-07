@@ -9,6 +9,7 @@ import (
 type Request struct {
 	Context   context.Context `json:"-"`
 	WorkDir   string          `json:"work_dir,omitempty"`
+	Project   string          `json:"project,omitempty"`
 	URL       string          `json:"url,omitempty"`
 	Alias     string          `json:"alias,omitempty"`
 	Reference bool            `json:"reference,omitempty"`

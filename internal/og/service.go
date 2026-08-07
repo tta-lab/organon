@@ -1,8 +1,11 @@
 package og
 
 import (
+	"fmt"
+
 	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
@@ -38,8 +41,20 @@ func (s Service) GitHubAppConfigured() bool {
 
 // Validate checks daemon-owned configuration without starting listeners or network operations.
 func (s Service) Validate() error {
-	_, err := s.projectStore().Snapshot()
-	return err
+	catalog, err := s.projectStore().Snapshot()
+	if err != nil {
+		return err
+	}
+	for _, entry := range catalog.ListAll(true) {
+		info, parseErr := gitprovider.ParseHTTPRemoteURL(entry.Remote)
+		if parseErr != nil {
+			return fmt.Errorf("project %q remote: %w", entry.Alias, parseErr)
+		}
+		if _, classifyErr := s.config.ClassifyRemote(info); classifyErr != nil {
+			return fmt.Errorf("project %q remote: %w", entry.Alias, classifyErr)
+		}
+	}
+	return nil
 }
 
 func (s Service) resolveRepoContextFor(workDir string) (*repoContext, error) {

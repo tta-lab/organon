@@ -38,7 +38,8 @@ type ogPushInput struct {
 }
 
 type ogCloneInput struct {
-	URL       string `json:"url" jsonschema:"HTTP(S) repository URL with exactly owner/repo"`
+	Project   string `json:"project,omitempty" jsonschema:"exact registered single-layer project alias"`
+	URL       string `json:"url,omitempty" jsonschema:"HTTP(S) repository URL with exactly owner/repo"`
 	Alias     string `json:"alias,omitempty" jsonschema:"optional exact single-layer project alias"`
 	Reference bool   `json:"reference,omitempty" jsonschema:"clone under the references tree without registration"`
 }
@@ -145,6 +146,12 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	if reference := schema.Properties["reference"]; reference != nil {
 		reference.Default = json.RawMessage("false")
 	}
+	if schema.Properties["project"] != nil && schema.Properties["url"] != nil {
+		schema.OneOf = []*jsonschema.Schema{
+			{Required: []string{"project"}},
+			{Required: []string{"url"}},
+		}
+	}
 	if state := schema.Properties["state"]; state != nil {
 		state.Default = json.RawMessage(`"` + stateOpen + `"`)
 		state.Enum = []any{stateOpen, "closed", stateAll}
@@ -183,6 +190,21 @@ func validatePositivePRID(id int64) error {
 	return nil
 }
 
+func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) error {
+	hasProject := strings.TrimSpace(projectAlias) != ""
+	hasURL := strings.TrimSpace(rawURL) != ""
+	if hasProject == hasURL {
+		return fmt.Errorf("exactly one of project and url is required")
+	}
+	if hasProject && (alias != "" || reference) {
+		return fmt.Errorf("project clone does not accept alias or reference")
+	}
+	if reference && alias != "" {
+		return fmt.Errorf("reference clone does not accept alias")
+	}
+	return nil
+}
+
 func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
 
@@ -195,8 +217,11 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 		_ *mcp.CallToolRequest,
 		input ogCloneInput,
 	) (*mcp.CallToolResult, ogCloneOutput, error) {
+		if err := validateCloneSelector(input.Project, input.URL, input.Alias, input.Reference); err != nil {
+			return nil, ogCloneOutput{}, err
+		}
 		resp, err := caller.CallContext(ctx, "/git/clone", og.Request{
-			URL: input.URL, Alias: input.Alias, Reference: input.Reference,
+			Project: input.Project, URL: input.URL, Alias: input.Alias, Reference: input.Reference,
 		})
 		if err != nil {
 			return nil, ogCloneOutput{}, fmt.Errorf("call og daemon: %w", err)

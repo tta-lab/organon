@@ -272,11 +272,49 @@ func TestCloneRoutesURLFlagsAndPrintsTypedJSON(t *testing.T) {
 	}
 }
 
+func TestCloneRoutesProjectAlias(t *testing.T) {
+	var got og.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Clone: &og.CloneResult{
+			Alias: "orga", Path: "/work/organon", Host: "github.com", Owner: "tta-lab",
+			Repo: "organon", Provider: "github", Remote: "https://github.com/tta-lab/organon.git",
+			Registered: true,
+		}})
+	}))
+	defer server.Close()
+	t.Setenv("OG_DAEMON_URL", server.URL)
+
+	if _, err := runOG(t, "clone", "orga"); err != nil {
+		t.Fatalf("runOG: %v", err)
+	}
+	if got.Project != "orga" || got.URL != "" || got.Alias != "" || got.Reference {
+		t.Fatalf("clone request = %+v", got)
+	}
+}
+
 func TestCloneReferenceRejectsAliasBeforeDaemonCall(t *testing.T) {
 	useFailingDaemon(t)
 	_, err := runOG(t, "clone", "--reference", "--alias", "sample", "https://codeberg.org/tta-lab/example.git")
 	if err == nil || !strings.Contains(err.Error(), "cannot be used") {
 		t.Fatalf("clone error = %v", err)
+	}
+}
+
+func TestCloneProjectAliasRejectsURLOnlyFlagsBeforeDaemonCall(t *testing.T) {
+	for _, args := range [][]string{
+		{"clone", "--alias", "other", "orga"},
+		{"clone", "--reference", "orga"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			useFailingDaemon(t)
+			_, err := runOG(t, args...)
+			if err == nil || !strings.Contains(err.Error(), "project clone") {
+				t.Fatalf("clone error = %v, want project clone flag rejection", err)
+			}
+		})
 	}
 }
 

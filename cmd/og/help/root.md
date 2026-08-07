@@ -3,13 +3,18 @@
 Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
-contains URL-based clone, pull request, guarded push/pull/tag, auth, and daemon
+contains registry- and URL-based clone, pull request, guarded push/pull/tag, auth, and daemon
 operations. Merge is intentionally out of scope.
 
+`og clone <project-alias>` clones the registered remote to the registered path.
 `og clone <http(s)-url>` derives `~/code/projects/<owner>/<repo>` and registers
 the project alias. `og clone --reference <url>` derives
 `~/code/references/<host>/<owner>/<repo>` and never registers an alias. The
 caller cannot choose a destination path.
+
+For registered projects, the registry remote is the repository identity. Before
+each Git network operation, og requires the effective origin fetch URL—and every
+push URL for writes—to match it. Repository-local hooks run normally.
 
 GitHub commands authenticate in the daemon with repository-scoped GitHub App
 installation tokens. Worker environments and request payloads do not provide

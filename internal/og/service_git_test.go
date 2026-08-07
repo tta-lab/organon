@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -54,57 +55,46 @@ func TestGitPushRejectsMismatchedPushURLBeforeCredentials(t *testing.T) {
 	}
 }
 
-func TestGitPushRejectsUnsafeLocalHTTPConfigBeforeCredentials(t *testing.T) {
-	tests := []struct {
-		name       string
-		origin     string
-		pushOrigin string
-		key        string
-		value      string
-	}{
-		{name: "disabled TLS verification", key: "http.https://github.com/tta-lab/example.git.sslVerify", value: "false"},
-		{
-			name: "repository proxy", key: "http.https://github.com/tta-lab/example.git.proxy",
-			value: "http://attacker.invalid:8080",
-		},
-		{
-			name: "canonical rewrite proxy", origin: "https://github.com/tta-lab/example",
-			key: "http.https://github.com/tta-lab/example.git.proxy", value: "http://attacker.invalid:8080",
-		},
-		{
-			name: "distinct push URL proxy", pushOrigin: "https://github.com/TTA-LAB/EXAMPLE.git",
-			key: "http.https://github.com/TTA-LAB/EXAMPLE.git.proxy", value: "http://attacker.invalid:8080",
-		},
-		{name: "custom CA", key: "http.https://github.com/tta-lab/example.git.sslCAInfo", value: "/tmp/attacker-ca.pem"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			repo := testRegisteredHTTPRepo(t, home, "feature/x")
-			if tt.origin != "" {
-				gitRun(t, repo, "remote", "set-url", remoteOrigin, tt.origin)
-			}
-			if tt.pushOrigin != "" {
-				gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, tt.pushOrigin)
-			}
-			gitRun(t, repo, "config", tt.key, tt.value)
-			broker := &recordingBroker{token: "must-not-mint"}
-			runs := 0
-			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
-				runs++
-				return nil
-			})
-			defer restoreGit()
+func TestGitPullRejectsOriginThatDiffersFromRegistryBeforeCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
 
-			_, err := NewService(broker).GitPush(Request{WorkDir: repo})
-			if err == nil || !strings.Contains(err.Error(), "HTTP transport") {
-				t.Fatalf("GitPush error = %v, want unsafe HTTP transport refusal", err)
-			}
-			if len(broker.tokenCalls) != 0 || runs != 0 {
-				t.Fatalf("side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
-			}
-		})
+	_, err := NewService(broker).GitPull(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("GitPull error = %v, want registry fetch-target mismatch", err)
+	}
+	if len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("side effects: broker=%v git=%d", broker.tokenCalls, runs)
+	}
+}
+
+func TestGitPushRunsRepositoryPrePushHook(t *testing.T) {
+	repo := testGitRepoWithRemote(t)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\nprintf ran > " + strconv.Quote(marker) + "\nexit 1\n"
+	hookPath := filepath.Join(repo, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(hookPath, []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runGitWithCredsImpl(
+		&repoContext{Provider: gitprovider.ProviderGeneric, WorkDir: repo},
+		gitAuthentication{}, "push", "origin", branchMain,
+	)
+	if err == nil {
+		t.Fatal("GitPush succeeded, want hook rejection")
+	}
+	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "ran" {
+		t.Fatalf("pre-push hook marker = %q, %v", data, readErr)
 	}
 }
 

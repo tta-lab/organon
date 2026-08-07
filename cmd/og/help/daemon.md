@@ -5,8 +5,9 @@ Run and manage the `og` daemon.
 Behavior:
 
 - `og daemon run` runs the daemon in the foreground.
-- `og daemon validate` checks the project registry, complete og configuration,
-  and configured GitHub App key without binding a socket or making a network request.
+- `og daemon validate` checks every registry remote against the complete og
+  configuration and validates the configured GitHub App key without binding a
+  socket or making a network request.
 - `og daemon install` installs the user service.
 - `og daemon uninstall` removes the user service.
 - `og daemon start`, `stop`, and `restart` control the user service.

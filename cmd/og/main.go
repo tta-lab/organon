@@ -174,7 +174,7 @@ func newGitTagCmd() *cobra.Command {
 
 func newGitCloneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "clone <http(s)-url>",
+		Use:   "clone <project-alias|http(s)-url>",
 		Short: "Clone a repository to its derived project or reference path",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runGitClone,

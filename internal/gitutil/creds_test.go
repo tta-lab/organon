@@ -2,7 +2,6 @@ package gitutil
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
@@ -224,8 +223,8 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 				t.Fatal("controlled Git environment retained ambient global/system configuration")
 			}
 			configs := gitConfigPairs(t, env)
-			if configs["core.hooksPath"] != os.DevNull || configs["http.sslVerify"] != "true" {
-				t.Fatalf("controlled git configs = %#v, want hooks disabled and TLS verification enabled", configs)
+			if _, disabled := configs["core.hooksPath"]; disabled || configs["http.sslVerify"] != "true" {
+				t.Fatalf("controlled git configs = %#v, want normal hooks and TLS verification enabled", configs)
 			}
 		})
 	}

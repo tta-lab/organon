@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -18,8 +16,6 @@ import (
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
-
-var cloneSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type cloneSource struct {
 	info        *gitprovider.RepoInfo
@@ -46,11 +42,10 @@ func (s Service) GitClone(req Request) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
-	source, err := s.resolveCloneSource(req.URL, req.Reference)
-	if err != nil {
+	if err := validateCloneRequest(req); err != nil {
 		return Response{}, err
 	}
-	registered, err := s.cloneRegistration(req, source)
+	source, registered, err := s.resolveCloneRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -70,6 +65,42 @@ func (s Service) GitClone(req Request) (Response, error) {
 	return s.cloneNew(ctx, req.Reference, source, registered, result)
 }
 
+func validateCloneRequest(req Request) error {
+	hasProject := strings.TrimSpace(req.Project) != ""
+	hasURL := strings.TrimSpace(req.URL) != ""
+	if hasProject == hasURL {
+		return fmt.Errorf("exactly one of project and URL is required")
+	}
+	if hasProject && (req.Alias != "" || req.Reference) {
+		return fmt.Errorf("project clone does not accept alias or reference")
+	}
+	if req.Reference && req.Alias != "" {
+		return fmt.Errorf("reference clone does not accept alias")
+	}
+	return nil
+}
+
+func (s Service) resolveCloneRequest(req Request) (cloneSource, project.Entry, error) {
+	if req.Project != "" {
+		entry, err := s.projectStore().Get(req.Project)
+		if err != nil {
+			return cloneSource{}, project.Entry{}, err
+		}
+		source, err := s.resolveCloneSource(entry.Remote, false)
+		if err != nil {
+			return cloneSource{}, project.Entry{}, err
+		}
+		source.destination = entry.Path
+		return source, entry, nil
+	}
+	source, err := s.resolveCloneSource(req.URL, req.Reference)
+	if err != nil {
+		return cloneSource{}, project.Entry{}, err
+	}
+	entry, err := s.cloneRegistration(req, &source)
+	return source, entry, err
+}
+
 func requestContext(req Request) context.Context {
 	if req.Context != nil {
 		return req.Context
@@ -77,19 +108,31 @@ func requestContext(req Request) context.Context {
 	return context.Background()
 }
 
-func (s Service) cloneRegistration(req Request, source cloneSource) (project.Entry, error) {
+func (s Service) cloneRegistration(req Request, source *cloneSource) (project.Entry, error) {
 	if req.Reference {
-		if req.Alias != "" {
-			return project.Entry{}, fmt.Errorf("--alias cannot be used with a reference clone")
-		}
 		return project.Entry{}, nil
 	}
-	entry, err := s.projectStore().GetByPath(source.destination)
+	entry, err := s.projectStore().GetByRemote(source.remote)
 	if err == nil {
+		if req.Alias != "" && req.Alias != entry.Alias {
+			return project.Entry{}, fmt.Errorf(
+				"project alias %q conflicts with registered alias %q for remote %q",
+				req.Alias, entry.Alias, source.remote,
+			)
+		}
+		source.destination = entry.Path
 		return entry, nil
 	}
 	if !errors.Is(err, project.ErrNotFound) {
 		return project.Entry{}, err
+	}
+	if existing, pathErr := s.projectStore().GetByPath(source.destination); pathErr == nil {
+		return project.Entry{}, fmt.Errorf(
+			"project path %q conflicts with alias %q and remote %q",
+			source.destination, existing.Alias, existing.Remote,
+		)
+	} else if !errors.Is(pathErr, project.ErrNotFound) {
+		return project.Entry{}, pathErr
 	}
 	alias := req.Alias
 	if alias == "" {
@@ -105,7 +148,7 @@ func (s Service) cloneRegistration(req Request, source cloneSource) (project.Ent
 	} else if !errors.Is(err, project.ErrNotFound) {
 		return project.Entry{}, err
 	}
-	return project.Entry{Alias: alias, Path: source.destination}, nil
+	return project.Entry{Alias: alias, Path: source.destination, Remote: source.remote}, nil
 }
 
 func (s Service) cloneNew(
@@ -184,78 +227,30 @@ func (s Service) completeCloneRegistration(
 }
 
 func (s Service) resolveCloneSource(raw string, reference bool) (cloneSource, error) {
-	u, owner, repo, err := parseCloneRepositoryURL(raw)
+	info, err := gitprovider.ParseHTTPRemoteURL(raw)
 	if err != nil {
 		return cloneSource{}, err
 	}
-	baseURL, err := ogconfig.NormalizeBaseURL(strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host))
-	if err != nil {
-		return cloneSource{}, fmt.Errorf("normalize clone URL: %w", err)
-	}
-	normalizedURL, err := url.Parse(baseURL)
-	if err != nil {
-		return cloneSource{}, fmt.Errorf("parse normalized clone URL: %w", err)
-	}
-	info := &gitprovider.RepoInfo{Owner: owner, Repo: repo, Host: normalizedURL.Hostname(), BaseURL: baseURL}
 	provider, err := s.config.ClassifyRemote(info)
 	if err != nil {
 		return cloneSource{}, fmt.Errorf("classify clone URL: %w", err)
 	}
 	info.Provider = provider
-	remote := baseURL + "/" + owner + "/" + repo + ".git"
+	remote := info.CanonicalURL
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return cloneSource{}, fmt.Errorf("resolve home directory: %w", err)
 	}
-	hostDir := strings.NewReplacer(":", "_", "[", "", "]", "").Replace(normalizedURL.Host)
+	hostDir := strings.TrimPrefix(strings.TrimPrefix(info.BaseURL, "https://"), "http://")
+	hostDir = strings.NewReplacer(":", "_", "[", "", "]", "").Replace(hostDir)
 	base := filepath.Join(home, "code", "projects")
 	if reference {
 		base = filepath.Join(home, "code", "references", hostDir)
 	}
 	return cloneSource{
-		info: info, remote: remote, host: normalizedURL.Host,
-		provider: provider, destination: filepath.Join(base, owner, repo),
+		info: info, remote: remote, host: strings.TrimPrefix(strings.TrimPrefix(info.BaseURL, "https://"), "http://"),
+		provider: provider, destination: filepath.Join(base, info.Owner, info.Repo),
 	}, nil
-}
-
-func parseCloneRepositoryURL(raw string) (*url.URL, string, string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("invalid clone URL: %w", err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, "", "", fmt.Errorf("clone URL must use HTTP(S)")
-	}
-	if u.User != nil {
-		return nil, "", "", fmt.Errorf("clone URL must not contain credentials")
-	}
-	if u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
-		return nil, "", "", fmt.Errorf("clone URL must contain a host and no query or fragment")
-	}
-	if strings.Contains(u.EscapedPath(), "%") {
-		return nil, "", "", fmt.Errorf("clone URL path must not contain escaped characters")
-	}
-	if !validCloneURLPath(u.Path) {
-		return nil, "", "", fmt.Errorf("clone URL path must be exactly /owner/repo")
-	}
-	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
-	owner := parts[0]
-	repo := strings.TrimSuffix(parts[1], ".git")
-	if !safeCloneSegment(owner) || !safeCloneSegment(repo) {
-		return nil, "", "", fmt.Errorf("clone URL contains an unsafe owner or repository name")
-	}
-	return u, owner, repo, nil
-}
-
-func validCloneURLPath(path string) bool {
-	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.HasSuffix(path, "/") {
-		return false
-	}
-	return len(strings.Split(strings.TrimPrefix(path, "/"), "/")) == 2
-}
-
-func safeCloneSegment(segment string) bool {
-	return segment != "." && segment != ".." && cloneSegmentPattern.MatchString(segment)
 }
 
 func cloneResultFor(source cloneSource, entry project.Entry, registered bool) CloneResult {
@@ -291,40 +286,13 @@ func (s Service) cloneAuthentication(ctx context.Context, source cloneSource) (g
 
 func ensureCloneParent(destination string) error {
 	parent := filepath.Dir(destination)
-	if err := validateCloneParentChain(parent); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("create clone destination parent: %w", err)
-	}
-	return validateCloneParentChain(parent)
-}
-
-func validateCloneParentChain(parent string) error {
-	for current := parent; ; current = filepath.Dir(current) {
-		info, err := os.Lstat(current)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("clone destination parent %q is a symlink", current)
-			}
-			if !info.IsDir() {
-				return fmt.Errorf("clone destination parent %q is not a directory", current)
-			}
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect clone destination parent: %w", err)
-		}
-		next := filepath.Dir(current)
-		if next == current {
-			break
-		}
 	}
 	return nil
 }
 
 func (s Service) validateExistingClone(source cloneSource) (bool, error) {
-	if err := validateCloneParentChain(filepath.Dir(source.destination)); err != nil {
-		return false, err
-	}
 	info, err := os.Lstat(source.destination)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -342,66 +310,29 @@ func (s Service) validateExistingClone(source cloneSource) (bool, error) {
 }
 
 func validateClonedRepository(directory string, source cloneSource) error {
-	if err := validateLocalGitControl(directory); err != nil {
-		return err
-	}
 	root, err := gitOutput(directory, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("validate cloned repository: %w", err)
 	}
-	if filepath.Clean(root) != filepath.Clean(directory) {
+	realRoot, rootErr := filepath.EvalSymlinks(root)
+	realDirectory, directoryErr := filepath.EvalSymlinks(directory)
+	if rootErr != nil || directoryErr != nil || filepath.Clean(realRoot) != filepath.Clean(realDirectory) {
 		return fmt.Errorf("cloned repository top-level %q does not match destination %q", root, directory)
 	}
 	remote, err := controlledGitOutput(directory, "remote", "get-url", remoteOrigin)
 	if err != nil {
 		return fmt.Errorf("validate cloned origin: %w", err)
 	}
-	u, owner, repo, err := parseCloneRepositoryURL(remote)
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
 	if err != nil {
 		return fmt.Errorf("validate cloned origin: %w", err)
-	}
-	rawBaseURL := strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
-	normalizedBaseURL, err := ogconfig.NormalizeBaseURL(rawBaseURL)
-	if err != nil {
-		return fmt.Errorf("validate cloned origin: %w", err)
-	}
-	info := &gitprovider.RepoInfo{
-		Owner: owner, Repo: repo, Host: strings.ToLower(u.Hostname()), BaseURL: normalizedBaseURL,
 	}
 	provider, err := ogconfigForSource(source).ClassifyRemote(info)
 	if err != nil {
 		return fmt.Errorf("validate cloned origin: %w", err)
 	}
-	if provider != source.provider || !strings.EqualFold(info.Host, source.info.Host) ||
-		info.Owner != source.info.Owner || info.Repo != source.info.Repo ||
-		!strings.EqualFold(normalizedBaseURL, source.info.BaseURL) {
+	if provider != source.provider || info.CanonicalURL != source.remote {
 		return fmt.Errorf("existing origin %q does not match requested repository %q", remote, source.remote)
-	}
-	return nil
-}
-
-func validateLocalGitControl(directory string) error {
-	gitControlPath := filepath.Join(directory, ".git")
-	gitControl, err := os.Lstat(gitControlPath)
-	if err != nil {
-		return fmt.Errorf("validate git control directory: %w", err)
-	}
-	if gitControl.Mode()&os.ModeSymlink != 0 || !gitControl.IsDir() {
-		return fmt.Errorf("git control directory %q must be a local directory", gitControlPath)
-	}
-	absoluteGitDir, err := controlledGitOutput(directory, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return fmt.Errorf("validate git control directory: %w", err)
-	}
-	if filepath.Clean(absoluteGitDir) != filepath.Clean(gitControlPath) {
-		return fmt.Errorf("git control directory %q escapes clone destination", absoluteGitDir)
-	}
-	absoluteCommonDir, err := controlledGitOutput(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return fmt.Errorf("validate git control directory: %w", err)
-	}
-	if filepath.Clean(absoluteCommonDir) != filepath.Clean(gitControlPath) {
-		return fmt.Errorf("git control directory %q escapes clone destination", absoluteCommonDir)
 	}
 	return nil
 }

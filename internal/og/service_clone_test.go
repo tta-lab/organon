@@ -147,7 +147,6 @@ func TestGitCloneRejectsUnsafeInputsBeforeSideEffects(t *testing.T) {
 		{name: "fragment", req: Request{URL: "https://codeberg.org/tta-lab/example.git#main"}},
 		{name: "extra path", req: Request{URL: "https://codeberg.org/team/tta-lab/example.git"}},
 		{name: "double slash", req: Request{URL: "https://codeberg.org//tta-lab/example.git"}},
-		{name: "trailing slash", req: Request{URL: "https://codeberg.org/tta-lab/example.git/"}},
 		{name: "traversal", req: Request{URL: "https://codeberg.org/tta-lab/../example.git"}},
 		{name: "encoded path", req: Request{URL: "https://codeberg.org/tta-lab%2fescape/example.git"}},
 		{name: "reference alias", req: Request{URL: "https://codeberg.org/tta-lab/example.git", Alias: "x", Reference: true}},
@@ -246,14 +245,14 @@ func TestGitClonePreservesArchivedRegistration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
-	store := writeCloneProjects(t, "[archived.example-old]\npath = "+quoteTOML(destination)+"\n")
+	store := writeCloneProjects(t, "[archived.example-old]\npath = "+quoteTOML(destination)+
+		"\nremote = \"https://codeberg.org/tta-lab/example.git\"\n")
 	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
 		return createClonedRepository(ctx, invocation)
 	})
 
 	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
-		URL:   "https://codeberg.org/tta-lab/example.git",
-		Alias: "different",
+		URL: "https://codeberg.org/tta-lab/example.git",
 	})
 	if err != nil {
 		t.Fatalf("GitClone: %v", err)
@@ -263,6 +262,68 @@ func TestGitClonePreservesArchivedRegistration(t *testing.T) {
 	}
 	if _, err := store.Get("different"); !errors.Is(err, project.ErrNotFound) {
 		t.Fatalf("unexpected alias registration error = %v", err)
+	}
+}
+
+func TestGitCloneRejectsConflictingExplicitAliasForRegisteredRemote(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "registered", "example")
+	store := writeCloneProjects(t, "[archived.example-old]\npath = "+quoteTOML(destination)+
+		"\nremote = \"https://codeberg.org/tta-lab/example.git\"\n")
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called before alias conflict rejection")
+		return nil
+	})
+
+	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git", Alias: "different",
+	})
+	if err == nil || !strings.Contains(err.Error(), "alias") {
+		t.Fatalf("GitClone error = %v, want explicit alias conflict", err)
+	}
+}
+
+func TestGitCloneReusesRegisteredPathFoundByRemote(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "custom", "example")
+	store := writeCloneProjects(t, "[existing]\npath = "+quoteTOML(destination)+
+		"\nremote = \"https://codeberg.org/tta-lab/example.git\"\n")
+	var got cloneInvocation
+	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
+		got = invocation
+		return createClonedRepository(ctx, invocation)
+	})
+
+	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err != nil {
+		t.Fatalf("GitClone: %v", err)
+	}
+	assertTemporaryCloneInvocationFor(t, got, destination, "https://codeberg.org/tta-lab/example.git")
+	if resp.Clone == nil || resp.Clone.Alias != "existing" || resp.Clone.Path != destination {
+		t.Fatalf("clone result = %+v", resp.Clone)
+	}
+}
+
+func TestGitCloneRejectsDerivedPathCollisionBeforeClone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
+	store := writeCloneProjects(t, "[other]\npath = "+quoteTOML(destination)+
+		"\nremote = \"https://github.com/tta-lab/example.git\"\n")
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called before path collision rejection")
+		return nil
+	})
+
+	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err == nil || !strings.Contains(err.Error(), "path") {
+		t.Fatalf("GitClone error = %v, want path collision", err)
 	}
 }
 
@@ -374,105 +435,42 @@ func TestGitCloneRejectsDestinationConflictsWithoutMutation(t *testing.T) {
 		}
 	})
 
-	t.Run("symlink parent", func(t *testing.T) {
+	t.Run("destination symlink", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
-		outside := t.TempDir()
-		code := filepath.Join(home, "code")
-		if err := os.MkdirAll(code, 0o755); err != nil {
+		destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(outside, filepath.Join(code, "projects")); err != nil {
+		if err := os.Symlink(t.TempDir(), destination); err != nil {
 			t.Fatal(err)
 		}
 		_, err := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{}).GitClone(Request{
 			URL: "https://codeberg.org/tta-lab/example.git",
 		})
-		if err == nil || !strings.Contains(err.Error(), "symlink") {
-			t.Fatalf("GitClone error = %v", err)
-		}
-		if entries, _ := os.ReadDir(outside); len(entries) != 0 {
-			t.Fatalf("symlink target mutated: %+v", entries)
+		if err == nil || !strings.Contains(err.Error(), "safe directory") {
+			t.Fatalf("GitClone error = %v, want destination symlink rejection", err)
 		}
 	})
 
-}
-
-func TestGitCloneRejectsExistingCheckoutUnderSymlinkParent(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	outside := t.TempDir()
-	code := filepath.Join(home, "code")
-	if err := os.MkdirAll(code, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(code, "projects")); err != nil {
-		t.Fatal(err)
-	}
-	destination := filepath.Join(outside, "tta-lab", "example")
-	initCloneRepository(t, destination, "https://codeberg.org/tta-lab/example.git")
-	store := writeCloneProjects(t, "")
-	withCloneRunner(t, func(context.Context, cloneInvocation) error {
-		t.Fatal("clone runner called for existing checkout")
-		return nil
+	t.Run("wrong top-level", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		parent := filepath.Join(home, "code", "projects", "tta-lab")
+		destination := filepath.Join(parent, "example")
+		gitRun(t, "", "init", parent)
+		gitRun(t, parent, "remote", "add", "origin", "https://codeberg.org/tta-lab/example.git")
+		if err := os.MkdirAll(destination, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{}).GitClone(Request{
+			URL: "https://codeberg.org/tta-lab/example.git",
+		})
+		if err == nil || !strings.Contains(err.Error(), "top-level") {
+			t.Fatalf("GitClone error = %v, want top-level mismatch", err)
+		}
 	})
 
-	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
-		URL: "https://codeberg.org/tta-lab/example.git",
-	})
-	if err == nil {
-		t.Fatal("GitClone accepted an existing checkout under a symlink parent")
-	}
-	if _, getErr := store.Get("example"); !errors.Is(getErr, project.ErrNotFound) {
-		t.Fatalf("existing unsafe checkout was registered: %v", getErr)
-	}
-}
-
-func TestGitCloneRejectsExternalGitControlDirectory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
-	external := filepath.Join(t.TempDir(), "external")
-	initCloneRepository(t, external, "https://codeberg.org/tta-lab/example.git")
-	if err := os.MkdirAll(destination, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(external, ".git"), filepath.Join(destination, ".git")); err != nil {
-		t.Fatal(err)
-	}
-	assertUnsafeExistingCloneRejected(t, destination)
-}
-
-func TestGitCloneRejectsExternalGitCommonDirectory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
-	initCloneRepository(t, destination, "https://codeberg.org/tta-lab/example.git")
-	external := filepath.Join(t.TempDir(), "common.git")
-	gitRun(t, "", "init", "--bare", external)
-	if err := os.WriteFile(filepath.Join(destination, ".git", "commondir"), []byte(external+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	assertUnsafeExistingCloneRejected(t, destination)
-}
-
-func assertUnsafeExistingCloneRejected(t *testing.T, destination string) {
-	t.Helper()
-	store := writeCloneProjects(t, "")
-	withCloneRunner(t, func(context.Context, cloneInvocation) error {
-		t.Fatal("clone runner called for existing checkout")
-		return nil
-	})
-
-	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
-		URL: "https://codeberg.org/tta-lab/example.git",
-	})
-	if err == nil || !strings.Contains(err.Error(), "git control directory") {
-		t.Fatalf("GitClone error = %v, want Git control directory rejection for %s", err, destination)
-	}
-	if _, getErr := store.Get("example"); !errors.Is(getErr, project.ErrNotFound) {
-		t.Fatalf("existing unsafe checkout was registered: %v", getErr)
-	}
 }
 
 func TestGitCloneLeavesCompletedCheckoutWhenRegistrationFails(t *testing.T) {
@@ -488,13 +486,14 @@ func TestGitCloneLeavesCompletedCheckoutWhenRegistrationFails(t *testing.T) {
 		if err := createClonedRepository(ctx, invocation); err != nil {
 			return err
 		}
-		return os.WriteFile(registry, []byte("[example]\npath = \"/other/repository\"\n"), 0o644)
+		return os.WriteFile(registry, []byte("[example]\npath = \"/other/repository\"\n"+
+			"remote = \"https://codeberg.org/other/repository.git\"\n"), 0o644)
 	})
 
 	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
 		URL: "https://codeberg.org/tta-lab/example.git",
 	})
-	if err == nil || !strings.Contains(err.Error(), "already uses path") {
+	if err == nil || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("GitClone error = %v, want alias collision", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(destination, ".git")); statErr != nil {
@@ -505,7 +504,8 @@ func TestGitCloneLeavesCompletedCheckoutWhenRegistrationFails(t *testing.T) {
 func TestGitCloneRejectsExistingAliasBeforeClone(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	store := writeCloneProjects(t, "[example]\npath = \"/other/repository\"\n")
+	store := writeCloneProjects(t, "[example]\npath = \"/other/repository\"\n"+
+		"remote = \"https://codeberg.org/other/repository.git\"\n")
 	withCloneRunner(t, func(context.Context, cloneInvocation) error {
 		t.Fatal("clone runner called for an existing alias")
 		return nil
@@ -514,7 +514,7 @@ func TestGitCloneRejectsExistingAliasBeforeClone(t *testing.T) {
 	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
 		URL: "https://codeberg.org/tta-lab/example.git",
 	})
-	if err == nil || !strings.Contains(err.Error(), "already uses path") {
+	if err == nil || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("GitClone error = %v, want alias collision", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(home, "code")); !os.IsNotExist(statErr) {
@@ -581,7 +581,7 @@ func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 	if strings.Contains(environment, "ambient-token") || strings.Contains(environment, "GIT_TOKEN_INJECT=") {
 		t.Fatal("public Forgejo clone retained credentials")
 	}
-	if !strings.Contains(environment, "GIT_CONFIG_COUNT=4") ||
+	if !strings.Contains(environment, "GIT_CONFIG_COUNT=3") ||
 		!strings.Contains(environment, "GIT_CONFIG_KEY_1=core.askPass") {
 		t.Fatal("public Forgejo clone did not use anonymous Git environment")
 	}
@@ -594,6 +594,116 @@ func writeCloneProjects(t *testing.T, content string) *project.Store {
 		t.Fatal(err)
 	}
 	return project.NewStore(path)
+}
+
+func TestGitCloneByAliasUsesRegisteredPathAndRemote(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "custom", "organon")
+	store := writeCloneProjects(t, "[orga]\npath = "+quoteTOML(destination)+
+		"\nremote = \"https://github.com/tta-lab/organon.git\"\n")
+	var got cloneInvocation
+	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
+		got = invocation
+		return createClonedRepository(ctx, invocation)
+	})
+
+	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{Project: "orga"})
+	if err != nil {
+		t.Fatalf("GitClone alias: %v", err)
+	}
+	assertTemporaryCloneInvocationFor(t, got, destination, "https://github.com/tta-lab/organon.git")
+	if resp.Clone == nil || resp.Clone.Alias != "orga" || resp.Clone.Path != destination ||
+		!resp.Clone.Registered || resp.Clone.Archived {
+		t.Fatalf("clone result = %+v", resp.Clone)
+	}
+}
+
+func assertTemporaryCloneInvocationFor(t *testing.T, got cloneInvocation, wantPath, wantRemote string) {
+	t.Helper()
+	if got.Destination == wantPath || filepath.Dir(got.Destination) != filepath.Dir(wantPath) {
+		t.Fatalf("temporary destination = %q, want sibling of %q", got.Destination, wantPath)
+	}
+	if got.Remote != wantRemote {
+		t.Fatalf("clone remote = %q, want %q", got.Remote, wantRemote)
+	}
+}
+
+func TestGitCloneRejectsInvalidSelectorCombinations(t *testing.T) {
+	service := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{})
+	for _, req := range []Request{
+		{},
+		{Project: "orga", URL: "https://github.com/tta-lab/organon.git"},
+		{Project: "orga", Alias: "other"},
+		{Project: "orga", Reference: true},
+	} {
+		if _, err := service.GitClone(req); err == nil {
+			t.Fatalf("GitClone(%+v) succeeded, want selector rejection", req)
+		}
+	}
+}
+
+func TestGitCloneAllowsSymlinkedParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, "code", "projects")); err != nil {
+		t.Fatal(err)
+	}
+	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
+		return createClonedRepository(ctx, invocation)
+	})
+
+	service := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{})
+	resp, err := service.GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err != nil {
+		t.Fatalf("GitClone: %v", err)
+	}
+	if resp.Clone == nil || !resp.Clone.Registered {
+		t.Fatalf("clone result = %+v", resp.Clone)
+	}
+	ctx, err := service.resolveRemoteRepoContextFor(resp.Clone.Path)
+	if err != nil {
+		t.Fatalf("resolve cloned project through symlink parent: %v", err)
+	}
+	if ctx.ProjectAlias != "example" {
+		t.Fatalf("resolved context = %+v", ctx)
+	}
+}
+
+func TestGitCloneAcceptsExistingLinkedWorktree(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base := filepath.Join(t.TempDir(), "base")
+	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
+	gitRun(t, "", "init", base)
+	gitRun(t, base, "config", "user.email", "test@example.com")
+	gitRun(t, base, "config", "user.name", "Test User")
+	gitRun(t, base, "commit", "--allow-empty", "-m", "initial")
+	gitRun(t, base, "remote", "add", "origin", "https://codeberg.org/tta-lab/example.git")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, base, "worktree", "add", "-b", "linked", destination)
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called for existing worktree")
+		return nil
+	})
+
+	resp, err := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err != nil {
+		t.Fatalf("GitClone linked worktree: %v", err)
+	}
+	if resp.Clone == nil || !resp.Clone.AlreadyExisted || !resp.Clone.Registered {
+		t.Fatalf("clone result = %+v", resp.Clone)
+	}
 }
 
 func withCloneRunner(t *testing.T, runner func(context.Context, cloneInvocation) error) {

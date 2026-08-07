@@ -27,7 +27,8 @@ func TestLoadDaemonServiceUsesConfiguredForgejoAllowlist(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "repo")
 	gitCommand(t, "", "init", repo)
 	gitCommand(t, repo, "remote", "add", "origin", "http://forgejo.localhost:17480/owner/repo.git")
-	projects := "[test]\npath = " + strconv.Quote(repo) + "\n"
+	projects := "[test]\npath = " + strconv.Quote(repo) +
+		"\nremote = \"http://forgejo.localhost:17480/owner/repo.git\"\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(projects), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,8 @@ func TestDaemonValidateLoadsConfigWithoutBindingSocket(t *testing.T) {
 	projectPath := filepath.Join(home, "code", "projects", "test")
 	if err := os.WriteFile(
 		filepath.Join(configDir, "projects.toml"),
-		[]byte("[test]\npath = "+strconv.Quote(projectPath)+"\n"), 0o600,
+		[]byte("[test]\npath = "+strconv.Quote(projectPath)+
+			"\nremote = \"https://github.com/tta-lab/test.git\"\n"), 0o600,
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -183,15 +183,22 @@ Clone URLs through the daemon so destination, authentication, and registration
 stay on one boundary:
 
 ```bash
+og clone organon
 og clone https://github.com/tta-lab/organon.git
 og clone --alias forgejo https://codeberg.org/forgejo/forgejo.git
 og clone --reference https://github.com/modelcontextprotocol/go-sdk.git
 ```
 
-Project clones derive `~/code/projects/<owner>/<repo>` and register an alias.
+Alias clones use the registered path and canonical remote. URL project clones
+derive `~/code/projects/<owner>/<repo>` and register an alias plus remote.
 Reference clones derive `~/code/references/<host>/<owner>/<repo>` and remain
 unregistered. Only GitHub, configured Forgejo roots, and anonymous generic
 HTTPS are supported; callers cannot provide a destination or credentials.
+
+For registered operations, `projects.toml` is the repository identity SSOT.
+Immediately before a Git network operation, og checks the effective fetch URL
+and, for writes, every push URL against that remote before resolving a token.
+Normal repository hooks such as Lefthook run without bypasses.
 
 Archived project entries remain useful context. They may read PR/CI state and
 fast-forward the known default branch with `og pull`, but cannot push, tag,

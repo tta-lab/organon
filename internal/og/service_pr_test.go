@@ -88,6 +88,30 @@ func TestPRCreateRejectsBlankTitleBeforeSideEffects(t *testing.T) {
 	}
 }
 
+func TestPRGetUsesRegistryIdentityWithoutInspectingPushTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/wrong/repo.git")
+	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
+		if ctx.Owner != "tta-lab" || ctx.Repo != "example" || ctx.Provider != gitprovider.ProviderGitHub {
+			t.Fatalf("provider context = %+v", ctx)
+		}
+		return fakeProvider{getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+			return &gitprovider.PullRequest{Index: index}, nil
+		}}, nil
+	})
+	defer restoreProvider()
+
+	resp, err := NewService(&recordingBroker{}).PRGet(Request{WorkDir: repo, Index: 7})
+	if err != nil {
+		t.Fatalf("PRGet: %v", err)
+	}
+	if resp.PR == nil || resp.PR.Index != 7 {
+		t.Fatalf("PR = %+v", resp.PR)
+	}
+}
+
 func TestArchivedAndGenericRepositoriesRejectPRWrites(t *testing.T) {
 	tests := []struct {
 		name     string

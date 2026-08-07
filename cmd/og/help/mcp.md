@@ -1,7 +1,8 @@
 Serve typed forge tools over MCP stdio. Repository operations accept an exact
-registered single-layer project alias. `clone` instead accepts an HTTP(S) URL,
-an optional project alias, and an optional reference flag. No tool accepts a
-destination path, working directory, MCP root, token, or file URI.
+registered single-layer project alias. `clone` accepts exactly one of a registered
+project alias or an HTTP(S) URL. URL mode may use an optional new alias or the
+reference flag. No tool accepts a destination path, working directory, MCP
+root, token, or file URI.
 
 The `og` daemon must already be running. All pull request tools require an
 exact project alias. Get, modify, comment, checks, log, and failures accept an
@@ -11,7 +12,7 @@ it is omitted.
 Tools:
 
   auth_status             # inspect secret-free forge authentication state
-  clone                   # clone URL to a daemon-derived project/reference path
+  clone                   # clone registered alias or URL to its controlled path
   push                    # push current branch; optional force-with-lease
   pull                    # run the complete guarded CLI pull workflow
   pr_create               # push current branch and create its pull request

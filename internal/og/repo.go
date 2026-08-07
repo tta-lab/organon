@@ -44,6 +44,7 @@ type repoContext struct {
 	Owner            string
 	Repo             string
 	RemoteURL        string
+	RegistryRemote   string
 	TokenEnv         string
 	Token            string
 	DefaultBase      string
@@ -91,13 +92,9 @@ func resolveRemoteRepoContextWith(
 	if err != nil {
 		return nil, err
 	}
-	remote, err := controlledGitOutput(root, "remote", "get-url", remoteOrigin)
+	info, err := gitprovider.ParseHTTPRemoteURL(entry.Remote)
 	if err != nil {
-		return nil, fmt.Errorf("get origin remote: %w", err)
-	}
-	info, err := gitprovider.ParseRemoteURL(remote)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse registered remote: %w", err)
 	}
 	provider, err := cfg.ClassifyRemote(info)
 	if err != nil {
@@ -110,18 +107,19 @@ func resolveRemoteRepoContextWith(
 		token = os.Getenv(tokenEnv)
 	}
 	return &repoContext{
-		WorkDir:      root,
-		ProjectAlias: entry.Alias,
-		Archived:     entry.Archived,
-		Provider:     info.Provider,
-		Host:         info.Host,
-		BaseURL:      info.BaseURL,
-		Owner:        info.Owner,
-		Repo:         info.Repo,
-		RemoteURL:    remote,
-		TokenEnv:     tokenEnv,
-		Token:        token,
-		config:       cfg,
+		WorkDir:        root,
+		ProjectAlias:   entry.Alias,
+		Archived:       entry.Archived,
+		Provider:       info.Provider,
+		Host:           info.Host,
+		BaseURL:        info.BaseURL,
+		Owner:          info.Owner,
+		Repo:           info.Repo,
+		RemoteURL:      entry.Remote,
+		RegistryRemote: entry.Remote,
+		TokenEnv:       tokenEnv,
+		Token:          token,
+		config:         cfg,
 	}, nil
 }
 
@@ -133,28 +131,22 @@ func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error 
 	if err != nil {
 		return fmt.Errorf("origin fetch target cannot be verified")
 	}
-	info, err := gitprovider.ParseRemoteURL(remote)
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
 	if err != nil {
 		return fmt.Errorf("origin fetch target is not an allowed HTTP(S) repository")
 	}
 	provider, err := ctxInfo.config.ClassifyRemote(info)
-	if err != nil || !sameRepositoryIdentity(
-		&gitprovider.RepoInfo{
-			BaseURL: ctxInfo.BaseURL, Owner: ctxInfo.Owner, Repo: ctxInfo.Repo,
-		},
-		ctxInfo.Provider,
-		info,
-		provider,
-	) {
-		return fmt.Errorf("origin fetch target does not match the classified repository")
+	expected := ctxInfo.RegistryRemote
+	if expected == "" {
+		expected = ctxInfo.RemoteURL
+	}
+	if err != nil || provider != ctxInfo.Provider || info.CanonicalURL != expected {
+		return fmt.Errorf("origin fetch target does not match registered remote")
 	}
 	if requirePush {
-		if err := validatePushTargets(ctxInfo.WorkDir, ctxInfo.config, info, provider); err != nil {
+		if err := validatePushTargets(ctxInfo.WorkDir, ctxInfo.config, expected, provider); err != nil {
 			return err
 		}
-	}
-	if err := validateSafeRemoteTransport(ctxInfo.WorkDir, remote, info, provider); err != nil {
-		return err
 	}
 	ctxInfo.RemoteURL = remote
 	return nil
@@ -163,7 +155,7 @@ func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error 
 func validatePushTargets(
 	workDir string,
 	cfg ogconfig.Config,
-	fetchInfo *gitprovider.RepoInfo,
+	expected string,
 	fetchProvider gitprovider.ProviderType,
 ) error {
 	out, err := controlledGitOutput(workDir, "remote", "get-url", "--push", "--all", remoteOrigin)
@@ -172,49 +164,16 @@ func validatePushTargets(
 	}
 	for _, raw := range strings.Split(out, "\n") {
 		raw = strings.TrimSpace(raw)
-		pushInfo, parseErr := gitprovider.ParseRemoteURL(raw)
+		pushInfo, parseErr := gitprovider.ParseHTTPRemoteURL(raw)
 		if parseErr != nil {
 			return fmt.Errorf("origin push target is not an allowed HTTP(S) repository")
 		}
 		pushProvider, classifyErr := cfg.ClassifyRemote(pushInfo)
-		if classifyErr != nil || !sameRepositoryIdentity(fetchInfo, fetchProvider, pushInfo, pushProvider) {
-			return fmt.Errorf("origin push target does not match the classified fetch repository")
-		}
-		if err := validateSafeRemoteTransport(workDir, raw, pushInfo, pushProvider); err != nil {
-			return err
+		if classifyErr != nil || pushProvider != fetchProvider || pushInfo.CanonicalURL != expected {
+			return fmt.Errorf("origin push target does not match registered remote")
 		}
 	}
 	return nil
-}
-
-func validateSafeRemoteTransport(
-	workDir, remote string,
-	info *gitprovider.RepoInfo,
-	provider gitprovider.ProviderType,
-) error {
-	if err := gitutil.ValidateSafeHTTPTransport(workDir, remote); err != nil {
-		return err
-	}
-	if provider != gitprovider.ProviderGitHub {
-		return nil
-	}
-	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", info.Owner, info.Repo)
-	if canonicalURL == remote {
-		return nil
-	}
-	return gitutil.ValidateSafeHTTPTransport(workDir, canonicalURL)
-}
-
-func sameRepositoryIdentity(
-	left *gitprovider.RepoInfo,
-	leftProvider gitprovider.ProviderType,
-	right *gitprovider.RepoInfo,
-	rightProvider gitprovider.ProviderType,
-) bool {
-	leftBase, leftErr := ogconfig.NormalizeBaseURL(left.BaseURL)
-	rightBase, rightErr := ogconfig.NormalizeBaseURL(right.BaseURL)
-	return leftErr == nil && rightErr == nil && leftProvider == rightProvider && leftBase == rightBase &&
-		strings.EqualFold(left.Owner, right.Owner) && strings.EqualFold(left.Repo, right.Repo)
 }
 
 func resolveRegisteredRepo(workDir string, projects *project.Store) (string, project.Entry, error) {
@@ -238,23 +197,41 @@ func resolveRegisteredRepo(workDir string, projects *project.Store) (string, pro
 		return "", project.Entry{}, fmt.Errorf("project store is not configured")
 	}
 	registeredInput, inputErr := projects.GetByPath(requestedPath)
-	if inputErr == nil && registeredInput.Path != root {
-		return "", project.Entry{}, fmt.Errorf(
-			"registered project %q path %q must be the Git top-level %q",
-			registeredInput.Alias, registeredInput.Path, root,
-		)
+	if inputErr == nil {
+		if !sameRealPath(registeredInput.Path, root) {
+			return "", project.Entry{}, fmt.Errorf(
+				"registered project %q path %q must be the Git top-level %q",
+				registeredInput.Alias, registeredInput.Path, root,
+			)
+		}
+		return root, registeredInput, nil
 	}
 	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
 		return "", project.Entry{}, inputErr
 	}
 	entry, err := projects.GetByPath(root)
 	if errors.Is(err, project.ErrNotFound) {
+		entries, listErr := projects.List(true)
+		if listErr != nil {
+			return "", project.Entry{}, listErr
+		}
+		for _, candidate := range entries {
+			if sameRealPath(candidate.Path, root) {
+				return root, candidate, nil
+			}
+		}
 		return "", project.Entry{}, fmt.Errorf("workdir %q is not inside a registered project", root)
 	}
 	if err != nil {
 		return "", project.Entry{}, err
 	}
 	return root, entry, nil
+}
+
+func sameRealPath(left, right string) bool {
+	realLeft, leftErr := filepath.EvalSymlinks(left)
+	realRight, rightErr := filepath.EvalSymlinks(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(realLeft) == filepath.Clean(realRight)
 }
 
 func tokenEnvFor(provider gitprovider.ProviderType) string {

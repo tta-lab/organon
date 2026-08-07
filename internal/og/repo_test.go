@@ -130,7 +130,9 @@ func TestResolveRemoteRepoContextRejectsNestedRegisteredProjectPath(t *testing.T
 		t.Fatalf("mkdir nested project: %v", err)
 	}
 	projects := "[outer]\npath = " + quoteTOMLString(repo) +
-		"\n[nested]\npath = " + quoteTOMLString(nested) + "\n"
+		"\nremote = \"https://github.com/tta-lab/example.git\"\n" +
+		"[nested]\npath = " + quoteTOMLString(nested) +
+		"\nremote = \"https://github.com/tta-lab/nested.git\"\n"
 	projectsPath := filepath.Join(home, ".config", "ttal", "projects.toml")
 	if err := os.WriteFile(projectsPath, []byte(projects), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
@@ -400,7 +402,12 @@ func testRegisteredRepo(
 	if archived {
 		header = "[archived.test]"
 	}
-	content := header + "\npath = " + quoteTOMLString(repo) + "\n"
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
+	if err != nil {
+		t.Fatalf("canonical test remote: %v", err)
+	}
+	content := header + "\npath = " + quoteTOMLString(repo) +
+		"\nremote = " + quoteTOMLString(info.CanonicalURL) + "\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
 	}

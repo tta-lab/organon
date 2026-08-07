@@ -35,7 +35,8 @@ func testOGStore(t *testing.T) *project.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "projects.toml")
 	content := "[organon]\nname = \"Organon\"\n" +
-		"path = \"/work/code/projects/tta-lab/organon\"\n"
+		"path = \"/work/code/projects/tta-lab/organon\"\n" +
+		"remote = \"https://github.com/tta-lab/organon.git\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +181,24 @@ func assertRequiredInput(t *testing.T, tool *mcp.Tool) {
 	if tool.Name != "clone" && !required["project"] {
 		t.Fatalf("tool %q required inputs = %v", tool.Name, schema.Required)
 	}
-	if tool.Name == "clone" && (!required["url"] || required["project"] || required["alias"] || required["reference"]) {
-		t.Fatalf("clone required inputs = %v", schema.Required)
+	if tool.Name == "clone" {
+		assertCloneSelectorContract(t, &schema, required)
 	}
 	if required["pr_id"] {
 		t.Fatalf("tool %q unexpectedly requires pr_id: %v", tool.Name, schema.Required)
 	}
 	if tool.Name == "pr_create" && !required["title"] {
 		t.Fatalf("tool %q required inputs = %v, want title", tool.Name, schema.Required)
+	}
+}
+
+func assertCloneSelectorContract(t *testing.T, schema *jsonschema.Schema, required map[string]bool) {
+	t.Helper()
+	if required["url"] || required["project"] || required["alias"] || required["reference"] {
+		t.Fatalf("clone required inputs = %v", schema.Required)
+	}
+	if len(schema.OneOf) != 2 {
+		t.Fatalf("clone oneOf = %#v, want project-or-url selector", schema.OneOf)
 	}
 }
 
@@ -292,9 +303,63 @@ func TestOGMCPCloneRoutesURLWithoutProjectPathOrToken(t *testing.T) {
 	}
 }
 
+func TestOGMCPCloneRoutesProjectAlias(t *testing.T) {
+	want := &og.CloneResult{
+		Alias: "organon", Path: "/work/code/projects/tta-lab/organon", Host: "github.com",
+		Owner: "tta-lab", Repo: "organon", Provider: "github",
+		Remote: "https://github.com/tta-lab/organon.git", Registered: true,
+	}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		if path != "/git/clone" || req.Project != "organon" || req.URL != "" || req.Alias != "" || req.Reference {
+			t.Fatalf("clone request = %+v path=%q", req, path)
+		}
+		return og.Response{OK: true, Clone: want}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "clone", Arguments: map[string]any{"project": "organon"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("clone result = %#v", result)
+	}
+}
+
+func TestOGMCPCloneRejectsInvalidSelectorCombinations(t *testing.T) {
+	calls := 0
+	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
+		calls++
+		return og.Response{}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
+	for _, args := range []map[string]any{
+		{},
+		{"project": "organon", "url": "https://github.com/tta-lab/organon.git"},
+		{"project": "organon", "alias": "other"},
+		{"project": "organon", "reference": true},
+		{"reference": true},
+		{"url": "https://github.com/tta-lab/organon.git", "reference": true, "alias": "other"},
+	} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "clone", Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.IsError {
+			t.Fatalf("clone(%v) succeeded", args)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("daemon calls = %d, want 0", calls)
+	}
+}
+
 func TestOGMCPReadsNewAliasWithoutRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "projects.toml")
-	if err := os.WriteFile(path, []byte("[organon]\npath = \"/work/organon\"\n"), 0o644); err != nil {
+	content := "[organon]\npath = \"/work/organon\"\n" +
+		"remote = \"https://github.com/tta-lab/organon.git\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
@@ -302,7 +367,8 @@ func TestOGMCPReadsNewAliasWithoutRestart(t *testing.T) {
 	}}
 	session := connectOGMCP(t, newOGMCPServer(project.NewStore(path), caller))
 	if err := os.WriteFile(path, []byte(
-		"[organon]\npath = \"/work/organon\"\n\n[newrepo]\npath = \"/work/newrepo\"\n",
+		"[organon]\npath = \"/work/organon\"\nremote = \"https://github.com/tta-lab/organon.git\"\n\n"+
+			"[newrepo]\npath = \"/work/newrepo\"\nremote = \"https://github.com/tta-lab/newrepo.git\"\n",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -836,7 +902,9 @@ func TestOGMCPCommandTransportClonesAllowedForgejoHTTPAndHotRegisters(t *testing
 
 func writeOGMCPConfig(t *testing.T, home string) {
 	t.Helper()
-	writeOGMCPConfigContent(t, home, "[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n")
+	writeOGMCPConfigContent(t, home,
+		"[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n"+
+			"remote = \"https://github.com/tta-lab/organon.git\"\n")
 }
 
 func writeOGMCPConfigContent(t *testing.T, home, content string) {
