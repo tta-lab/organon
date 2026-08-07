@@ -370,7 +370,7 @@ func runGitClone(ctx context.Context, invocation cloneInvocation) error {
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return ctx.Err()
 		}
-		return fmt.Errorf("git clone: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("git clone: %w: %s", err, redactSecret(string(out), invocation.Token))
 	}
 	return nil
 }

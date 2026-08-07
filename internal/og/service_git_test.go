@@ -77,6 +77,34 @@ func TestGitPullRejectsOriginThatDiffersFromRegistryBeforeCredentials(t *testing
 	}
 }
 
+func TestGitPullFeatureBranchRejectsOriginBeforeProviderCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	providerCalls := 0
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		providerCalls++
+		return fakeProvider{}, nil
+	})
+	defer restoreProvider()
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(broker).GitPull(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("GitPull error = %v, want registry fetch-target mismatch", err)
+	}
+	if providerCalls != 0 || len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("side effects: provider=%d broker=%v git=%d", providerCalls, broker.tokenCalls, runs)
+	}
+}
+
 func TestGitPushRunsRepositoryPrePushHook(t *testing.T) {
 	repo := testGitRepoWithRemote(t)
 	marker := filepath.Join(t.TempDir(), "hook-ran")
@@ -95,6 +123,33 @@ func TestGitPushRunsRepositoryPrePushHook(t *testing.T) {
 	}
 	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "ran" {
 		t.Fatalf("pre-push hook marker = %q, %v", data, readErr)
+	}
+}
+
+func TestRunGitWithCredsDoesNotExposeInjectedTokenInError(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	const token = "repo-scoped-secret"
+
+	err := runGitWithCredsImpl(
+		&repoContext{
+			Provider:  gitprovider.ProviderGitHub,
+			WorkDir:   t.TempDir(),
+			RemoteURL: "https://github.com/tta-lab/example.git",
+			Owner:     "tta-lab",
+			Repo:      "example",
+		},
+		gitAuthentication{token: token}, "push", remoteOrigin, "feature/x",
+	)
+	if err == nil {
+		t.Fatal("runGitWithCredsImpl succeeded, want failure")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("git error exposed injected token: %v", err)
 	}
 }
 

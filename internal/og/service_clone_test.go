@@ -587,6 +587,31 @@ func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 	}
 }
 
+func TestRunGitCloneDoesNotExposeInjectedTokenInError(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	const token = "repo-scoped-secret"
+
+	err := runGitClone(context.Background(), cloneInvocation{
+		Destination: filepath.Join(t.TempDir(), "checkout"),
+		Remote:      "https://github.com/tta-lab/example.git",
+		Provider:    "github",
+		Owner:       "tta-lab",
+		Repo:        "example",
+		Token:       token,
+	})
+	if err == nil {
+		t.Fatal("runGitClone succeeded, want failure")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("clone error exposed injected token: %v", err)
+	}
+}
+
 func writeCloneProjects(t *testing.T, content string) *project.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "projects.toml")

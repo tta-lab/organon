@@ -72,6 +72,9 @@ func pullActive(ctx *repoContext) (Response, error) {
 	if ctx.Branch == ctx.DefaultBase {
 		return pullNamedBranch(ctx, ctx.DefaultBase)
 	}
+	if err := validateCurrentRemoteTargets(ctx, false); err != nil {
+		return Response{}, err
+	}
 
 	pr, err := findPR(ctx, stateAll)
 	if err != nil && !isNoPRFound(err) && !isAnonymousGitHubReadScopeError(ctx, err) {

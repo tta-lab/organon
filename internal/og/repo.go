@@ -362,9 +362,20 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return fmt.Errorf(
+			"git %s: %w: %s",
+			strings.Join(args, " "), err, redactSecret(string(out), auth.token),
+		)
 	}
 	return nil
+}
+
+func redactSecret(value, secret string) string {
+	value = strings.TrimSpace(value)
+	if secret == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, secret, "[REDACTED]")
 }
 
 func confirmedGitAuthenticationFailure(err error) bool {
