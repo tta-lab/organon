@@ -49,7 +49,7 @@ type repoContext struct {
 	DefaultBase      string
 	DefaultBaseKnown bool
 	Branch           string
-	pushTargetErr    error
+	config           ogconfig.Config
 	githubBroker     githubapp.CredentialBroker
 }
 
@@ -104,26 +104,60 @@ func resolveRemoteRepoContextWith(
 		return nil, fmt.Errorf("classify origin remote: %w", err)
 	}
 	info.Provider = provider
-	pushTargetErr := validatePushTargets(root, cfg, info, provider)
 	tokenEnv := tokenEnvFor(provider)
 	token := ""
 	if tokenEnv != "" {
 		token = os.Getenv(tokenEnv)
 	}
 	return &repoContext{
-		WorkDir:       root,
-		ProjectAlias:  entry.Alias,
-		Archived:      entry.Archived,
-		Provider:      info.Provider,
-		Host:          info.Host,
-		BaseURL:       info.BaseURL,
-		Owner:         info.Owner,
-		Repo:          info.Repo,
-		RemoteURL:     remote,
-		TokenEnv:      tokenEnv,
-		Token:         token,
-		pushTargetErr: pushTargetErr,
+		WorkDir:      root,
+		ProjectAlias: entry.Alias,
+		Archived:     entry.Archived,
+		Provider:     info.Provider,
+		Host:         info.Host,
+		BaseURL:      info.BaseURL,
+		Owner:        info.Owner,
+		Repo:         info.Repo,
+		RemoteURL:    remote,
+		TokenEnv:     tokenEnv,
+		Token:        token,
+		config:       cfg,
 	}, nil
+}
+
+func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error {
+	if ctxInfo.WorkDir == "" || ctxInfo.RemoteURL == "" || ctxInfo.BaseURL == "" {
+		return nil
+	}
+	remote, err := controlledGitOutput(ctxInfo.WorkDir, "remote", "get-url", remoteOrigin)
+	if err != nil {
+		return fmt.Errorf("origin fetch target cannot be verified")
+	}
+	info, err := gitprovider.ParseRemoteURL(remote)
+	if err != nil {
+		return fmt.Errorf("origin fetch target is not an allowed HTTP(S) repository")
+	}
+	provider, err := ctxInfo.config.ClassifyRemote(info)
+	if err != nil || !sameRepositoryIdentity(
+		&gitprovider.RepoInfo{
+			BaseURL: ctxInfo.BaseURL, Owner: ctxInfo.Owner, Repo: ctxInfo.Repo,
+		},
+		ctxInfo.Provider,
+		info,
+		provider,
+	) {
+		return fmt.Errorf("origin fetch target does not match the classified repository")
+	}
+	if requirePush {
+		if err := validatePushTargets(ctxInfo.WorkDir, ctxInfo.config, info, provider); err != nil {
+			return err
+		}
+	}
+	if err := validateSafeRemoteTransport(ctxInfo.WorkDir, remote, info, provider); err != nil {
+		return err
+	}
+	ctxInfo.RemoteURL = remote
+	return nil
 }
 
 func validatePushTargets(
@@ -137,7 +171,8 @@ func validatePushTargets(
 		return fmt.Errorf("origin push target cannot be verified")
 	}
 	for _, raw := range strings.Split(out, "\n") {
-		pushInfo, parseErr := gitprovider.ParseRemoteURL(strings.TrimSpace(raw))
+		raw = strings.TrimSpace(raw)
+		pushInfo, parseErr := gitprovider.ParseRemoteURL(raw)
 		if parseErr != nil {
 			return fmt.Errorf("origin push target is not an allowed HTTP(S) repository")
 		}
@@ -145,8 +180,29 @@ func validatePushTargets(
 		if classifyErr != nil || !sameRepositoryIdentity(fetchInfo, fetchProvider, pushInfo, pushProvider) {
 			return fmt.Errorf("origin push target does not match the classified fetch repository")
 		}
+		if err := validateSafeRemoteTransport(workDir, raw, pushInfo, pushProvider); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateSafeRemoteTransport(
+	workDir, remote string,
+	info *gitprovider.RepoInfo,
+	provider gitprovider.ProviderType,
+) error {
+	if err := gitutil.ValidateSafeHTTPTransport(workDir, remote); err != nil {
+		return err
+	}
+	if provider != gitprovider.ProviderGitHub {
+		return nil
+	}
+	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", info.Owner, info.Repo)
+	if canonicalURL == remote {
+		return nil
+	}
+	return gitutil.ValidateSafeHTTPTransport(workDir, canonicalURL)
 }
 
 func sameRepositoryIdentity(
@@ -249,6 +305,9 @@ type gitAuthentication struct {
 var runGitWithCredsFunc = runGitWithCredsImpl
 
 func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...string) error {
+	if err := validateCurrentRemoteTargets(ctxInfo, purpose == githubapp.PurposeGitWrite); err != nil {
+		return err
+	}
 	auth, err := gitAuthenticationFor(ctxInfo, purpose)
 	if err != nil {
 		return err
@@ -267,9 +326,6 @@ func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...st
 }
 
 func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitAuthentication, error) {
-	if purpose == githubapp.PurposeGitWrite && ctxInfo.pushTargetErr != nil {
-		return gitAuthentication{}, ctxInfo.pushTargetErr
-	}
 	if ctxInfo.Provider == gitprovider.ProviderGeneric {
 		if purpose != githubapp.PurposeGitRead {
 			return gitAuthentication{}, fmt.Errorf("generic HTTPS repository is read-only")
@@ -307,8 +363,8 @@ func requireRemoteWrite(ctxInfo *repoContext, operation string) error {
 }
 
 func requireGitPushTarget(ctxInfo *repoContext, operation string) error {
-	if ctxInfo.pushTargetErr != nil {
-		return fmt.Errorf("refusing %s: %w", operation, ctxInfo.pushTargetErr)
+	if err := validateCurrentRemoteTargets(ctxInfo, true); err != nil {
+		return fmt.Errorf("refusing %s: %w", operation, err)
 	}
 	return nil
 }

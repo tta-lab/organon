@@ -2,12 +2,17 @@ package og
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/ogconfig"
+	"github.com/tta-lab/organon/internal/project"
 )
 
 func TestGitPushRequestsWritePurpose(t *testing.T) {
@@ -49,6 +54,60 @@ func TestGitPushRejectsMismatchedPushURLBeforeCredentials(t *testing.T) {
 	}
 }
 
+func TestGitPushRejectsUnsafeLocalHTTPConfigBeforeCredentials(t *testing.T) {
+	tests := []struct {
+		name       string
+		origin     string
+		pushOrigin string
+		key        string
+		value      string
+	}{
+		{name: "disabled TLS verification", key: "http.https://github.com/tta-lab/example.git.sslVerify", value: "false"},
+		{
+			name: "repository proxy", key: "http.https://github.com/tta-lab/example.git.proxy",
+			value: "http://attacker.invalid:8080",
+		},
+		{
+			name: "canonical rewrite proxy", origin: "https://github.com/tta-lab/example",
+			key: "http.https://github.com/tta-lab/example.git.proxy", value: "http://attacker.invalid:8080",
+		},
+		{
+			name: "distinct push URL proxy", pushOrigin: "https://github.com/TTA-LAB/EXAMPLE.git",
+			key: "http.https://github.com/TTA-LAB/EXAMPLE.git.proxy", value: "http://attacker.invalid:8080",
+		},
+		{name: "custom CA", key: "http.https://github.com/tta-lab/example.git.sslCAInfo", value: "/tmp/attacker-ca.pem"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, "feature/x")
+			if tt.origin != "" {
+				gitRun(t, repo, "remote", "set-url", remoteOrigin, tt.origin)
+			}
+			if tt.pushOrigin != "" {
+				gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, tt.pushOrigin)
+			}
+			gitRun(t, repo, "config", tt.key, tt.value)
+			broker := &recordingBroker{token: "must-not-mint"}
+			runs := 0
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				runs++
+				return nil
+			})
+			defer restoreGit()
+
+			_, err := NewService(broker).GitPush(Request{WorkDir: repo})
+			if err == nil || !strings.Contains(err.Error(), "HTTP transport") {
+				t.Fatalf("GitPush error = %v, want unsafe HTTP transport refusal", err)
+			}
+			if len(broker.tokenCalls) != 0 || runs != 0 {
+				t.Fatalf("side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
+			}
+		})
+	}
+}
+
 func TestGitPullRequestsReadPurpose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -63,6 +122,52 @@ func TestGitPullRequestsReadPurpose(t *testing.T) {
 	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitRead}
 	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
 		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
+	}
+}
+
+func TestGitPullRejectsCredentialBearingOriginBeforeSideEffects(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		config ogconfig.Config
+	}{
+		{
+			name:   "generic userinfo",
+			origin: "https://user:secret@codeberg.org/tta-lab/example.git",
+		},
+		{
+			name:   "allowed Forgejo query",
+			origin: "http://forgejo.localhost:17480/tta-lab/example.git?token=secret",
+			config: ogconfig.Config{Forgejo: ogconfig.ForgejoConfig{
+				AllowedBaseURLs: []string{"http://forgejo.localhost:17480"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, branchMain)
+			gitRun(t, repo, "remote", "set-url", remoteOrigin, tt.origin)
+			broker := &recordingBroker{token: "must-not-mint"}
+			runs := 0
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				runs++
+				return nil
+			})
+			defer restoreGit()
+
+			service := NewServiceWithConfig(
+				broker, project.NewStore(config.ProjectsPath()), tt.config,
+			)
+			_, err := service.GitPull(Request{WorkDir: repo})
+			if err == nil {
+				t.Fatal("GitPull accepted credential-bearing origin")
+			}
+			if len(broker.tokenCalls) != 0 || runs != 0 {
+				t.Fatalf("side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
+			}
+		})
 	}
 }
 
@@ -101,6 +206,41 @@ func TestGitPullFeatureBranchFallsBackToAnonymousForUnmanagedRepository(t *testi
 				t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
 			}
 		})
+	}
+}
+
+func TestCleanupRevalidatesRemoteAfterBranchSwitch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	conditional := filepath.Join(t.TempDir(), "main-remote.config")
+	if err := os.WriteFile(conditional, []byte(
+		"[url \"https://attacker.invalid/tta-lab/example.git\"]\n"+
+			"\tinsteadOf = https://github.com/tta-lab/example.git\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "--add", "includeIf.onbranch:main.path", conditional)
+	broker := &recordingBroker{token: "scoped-token"}
+	service := NewService(broker)
+	ctx, err := service.resolveRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRepoContextFor: %v", err)
+	}
+	var runs [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		runs = append(runs, append([]string(nil), args...))
+		return nil
+	})
+	defer restoreGit()
+
+	err = cleanupClosedPRBranch(ctx, true)
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("cleanupClosedPRBranch error = %v, want changed fetch target refusal", err)
+	}
+	if len(runs) != 1 || len(broker.tokenCalls) != 1 {
+		t.Fatalf("post-switch network side effects: git runs = %v, broker calls = %+v", runs, broker.tokenCalls)
 	}
 }
 

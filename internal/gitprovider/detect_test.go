@@ -72,6 +72,21 @@ func TestParseRemoteURL(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:    "HTTP URL with credentials",
+			url:     "https://user:secret@git.example.com/owner/repo.git",
+			wantErr: true,
+		},
+		{
+			name:    "HTTP URL with query",
+			url:     "https://git.example.com/owner/repo.git?token=secret",
+			wantErr: true,
+		},
+		{
+			name:    "HTTP URL with fragment",
+			url:     "https://git.example.com/owner/repo.git#main",
+			wantErr: true,
+		},
+		{
 			name:    "malformed - no slash",
 			url:     "git@github.com:justrepo",
 			wantErr: true,

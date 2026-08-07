@@ -2,6 +2,7 @@ package gitutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +10,10 @@ import (
 	"time"
 )
 
-const forgejoTokenEnv = "FORGEJO_TOKEN"
+const (
+	credentialHelperConfig = "credential.helper"
+	forgejoTokenEnv        = "FORGEJO_TOKEN"
+)
 
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
@@ -82,14 +86,14 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 
 	type configPair struct{ key, value string }
 	configs := []configPair{
-		{key: "credential.helper", value: ""},
+		{key: credentialHelperConfig, value: ""},
 		{key: "core.askPass", value: ""},
 		{key: "core.hooksPath", value: os.DevNull},
 		{key: "http.sslVerify", value: "true"},
 	}
 	if token != "" {
 		configs = append(configs, configPair{
-			key:   "credential.helper",
+			key:   credentialHelperConfig,
 			value: "!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
 		})
 	}
@@ -131,6 +135,64 @@ func controlledCredentialEnv(baseEnv []string) []string {
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
+}
+
+// ValidateSafeHTTPTransport rejects repository-local settings that can redirect
+// or weaken an HTTP(S) Git operation. Call it immediately before resolving or
+// injecting credentials for the validated remote URL.
+func ValidateSafeHTTPTransport(workDir, remoteURL string) error {
+	sslVerify, err := effectiveURLConfig(workDir, "http.sslVerify", remoteURL, true)
+	if err != nil {
+		return err
+	}
+	if sslVerify != "true" {
+		return fmt.Errorf("unsafe HTTP transport config: TLS verification is not enabled")
+	}
+	unsafeKeys := []string{
+		"http.proxy",
+		"http.sslCAInfo",
+		"http.sslCAPath",
+		"http.proxySSLCAInfo",
+		"http.proxySSLCert",
+		"http.proxySSLKey",
+		"http.sslCert",
+		"http.sslKey",
+		"http.extraHeader",
+		"http.cookieFile",
+		"http.curloptResolve",
+		credentialHelperConfig,
+	}
+	for _, key := range unsafeKeys {
+		value, configErr := effectiveURLConfig(workDir, key, remoteURL, false)
+		if configErr != nil {
+			return configErr
+		}
+		if value != "" {
+			return fmt.Errorf("unsafe HTTP transport config: %s is set", key)
+		}
+	}
+	return nil
+}
+
+func effectiveURLConfig(workDir, key, remoteURL string, boolValue bool) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	args := []string{"-C", workDir, "config"}
+	if boolValue {
+		args = append(args, "--type=bool")
+	}
+	args = append(args, "--get-urlmatch", key, remoteURL)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = AnonymousGitEnv(os.Environ())
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	return "", fmt.Errorf("read effective Git HTTP config %s: %w", key, err)
 }
 
 func filterCredentialEnv(baseEnv []string) []string {
