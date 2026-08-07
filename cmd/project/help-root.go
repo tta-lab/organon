@@ -17,8 +17,5 @@ var helpResolve string
 //go:embed help/jump.md
 var helpJump string
 
-//go:embed help/org.md
-var helpOrg string
-
 //go:embed help/mcp.md
 var helpMCP string

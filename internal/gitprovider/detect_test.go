@@ -72,6 +72,21 @@ func TestParseRemoteURL(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:    "HTTP URL with credentials",
+			url:     "https://user:secret@git.example.com/owner/repo.git",
+			wantErr: true,
+		},
+		{
+			name:    "HTTP URL with query",
+			url:     "https://git.example.com/owner/repo.git?token=secret",
+			wantErr: true,
+		},
+		{
+			name:    "HTTP URL with fragment",
+			url:     "https://git.example.com/owner/repo.git#main",
+			wantErr: true,
+		},
+		{
 			name:    "malformed - no slash",
 			url:     "git@github.com:justrepo",
 			wantErr: true,
@@ -116,6 +131,80 @@ func TestParseRemoteURL(t *testing.T) {
 	}
 }
 
+func TestParseHTTPRemoteURLCanonicalizesRepositoryIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		remote        string
+		wantCanonical string
+		wantOwner     string
+		wantRepo      string
+		wantHost      string
+	}{
+		{
+			name:          "GitHub identity is case insensitive",
+			remote:        "HTTPS://GitHub.COM:443/TTA-Lab/Organon/",
+			wantCanonical: "https://github.com/tta-lab/organon.git",
+			wantOwner:     "tta-lab",
+			wantRepo:      "organon",
+			wantHost:      "github.com",
+		},
+		{
+			name:          "Forgejo preserves path case and port",
+			remote:        "http://FORGEJO.localhost:17480/GuionAI/FlickNote.git",
+			wantCanonical: "http://forgejo.localhost:17480/GuionAI/FlickNote.git",
+			wantOwner:     "GuionAI",
+			wantRepo:      "FlickNote",
+			wantHost:      "forgejo.localhost",
+		},
+		{
+			name:          "default HTTP port is removed",
+			remote:        "http://git.example.com:80/Owner/Repo",
+			wantCanonical: "http://git.example.com/Owner/Repo.git",
+			wantOwner:     "Owner",
+			wantRepo:      "Repo",
+			wantHost:      "git.example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseHTTPRemoteURL(tt.remote)
+			if err != nil {
+				t.Fatalf("ParseHTTPRemoteURL: %v", err)
+			}
+			if got.CanonicalURL != tt.wantCanonical || got.Owner != tt.wantOwner ||
+				got.Repo != tt.wantRepo || got.Host != tt.wantHost {
+				t.Fatalf(
+					"ParseHTTPRemoteURL = %+v, want canonical=%q owner=%q repo=%q host=%q",
+					got, tt.wantCanonical, tt.wantOwner, tt.wantRepo, tt.wantHost,
+				)
+			}
+		})
+	}
+}
+
+func TestParseHTTPRemoteURLRejectsUnsafeOrAmbiguousForms(t *testing.T) {
+	for _, remote := range []string{
+		"git@github.com:owner/repo.git",
+		"ssh://git@github.com/owner/repo.git",
+		"git://github.com/owner/repo.git",
+		"file:///tmp/repo",
+		"/tmp/repo",
+		"https://user@example.com/owner/repo.git",
+		"https://example.com/owner/repo.git?token=x",
+		"https://example.com/owner/repo.git#main",
+		"https://example.com/owner/repo/extra.git",
+		"https://example.com/owner%2Frepo.git",
+		"https://example.com/owner/%2e%2e.git",
+	} {
+		t.Run(remote, func(t *testing.T) {
+			if _, err := ParseHTTPRemoteURL(remote); err == nil {
+				t.Fatalf("ParseHTTPRemoteURL(%q) succeeded", remote)
+			}
+		})
+	}
+}
+
 func TestDetectProviderFromHost(t *testing.T) {
 	tests := []struct {
 		host         string
@@ -124,9 +213,9 @@ func TestDetectProviderFromHost(t *testing.T) {
 		{"github.com", ProviderGitHub},
 		{"GitHub.com", ProviderGitHub},
 		{"GITHUB.COM", ProviderGitHub},
-		{"git.guion.io", ProviderForgejo},
-		{"git.example.com", ProviderForgejo},
-		{"codeberg.org", ProviderForgejo},
+		{"git.guion.io", ProviderGeneric},
+		{"git.example.com", ProviderGeneric},
+		{"codeberg.org", ProviderGeneric},
 	}
 
 	for _, tt := range tests {
@@ -219,6 +308,7 @@ func TestNewProviderWithTokenUsesRemoteBaseURL(t *testing.T) {
 	defer server.Close()
 
 	repo := mustParseRemoteURL(t, server.URL+"/GuionAI/flick-backend.git")
+	repo.Provider = ProviderForgejo
 	provider, err := NewProviderWithToken(repo, "unused")
 	if err != nil {
 		t.Fatalf("NewProviderWithToken(): %v", err)

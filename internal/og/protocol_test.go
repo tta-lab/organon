@@ -32,3 +32,22 @@ func TestResponseDefaultsToOKWhenHandlerSucceeds(t *testing.T) {
 		t.Fatalf("message = %q", resp.Message)
 	}
 }
+
+func TestCloneRequestJSONHasNoWorktreeOrCredentialFields(t *testing.T) {
+	data, err := json.Marshal(Request{URL: "https://codeberg.org/tta-lab/example.git", Alias: "example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["url"] != "https://codeberg.org/tta-lab/example.git" || got["alias"] != "example" {
+		t.Fatalf("clone request = %s", data)
+	}
+	for _, forbidden := range []string{"work_dir", "path", "cwd", "root", "token", "token_env"} {
+		if _, ok := got[forbidden]; ok {
+			t.Fatalf("clone request includes %q: %s", forbidden, data)
+		}
+	}
+}

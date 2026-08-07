@@ -53,9 +53,11 @@ func TestProjectList_PrintsModelFriendlyBullets(t *testing.T) {
 [len]
 name = "Lenos CLI runtime"
 path = "/home/neil/code/projects/tta-lab/lenos"
+remote = "https://github.com/tta-lab/lenos.git"
 
 [orientation]
 path = "/home/neil/code/projects/tta-lab/orientation"
+remote = "https://github.com/tta-lab/orientation.git"
 `)
 
 	stdout, err := runProject(t, []string{"list"})
@@ -83,6 +85,7 @@ func TestProjectList_JSONOutputUnchanged(t *testing.T) {
 [len]
 name = "Lenos CLI runtime"
 path = "/home/neil/code/projects/tta-lab/lenos"
+remote = "https://github.com/tta-lab/lenos.git"
 `)
 
 	stdout, err := runProject(t, []string{"list", "--json"})
@@ -98,6 +101,63 @@ path = "/home/neil/code/projects/tta-lab/lenos"
 	}
 	if projects[0]["alias"] != "len" || projects[0]["path"] != "/home/neil/code/projects/tta-lab/lenos" {
 		t.Fatalf("unexpected JSON project: %v", projects[0])
+	}
+	if archived, ok := projects[0]["archived"]; !ok || archived != false {
+		t.Fatalf("project archived field = %#v, want required false", projects[0]["archived"])
+	}
+	if len(projects[0]) != 5 || projects[0]["name"] != "Lenos CLI runtime" ||
+		projects[0]["remote"] != "https://github.com/tta-lab/lenos.git" {
+		t.Fatalf("project JSON is not the exact five-field DTO: %#v", projects[0])
+	}
+}
+
+func TestProjectListIncludesArchivedOnlyWhenRequested(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[active]
+path = "/projects/active"
+remote = "https://example.com/owner/active.git"
+
+[archived.ttal]
+path = "/projects/ttal"
+remote = "https://example.com/owner/ttal.git"
+`)
+
+	stdout, err := runProject(t, []string{"list", "--include-archived", "--json"})
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
+	var projects []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &projects); err != nil {
+		t.Fatalf("decode project list: %v", err)
+	}
+	if len(projects) != 2 || projects[1]["alias"] != "ttal" || projects[1]["archived"] != true {
+		t.Fatalf("projects = %#v, want archived ttal", projects)
+	}
+
+	if _, err := runProject(t, []string{"list", "tta-lab"}); err == nil {
+		t.Fatal("project list accepted removed org argument")
+	}
+}
+
+func TestProjectGetReturnsArchivedEntry(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[archived.ttal]
+path = "/projects/ttal"
+remote = "https://example.com/owner/ttal.git"
+`)
+
+	stdout, err := runProject(t, []string{"get", "ttal", "--json"})
+	if err != nil {
+		t.Fatalf("project get: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode project get: %v", err)
+	}
+	if got["alias"] != "ttal" || got["archived"] != true {
+		t.Fatalf("project get = %#v", got)
 	}
 }
 
@@ -121,6 +181,7 @@ func TestProjectGetRejectsDottedAliasWithoutReferenceFallback(t *testing.T) {
 [fse]
 name = "FSE"
 path = "/projects/fse"
+remote = "https://example.com/owner/fse.git"
 `)
 
 	stdout, err := runProject(t, []string{"get", "fse.gw", "--json"})
@@ -157,8 +218,11 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 					t.Fatalf("decode get output: %v", err)
 				}
-				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
 					t.Fatalf("get output = %#v", got)
+				}
+				if _, exists := got["org"]; exists {
+					t.Fatalf("get output still exposes org: %#v", got)
 				}
 			},
 		},
@@ -171,8 +235,11 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 					t.Fatalf("decode resolve output: %v", err)
 				}
-				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
 					t.Fatalf("resolve output = %#v", got)
+				}
+				if _, exists := got["org"]; exists {
+					t.Fatalf("resolve output still exposes org: %#v", got)
 				}
 			},
 		},

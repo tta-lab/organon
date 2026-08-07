@@ -12,20 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tta-lab/organon/internal/org"
 	"github.com/tta-lab/organon/internal/project"
 )
-
-func writeOrgConfig(t *testing.T, home, content string) {
-	t.Helper()
-	configDir := filepath.Join(home, ".config", "ttal")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "orgs.toml"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write orgs.toml: %v", err)
-	}
-}
 
 func testProjectMCPServer(t *testing.T) *mcp.Server {
 	t.Helper()
@@ -34,22 +22,14 @@ func testProjectMCPServer(t *testing.T) *mcp.Server {
 [organon]
 name = "Organon"
 path = "/work/code/projects/tta-lab/organon"
-k8s_app = "organon"
-k8s_namespace = "apps-dev"
+remote = "https://github.com/tta-lab/organon.git"
+
+[archived.ttal]
+name = "TTAL"
+path = "/work/code/projects/tta-lab/ttal-cli"
+remote = "https://github.com/tta-lab/ttal-cli.git"
 `)
-	writeOrgConfig(t, home, `
-[tta-lab]
-github_token_env = "GITHUB_TOKEN"
-`)
-	projects, err := project.OpenCatalog(filepath.Join(home, ".config", "ttal", "projects.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	orgs, err := org.OpenCatalog(filepath.Join(home, ".config", "ttal", "orgs.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return newProjectMCPServer(projects, orgs)
+	return newProjectMCPServer(project.NewStore(filepath.Join(home, ".config", "ttal", "projects.toml")))
 }
 
 func connectProjectMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
@@ -90,7 +70,7 @@ func TestProjectMCPListsOnlyDiscoveryTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"org_get", "org_list", "project_get", "project_list"}
+	want := []string{"project_get", "project_list"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tool names = %v, want %v", names, want)
 	}
@@ -108,8 +88,24 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 			args: map[string]any{},
 			want: map[string]any{"projects": []any{
 				map[string]any{
-					"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon", "org": "tta-lab",
-					"k8s_app": "organon", "k8s_namespace": "apps-dev",
+					"alias": "organon", "name": "Organon",
+					"path":   "/work/code/projects/tta-lab/organon",
+					"remote": "https://github.com/tta-lab/organon.git", "archived": false,
+				},
+			}},
+		},
+		{
+			name: "project_list",
+			args: map[string]any{"include_archived": true},
+			want: map[string]any{"projects": []any{
+				map[string]any{
+					"alias": "organon", "name": "Organon",
+					"path":   "/work/code/projects/tta-lab/organon",
+					"remote": "https://github.com/tta-lab/organon.git", "archived": false,
+				},
+				map[string]any{
+					"alias": "ttal", "name": "TTAL", "path": "/work/code/projects/tta-lab/ttal-cli",
+					"remote": "https://github.com/tta-lab/ttal-cli.git", "archived": true,
 				},
 			}},
 		},
@@ -117,22 +113,8 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 			name: "project_get",
 			args: map[string]any{"alias": "organon"},
 			want: map[string]any{"project": map[string]any{
-				"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon", "org": "tta-lab",
-				"k8s_app": "organon", "k8s_namespace": "apps-dev",
-			}},
-		},
-		{
-			name: "org_list",
-			args: map[string]any{},
-			want: map[string]any{"orgs": []any{
-				map[string]any{"name": "tta-lab", "github_token_env": "GITHUB_TOKEN"},
-			}},
-		},
-		{
-			name: "org_get",
-			args: map[string]any{"name": "tta-lab"},
-			want: map[string]any{"org": map[string]any{
-				"name": "tta-lab", "github_token_env": "GITHUB_TOKEN",
+				"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon",
+				"remote": "https://github.com/tta-lab/organon.git", "archived": false,
 			}},
 		},
 	}
@@ -157,6 +139,24 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 				t.Fatalf("structured content = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProjectMCPReloadsRegistryOnEveryCall(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".config", "ttal", "projects.toml")
+	writeProjectsConfig(t, home, "[one]\npath = \"/projects/one\"\nremote = \"https://example.com/owner/one.git\"\n")
+	session := connectProjectMCP(t, newProjectMCPServer(project.NewStore(path)))
+
+	writeProjectsConfig(t, home, "[two]\npath = \"/projects/two\"\nremote = \"https://example.com/owner/two.git\"\n")
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "project_get", Arguments: map[string]any{"alias": "two"},
+	})
+	if err != nil {
+		t.Fatalf("call project_get: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("tool error after reload: %#v", result.Content)
 	}
 }
 
@@ -191,8 +191,10 @@ func TestProjectMCPCommandHelper(_ *testing.T) {
 
 func TestProjectMCPCommandTransport(t *testing.T) {
 	home := t.TempDir()
-	writeProjectsConfig(t, home, "[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n")
-	writeOrgConfig(t, home, "[tta-lab]\ngithub_token_env = \"GITHUB_TOKEN\"\n")
+	writeProjectsConfig(t, home, `[organon]
+path = "/work/code/projects/tta-lab/organon"
+remote = "https://github.com/tta-lab/organon.git"
+`)
 	command := exec.Command(os.Args[0], "-test.run=TestProjectMCPCommandHelper")
 	command.Env = append(os.Environ(), "GO_WANT_PROJECT_MCP_HELPER=1", "HOME="+home)
 	client := mcp.NewClient(&mcp.Implementation{Name: "project-command-test", Version: "test"}, nil)

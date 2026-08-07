@@ -8,9 +8,95 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/ogconfig"
+	"github.com/tta-lab/organon/internal/project"
 )
+
+func TestResolveRemoteRepoContextClassifiesGenericHTTPSWithoutForgejoToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "must-not-leak")
+	repo := testRegisteredRepo(t, home, branchMain, "https://codeberg.org/forgejo/forgejo.git", false)
+
+	ctx, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderGeneric || ctx.Token != "" || ctx.TokenEnv != "" {
+		t.Fatalf("context = %+v, want generic provider without token metadata", ctx)
+	}
+}
+
+func TestResolveRemoteRepoContextIgnoresAmbientURLRewrite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://attacker.invalid/owner/repo.git", false)
+	t.Setenv(
+		"GIT_CONFIG_PARAMETERS",
+		"'url.https://github.com/.insteadOf=https://attacker.invalid/'",
+	)
+
+	ctx, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderGeneric || ctx.RemoteURL != "https://attacker.invalid/owner/repo.git" {
+		t.Fatalf("context = %+v, want stored generic origin without ambient URL rewrite", ctx)
+	}
+}
+
+func TestResolveRepoContextIgnoresAmbientRepositorySelectors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://github.com/tta-lab/example.git", false)
+	decoy := filepath.Join(t.TempDir(), "decoy")
+	gitRun(t, "", "init", decoy)
+	gitRun(t, decoy, "switch", "-c", "redirected")
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", repo)
+
+	ctx, err := NewService(nil).resolveRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRepoContextFor: %v", err)
+	}
+	if ctx.WorkDir != repo || ctx.Branch != branchMain || ctx.RemoteURL != "https://github.com/tta-lab/example.git" {
+		t.Fatalf("context = %+v, want registered repository metadata", ctx)
+	}
+}
+
+func TestResolveRemoteRepoContextUsesOnlyAllowedForgejoBase(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "forge-token")
+	repo := testRegisteredRepo(
+		t, home, branchMain, "http://forgejo.localhost:17480/GuionAI/flicknote.git", false,
+	)
+	service := NewServiceWithConfig(nil, project.NewStore(config.ProjectsPath()), ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"http://forgejo.localhost:17480"}},
+	})
+
+	ctx, err := service.resolveRemoteRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRemoteRepoContextFor: %v", err)
+	}
+	if ctx.Provider != gitprovider.ProviderForgejo || ctx.Token != "forge-token" {
+		t.Fatalf("context = %+v, want allowed Forgejo token routing", ctx)
+	}
+}
+
+func TestResolveRemoteRepoContextRejectsUnlistedHTTP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "http://forge.example/owner/repo.git", false)
+
+	_, err := NewService(nil).resolveRemoteRepoContextFor(repo)
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("resolveRemoteRepoContextFor error = %v, want unlisted HTTP refusal", err)
+	}
+}
 
 func TestTokenEnvForUsesForgejoConfiguration(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "")
@@ -44,7 +130,9 @@ func TestResolveRemoteRepoContextRejectsNestedRegisteredProjectPath(t *testing.T
 		t.Fatalf("mkdir nested project: %v", err)
 	}
 	projects := "[outer]\npath = " + quoteTOMLString(repo) +
-		"\n[nested]\npath = " + quoteTOMLString(nested) + "\n"
+		"\nremote = \"https://github.com/tta-lab/example.git\"\n" +
+		"[nested]\npath = " + quoteTOMLString(nested) +
+		"\nremote = \"https://github.com/tta-lab/nested.git\"\n"
 	projectsPath := filepath.Join(home, ".config", "ttal", "projects.toml")
 	if err := os.WriteFile(projectsPath, []byte(projects), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
@@ -290,6 +378,12 @@ func testGitRepoWithRemote(t *testing.T) string {
 }
 
 func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
+	return testRegisteredRepo(t, home, branch, "https://github.com/tta-lab/example.git", false)
+}
+
+func testRegisteredRepo(
+	t *testing.T, home, branch, remote string, archived bool,
+) string {
 	t.Helper()
 
 	repo := filepath.Join(t.TempDir(), "repo")
@@ -298,13 +392,22 @@ func testRegisteredHTTPRepo(t *testing.T, home, branch string) string {
 	gitRun(t, repo, "config", "user.name", "Test User")
 	gitRun(t, repo, "switch", "-c", branch)
 	gitRun(t, repo, "commit", "--allow-empty", "-m", "initial")
-	gitRun(t, repo, "remote", "add", remoteOrigin, "https://github.com/tta-lab/example.git")
+	gitRun(t, repo, "remote", "add", remoteOrigin, remote)
 
 	configDir := filepath.Join(home, ".config", "ttal")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
-	content := "[test]\npath = " + quoteTOMLString(repo) + "\n"
+	header := "[test]"
+	if archived {
+		header = "[archived.test]"
+	}
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
+	if err != nil {
+		t.Fatalf("canonical test remote: %v", err)
+	}
+	content := header + "\npath = " + quoteTOMLString(repo) +
+		"\nremote = " + quoteTOMLString(info.CanonicalURL) + "\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("write projects.toml: %v", err)
 	}

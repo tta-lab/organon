@@ -1,13 +1,53 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/og"
 )
+
+func runGitClone(cmd *cobra.Command, args []string) error {
+	alias, _ := cmd.Flags().GetString("alias")
+	reference, _ := cmd.Flags().GetBool("reference")
+	if reference && alias != "" {
+		return fmt.Errorf("--alias cannot be used with --reference")
+	}
+	selector := args[0]
+	req := og.Request{Alias: alias, Reference: reference}
+	isURL := strings.HasPrefix(selector, "http://") || strings.HasPrefix(selector, "https://")
+	if isURL {
+		req.URL = selector
+	} else {
+		if alias != "" || reference {
+			return fmt.Errorf("project clone does not accept --alias or --reference")
+		}
+		req.Project = selector
+	}
+	resp, err := og.NewClientFromEnv().CallContext(cmd.Context(), "/git/clone", req)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonClone(resp.Clone); err != nil {
+		return err
+	}
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(resp.Clone)
+	}
+	if resp.Clone.Registered {
+		cmd.Printf("Cloned %s to %s\n", resp.Clone.Alias, resp.Clone.Path)
+	} else {
+		cmd.Printf("Cloned reference to %s\n", resp.Clone.Path)
+	}
+	return nil
+}
 
 func runGitPush(cmd *cobra.Command, args []string) error {
 	workDir, err := os.Getwd()

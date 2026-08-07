@@ -16,6 +16,7 @@ import (
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/gitutil"
+	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -36,22 +37,33 @@ var (
 type repoContext struct {
 	WorkDir          string
 	ProjectAlias     string
+	Archived         bool
 	Provider         gitprovider.ProviderType
 	Host             string
 	BaseURL          string
 	Owner            string
 	Repo             string
 	RemoteURL        string
+	RegistryRemote   string
 	TokenEnv         string
 	Token            string
 	DefaultBase      string
 	DefaultBaseKnown bool
 	Branch           string
+	config           ogconfig.Config
 	githubBroker     githubapp.CredentialBroker
 }
 
 func resolveRepoContextFor(workDir string) (*repoContext, error) {
-	ctxInfo, err := resolveRemoteRepoContextFor(workDir)
+	return resolveRepoContextWith(
+		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+	)
+}
+
+func resolveRepoContextWith(
+	workDir string, projects *project.Store, cfg ogconfig.Config,
+) (*repoContext, error) {
+	ctxInfo, err := resolveRemoteRepoContextWith(workDir, projects, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -68,81 +80,182 @@ func resolveRepoContextFor(workDir string) (*repoContext, error) {
 }
 
 func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
-	}
-	requestedPath, err := filepath.Abs(workDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve working directory: %w", err)
-	}
-	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return nil, fmt.Errorf("not in a git repository: %w", err)
-	}
-	root = filepath.Clean(root)
-	catalog, err := project.OpenCatalog(config.ProjectsPath())
+	return resolveRemoteRepoContextWith(
+		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+	)
+}
+
+func resolveRemoteRepoContextWith(
+	workDir string, projects *project.Store, cfg ogconfig.Config,
+) (*repoContext, error) {
+	root, entry, err := resolveRegisteredRepo(workDir, projects)
 	if err != nil {
 		return nil, err
 	}
-	registeredInput, inputErr := catalog.GetByPath(requestedPath)
-	if inputErr == nil && registeredInput.Path != root {
-		return nil, fmt.Errorf(
-			"registered project %q path %q must be the Git top-level %q",
-			registeredInput.Alias, registeredInput.Path, root,
-		)
-	}
-	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
-		return nil, inputErr
-	}
-	e, err := catalog.GetByPath(root)
-	if errors.Is(err, project.ErrNotFound) {
-		return nil, fmt.Errorf("workdir %q is not inside a registered project", root)
-	}
+	info, err := gitprovider.ParseHTTPRemoteURL(entry.Remote)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse registered remote: %w", err)
 	}
-	remote, err := gitOutput(root, "remote", "get-url", remoteOrigin)
+	provider, err := cfg.ClassifyRemote(info)
 	if err != nil {
-		return nil, fmt.Errorf("get origin remote: %w", err)
+		return nil, fmt.Errorf("classify origin remote: %w", err)
 	}
-	info, err := gitprovider.ParseRemoteURL(remote)
-	if err != nil {
-		return nil, err
-	}
-	tokenEnv := tokenEnvFor(info.Provider)
+	info.Provider = provider
+	tokenEnv := tokenEnvFor(provider)
 	token := ""
 	if tokenEnv != "" {
 		token = os.Getenv(tokenEnv)
 	}
 	return &repoContext{
-		WorkDir:      root,
-		ProjectAlias: e.Alias,
-		Provider:     info.Provider,
-		Host:         info.Host,
-		BaseURL:      info.BaseURL,
-		Owner:        info.Owner,
-		Repo:         info.Repo,
-		RemoteURL:    remote,
-		TokenEnv:     tokenEnv,
-		Token:        token,
+		WorkDir:        root,
+		ProjectAlias:   entry.Alias,
+		Archived:       entry.Archived,
+		Provider:       info.Provider,
+		Host:           info.Host,
+		BaseURL:        info.BaseURL,
+		Owner:          info.Owner,
+		Repo:           info.Repo,
+		RemoteURL:      entry.Remote,
+		RegistryRemote: entry.Remote,
+		TokenEnv:       tokenEnv,
+		Token:          token,
+		config:         cfg,
 	}, nil
 }
 
+func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error {
+	if ctxInfo.WorkDir == "" || ctxInfo.RemoteURL == "" || ctxInfo.BaseURL == "" {
+		return nil
+	}
+	remote, err := controlledGitOutput(ctxInfo.WorkDir, "remote", "get-url", remoteOrigin)
+	if err != nil {
+		return fmt.Errorf("origin fetch target cannot be verified")
+	}
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
+	if err != nil {
+		return fmt.Errorf("origin fetch target is not an allowed HTTP(S) repository")
+	}
+	provider, err := ctxInfo.config.ClassifyRemote(info)
+	expected := ctxInfo.RegistryRemote
+	if expected == "" {
+		expected = ctxInfo.RemoteURL
+	}
+	if err != nil || provider != ctxInfo.Provider || info.CanonicalURL != expected {
+		return fmt.Errorf("origin fetch target does not match registered remote")
+	}
+	if requirePush {
+		if err := validatePushTargets(ctxInfo.WorkDir, ctxInfo.config, expected, provider); err != nil {
+			return err
+		}
+	}
+	ctxInfo.RemoteURL = remote
+	return nil
+}
+
+func validatePushTargets(
+	workDir string,
+	cfg ogconfig.Config,
+	expected string,
+	fetchProvider gitprovider.ProviderType,
+) error {
+	out, err := controlledGitOutput(workDir, "remote", "get-url", "--push", "--all", remoteOrigin)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return fmt.Errorf("origin push target cannot be verified")
+	}
+	for _, raw := range strings.Split(out, "\n") {
+		raw = strings.TrimSpace(raw)
+		pushInfo, parseErr := gitprovider.ParseHTTPRemoteURL(raw)
+		if parseErr != nil {
+			return fmt.Errorf("origin push target is not an allowed HTTP(S) repository")
+		}
+		pushProvider, classifyErr := cfg.ClassifyRemote(pushInfo)
+		if classifyErr != nil || pushProvider != fetchProvider || pushInfo.CanonicalURL != expected {
+			return fmt.Errorf("origin push target does not match registered remote")
+		}
+	}
+	return nil
+}
+
+func resolveRegisteredRepo(workDir string, projects *project.Store) (string, project.Entry, error) {
+	if workDir == "" {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return "", project.Entry{}, fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	requestedPath, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", project.Entry{}, fmt.Errorf("resolve working directory: %w", err)
+	}
+	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", project.Entry{}, fmt.Errorf("not in a git repository: %w", err)
+	}
+	root = filepath.Clean(root)
+	if projects == nil {
+		return "", project.Entry{}, fmt.Errorf("project store is not configured")
+	}
+	registeredInput, inputErr := projects.GetByPath(requestedPath)
+	if inputErr == nil {
+		if !sameRealPath(registeredInput.Path, root) {
+			return "", project.Entry{}, fmt.Errorf(
+				"registered project %q path %q must be the Git top-level %q",
+				registeredInput.Alias, registeredInput.Path, root,
+			)
+		}
+		return root, registeredInput, nil
+	}
+	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
+		return "", project.Entry{}, inputErr
+	}
+	entry, err := projects.GetByPath(root)
+	if errors.Is(err, project.ErrNotFound) {
+		entries, listErr := projects.List(true)
+		if listErr != nil {
+			return "", project.Entry{}, listErr
+		}
+		for _, candidate := range entries {
+			if sameRealPath(candidate.Path, root) {
+				return root, candidate, nil
+			}
+		}
+		return "", project.Entry{}, fmt.Errorf("workdir %q is not inside a registered project", root)
+	}
+	if err != nil {
+		return "", project.Entry{}, err
+	}
+	return root, entry, nil
+}
+
+func sameRealPath(left, right string) bool {
+	realLeft, leftErr := filepath.EvalSymlinks(left)
+	realRight, rightErr := filepath.EvalSymlinks(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(realLeft) == filepath.Clean(realRight)
+}
+
 func tokenEnvFor(provider gitprovider.ProviderType) string {
-	if provider == gitprovider.ProviderGitHub {
+	if provider != gitprovider.ProviderForgejo {
 		return ""
 	}
 	return gitutil.ForgeTokenEnv()
 }
 
 func gitOutput(workDir string, args ...string) (string, error) {
+	return gitOutputWithEnv(workDir, gitutil.AnonymousGitEnv(os.Environ()), args...)
+}
+
+func controlledGitOutput(workDir string, args ...string) (string, error) {
+	return gitOutput(workDir, args...)
+}
+
+func gitOutputWithEnv(workDir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
+	if env != nil {
+		cmd.Env = env
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -154,6 +267,7 @@ func runGit(workDir string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
+	cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -168,6 +282,9 @@ type gitAuthentication struct {
 var runGitWithCredsFunc = runGitWithCredsImpl
 
 func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...string) error {
+	if err := validateCurrentRemoteTargets(ctxInfo, purpose == githubapp.PurposeGitWrite); err != nil {
+		return err
+	}
 	auth, err := gitAuthenticationFor(ctxInfo, purpose)
 	if err != nil {
 		return err
@@ -186,7 +303,13 @@ func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...st
 }
 
 func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitAuthentication, error) {
-	if ctxInfo.Provider != gitprovider.ProviderGitHub {
+	if ctxInfo.Provider == gitprovider.ProviderGeneric {
+		if purpose != githubapp.PurposeGitRead {
+			return gitAuthentication{}, fmt.Errorf("generic HTTPS repository is read-only")
+		}
+		return gitAuthentication{}, nil
+	}
+	if ctxInfo.Provider == gitprovider.ProviderForgejo {
 		if err := requireToken(ctxInfo); err != nil {
 			return gitAuthentication{}, err
 		}
@@ -206,22 +329,53 @@ func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitA
 	return gitAuthentication{token: token}, nil
 }
 
+func requireRemoteWrite(ctxInfo *repoContext, operation string) error {
+	if ctxInfo.Archived {
+		return fmt.Errorf("archived repository is read-only: refusing %s", operation)
+	}
+	if ctxInfo.Provider == gitprovider.ProviderGeneric {
+		return fmt.Errorf("generic HTTPS repository is read-only: refusing %s", operation)
+	}
+	return nil
+}
+
+func requireGitPushTarget(ctxInfo *repoContext, operation string) error {
+	if err := validateCurrentRemoteTargets(ctxInfo, true); err != nil {
+		return fmt.Errorf("refusing %s: %w", operation, err)
+	}
+	return nil
+}
+
 func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
-	if ctxInfo.Provider == gitprovider.ProviderGitHub {
+	switch ctxInfo.Provider {
+	case gitprovider.ProviderGitHub:
 		cmd.Env = gitutil.GitHubAppGitEnv(
 			os.Environ(), ctxInfo.RemoteURL, ctxInfo.Owner, ctxInfo.Repo, auth.token,
 		)
-	} else {
-		cmd.Env = append(os.Environ(), gitutil.GitCredEnvWithToken(auth.token)...)
+	case gitprovider.ProviderGeneric:
+		cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
+	default:
+		cmd.Env = gitutil.ForgejoGitEnv(os.Environ(), auth.token)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return fmt.Errorf(
+			"git %s: %w: %s",
+			strings.Join(args, " "), err, redactSecret(string(out), auth.token),
+		)
 	}
 	return nil
+}
+
+func redactSecret(value, secret string) string {
+	value = strings.TrimSpace(value)
+	if secret == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, secret, "[REDACTED]")
 }
 
 func confirmedGitAuthenticationFailure(err error) bool {
@@ -370,6 +524,9 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) 
 }
 
 func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
+	if err := requireGitPushTarget(ctxInfo, "closed PR branch cleanup"); err != nil {
+		return err
+	}
 	if err := ensureCleanBranchForCleanup(ctxInfo, prMerged); err != nil {
 		return err
 	}

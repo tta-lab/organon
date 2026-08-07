@@ -1,18 +1,26 @@
 package og
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Request is the typed local daemon request.
 type Request struct {
-	WorkDir string  `json:"work_dir"`
-	Force   bool    `json:"force,omitempty"`
-	Tag     string  `json:"tag,omitempty"`
-	Bump    string  `json:"bump,omitempty"`
-	Title   *string `json:"title,omitempty"`
-	Body    *string `json:"body,omitempty"`
-	Index   int64   `json:"index,omitempty"`
-	State   string  `json:"state,omitempty"`
-	Tail    int     `json:"tail,omitempty"`
+	Context   context.Context `json:"-"`
+	WorkDir   string          `json:"work_dir,omitempty"`
+	Project   string          `json:"project,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	Alias     string          `json:"alias,omitempty"`
+	Reference bool            `json:"reference,omitempty"`
+	Force     bool            `json:"force,omitempty"`
+	Tag       string          `json:"tag,omitempty"`
+	Bump      string          `json:"bump,omitempty"`
+	Title     *string         `json:"title,omitempty"`
+	Body      *string         `json:"body,omitempty"`
+	Index     int64           `json:"index,omitempty"`
+	State     string          `json:"state,omitempty"`
+	Tail      int             `json:"tail,omitempty"`
 }
 
 // Response is the typed local daemon response.
@@ -24,6 +32,21 @@ type Response struct {
 	Comment *Comment     `json:"comment,omitempty"`
 	Auth    *AuthStatus  `json:"auth,omitempty"`
 	Lines   []string     `json:"lines,omitempty"`
+	Clone   *CloneResult `json:"clone,omitempty"`
+}
+
+// CloneResult is the stable, secret-free identity of a cloned checkout.
+type CloneResult struct {
+	Alias          string `json:"alias,omitempty"`
+	Path           string `json:"path"`
+	Host           string `json:"host"`
+	Owner          string `json:"owner"`
+	Repo           string `json:"repo"`
+	Provider       string `json:"provider"`
+	Remote         string `json:"remote"`
+	Registered     bool   `json:"registered"`
+	Archived       bool   `json:"archived"`
+	AlreadyExisted bool   `json:"already_existed"`
 }
 
 // Comment is the stable comment shape returned by the daemon.

@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tta-lab/organon/internal/og"
+	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -30,19 +31,16 @@ func (c recordingOGCaller) CallContext(ctx context.Context, path string, req og.
 	return c.call(ctx, path, req)
 }
 
-func testOGCatalog(t *testing.T) *project.Catalog {
+func testOGStore(t *testing.T) *project.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "projects.toml")
 	content := "[organon]\nname = \"Organon\"\n" +
-		"path = \"/work/code/projects/tta-lab/organon\"\n"
+		"path = \"/work/code/projects/tta-lab/organon\"\n" +
+		"remote = \"https://github.com/tta-lab/organon.git\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := project.OpenCatalog(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
+	return project.NewStore(path)
 }
 
 func connectOGMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
@@ -67,13 +65,13 @@ func TestOGMCPListsCLIParityTools(t *testing.T) {
 	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
 		return og.Response{}, nil
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	result, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantNames := []string{
-		"auth_status", "pr_checks", "pr_comment", "pr_create", "pr_failures", "pr_find", "pr_get",
+		"auth_status", "clone", "pr_checks", "pr_comment", "pr_create", "pr_failures", "pr_find", "pr_get",
 		"pr_log", "pr_modify", "pull", "push",
 	}
 	gotNames := make([]string, 0, len(result.Tools))
@@ -94,8 +92,20 @@ func assertOGToolContract(t *testing.T, tool *mcp.Tool) {
 	}
 	assertOGToolAnnotations(t, tool)
 	properties := decodeToolProperties(t, tool)
-	if properties["project"] == nil {
+	assertOGToolSelectorSchema(t, tool, properties)
+	assertOGToolPRIDSchema(t, tool, properties)
+	assertRequiredInput(t, tool)
+	assertOGToolDefaults(t, tool, properties)
+}
+
+func assertOGToolSelectorSchema(t *testing.T, tool *mcp.Tool, properties map[string]*jsonschema.Schema) {
+	t.Helper()
+	if tool.Name != "clone" && properties["project"] == nil {
 		t.Fatalf("tool %q input lacks project", tool.Name)
+	}
+	if tool.Name == "clone" &&
+		(properties["url"] == nil || properties["alias"] == nil || properties["reference"] == nil) {
+		t.Fatalf("clone input properties = %v", properties)
 	}
 	for _, forbidden := range []string{
 		"work_dir", "path", "cwd", "root", "roots", "uri", "file_uri", "token", "token_env",
@@ -104,6 +114,10 @@ func assertOGToolContract(t *testing.T, tool *mcp.Tool) {
 			t.Fatalf("tool %q exposes forbidden input %q", tool.Name, forbidden)
 		}
 	}
+}
+
+func assertOGToolPRIDSchema(t *testing.T, tool *mcp.Tool, properties map[string]*jsonschema.Schema) {
+	t.Helper()
 	if ogToolHasPRID(tool.Name) && properties["pr_id"] == nil {
 		t.Fatalf("tool %q input lacks pr_id", tool.Name)
 	}
@@ -115,8 +129,6 @@ func assertOGToolContract(t *testing.T, tool *mcp.Tool) {
 			t.Fatalf("tool %q pr_id minimum = %#v, want 1", tool.Name, prID.Minimum)
 		}
 	}
-	assertRequiredInput(t, tool)
-	assertOGToolDefaults(t, tool, properties)
 }
 
 func assertOGToolDefaults(t *testing.T, tool *mcp.Tool, properties map[string]*jsonschema.Schema) {
@@ -127,6 +139,11 @@ func assertOGToolDefaults(t *testing.T, tool *mcp.Tool, properties map[string]*j
 	if tool.Name == "push" {
 		if force := properties["force"]; force == nil || string(force.Default) != "false" {
 			t.Fatalf("tool %q force schema = %#v", tool.Name, force)
+		}
+	}
+	if tool.Name == "clone" {
+		if reference := properties["reference"]; reference == nil || string(reference.Default) != "false" {
+			t.Fatalf("tool %q reference schema = %#v", tool.Name, reference)
 		}
 	}
 	if tool.Name == "pr_find" {
@@ -161,14 +178,27 @@ func assertRequiredInput(t *testing.T, tool *mcp.Tool) {
 	for _, name := range schema.Required {
 		required[name] = true
 	}
-	if !required["project"] {
+	if tool.Name != "clone" && !required["project"] {
 		t.Fatalf("tool %q required inputs = %v", tool.Name, schema.Required)
+	}
+	if tool.Name == "clone" {
+		assertCloneSelectorContract(t, &schema, required)
 	}
 	if required["pr_id"] {
 		t.Fatalf("tool %q unexpectedly requires pr_id: %v", tool.Name, schema.Required)
 	}
 	if tool.Name == "pr_create" && !required["title"] {
 		t.Fatalf("tool %q required inputs = %v, want title", tool.Name, schema.Required)
+	}
+}
+
+func assertCloneSelectorContract(t *testing.T, schema *jsonschema.Schema, required map[string]bool) {
+	t.Helper()
+	if required["url"] || required["project"] || required["alias"] || required["reference"] {
+		t.Fatalf("clone required inputs = %v", schema.Required)
+	}
+	if len(schema.OneOf) != 2 {
+		t.Fatalf("clone oneOf = %#v, want project-or-url selector", schema.OneOf)
 	}
 }
 
@@ -184,6 +214,9 @@ func assertOGToolAnnotations(t *testing.T, tool *mcp.Tool) {
 	}
 	if tool.Name == "pr_comment" || tool.Name == "pr_create" {
 		wantReadOnly, wantIdempotent = false, false
+	}
+	if tool.Name == "clone" {
+		wantReadOnly, wantDestructive, wantIdempotent = false, false, true
 	}
 	if annotations.ReadOnlyHint != wantReadOnly || annotations.IdempotentHint != wantIdempotent ||
 		annotations.DestructiveHint == nil || *annotations.DestructiveHint != wantDestructive {
@@ -217,7 +250,7 @@ func assertTailSchema(t *testing.T, name string, tail *jsonschema.Schema) {
 func TestOGMCPResolvesAliasAndReturnsStructuredResults(t *testing.T) {
 	pr := &og.PullRequest{Index: 17, Title: "typed MCP", Body: "body", State: "open", URL: "https://forge/pr/17"}
 	comment := &og.Comment{ID: 44, PRID: 17, Body: "line one\nline two", URL: "https://forge/pr/17#comment-44"}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), structuredOGCaller(t, pr, comment)))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), structuredOGCaller(t, pr, comment)))
 	tests := []struct {
 		name string
 		args map[string]any
@@ -234,6 +267,119 @@ func TestOGMCPResolvesAliasAndReturnsStructuredResults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assertStructuredOGCall(t, session, tt.name, tt.args, tt.key)
 		})
+	}
+}
+
+func TestOGMCPCloneRoutesURLWithoutProjectPathOrToken(t *testing.T) {
+	want := &og.CloneResult{
+		Alias: "example", Path: "/home/neil/code/projects/tta-lab/example", Host: "codeberg.org",
+		Owner: "tta-lab", Repo: "example", Provider: "generic",
+		Remote: "https://codeberg.org/tta-lab/example.git", Registered: true,
+	}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		if path != "/git/clone" {
+			t.Fatalf("daemon path = %q", path)
+		}
+		if req.URL != "https://codeberg.org/tta-lab/example.git" || req.Alias != "example" || req.Reference {
+			t.Fatalf("clone request = %+v", req)
+		}
+		if req.WorkDir != "" {
+			t.Fatalf("clone work_dir = %q", req.WorkDir)
+		}
+		return og.Response{OK: true, Clone: want}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "clone", Arguments: map[string]any{
+			"url": "https://codeberg.org/tta-lab/example.git", "alias": "example",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), want.Path) ||
+		!strings.Contains(fmt.Sprint(result.StructuredContent), want.Remote) {
+		t.Fatalf("clone result = %#v", result)
+	}
+}
+
+func TestOGMCPCloneRoutesProjectAlias(t *testing.T) {
+	want := &og.CloneResult{
+		Alias: "organon", Path: "/work/code/projects/tta-lab/organon", Host: "github.com",
+		Owner: "tta-lab", Repo: "organon", Provider: "github",
+		Remote: "https://github.com/tta-lab/organon.git", Registered: true,
+	}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		if path != "/git/clone" || req.Project != "organon" || req.URL != "" || req.Alias != "" || req.Reference {
+			t.Fatalf("clone request = %+v path=%q", req, path)
+		}
+		return og.Response{OK: true, Clone: want}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "clone", Arguments: map[string]any{"project": "organon"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("clone result = %#v", result)
+	}
+}
+
+func TestOGMCPCloneRejectsInvalidSelectorCombinations(t *testing.T) {
+	calls := 0
+	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
+		calls++
+		return og.Response{}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
+	for _, args := range []map[string]any{
+		{},
+		{"project": "organon", "url": "https://github.com/tta-lab/organon.git"},
+		{"project": "organon", "alias": "other"},
+		{"project": "organon", "reference": true},
+		{"reference": true},
+		{"url": "https://github.com/tta-lab/organon.git", "reference": true, "alias": "other"},
+	} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "clone", Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.IsError {
+			t.Fatalf("clone(%v) succeeded", args)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("daemon calls = %d, want 0", calls)
+	}
+}
+
+func TestOGMCPReadsNewAliasWithoutRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	content := "[organon]\npath = \"/work/organon\"\n" +
+		"remote = \"https://github.com/tta-lab/organon.git\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	caller := recordingOGCaller{call: func(_ context.Context, path string, req og.Request) (og.Response, error) {
+		return og.Response{OK: true, Auth: &og.AuthStatus{Project: filepath.Base(req.WorkDir), Ready: true}}, nil
+	}}
+	session := connectOGMCP(t, newOGMCPServer(project.NewStore(path), caller))
+	if err := os.WriteFile(path, []byte(
+		"[organon]\npath = \"/work/organon\"\nremote = \"https://github.com/tta-lab/organon.git\"\n\n"+
+			"[newrepo]\npath = \"/work/newrepo\"\nremote = \"https://github.com/tta-lab/newrepo.git\"\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "auth_status", Arguments: map[string]any{"project": "newrepo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("hot alias result = %#v", result)
 	}
 }
 
@@ -274,7 +420,7 @@ func TestOGMCPRoutesWorktreeToolsThroughRegisteredAlias(t *testing.T) {
 			return og.Response{}, nil
 		}
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	tests := []struct {
 		name string
 		args map[string]any
@@ -318,7 +464,7 @@ func TestOGMCPCurrentBranchPRToolsAllowOmittedPRID(t *testing.T) {
 			return og.Response{}, nil
 		}
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	tests := []struct {
 		name string
 		args map[string]any
@@ -400,6 +546,22 @@ func assertStructuredOGCall(
 }
 
 func TestOGMCPPassesCancellationToDaemon(t *testing.T) {
+	tools := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "pr_get", args: map[string]any{"project": "organon", "pr_id": 17}},
+		{name: "clone", args: map[string]any{"url": "https://codeberg.org/tta-lab/example.git"}},
+	}
+	for _, tool := range tools {
+		t.Run(tool.name, func(t *testing.T) {
+			assertOGMCPCancellation(t, tool.name, tool.args)
+		})
+	}
+}
+
+func assertOGMCPCancellation(t *testing.T, name string, args map[string]any) {
+	t.Helper()
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	caller := recordingOGCaller{call: func(ctx context.Context, _ string, _ og.Request) (og.Response, error) {
@@ -408,14 +570,12 @@ func TestOGMCPPassesCancellationToDaemon(t *testing.T) {
 		close(canceled)
 		return og.Response{}, ctx.Err()
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = session.CallTool(ctx, &mcp.CallToolParams{
-			Name: "pr_get", Arguments: map[string]any{"project": "organon", "pr_id": 17},
-		})
+		_, _ = session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	}()
 	select {
 	case <-started:
@@ -432,7 +592,7 @@ func TestOGMCPPassesCancellationToDaemon(t *testing.T) {
 }
 
 func TestOGMCPModifyPreservesFieldPresence(t *testing.T) {
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), modifyPresenceCaller(t)))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), modifyPresenceCaller(t)))
 	for _, args := range []map[string]any{
 		{"project": "organon", "pr_id": 23, "title": "new title"},
 		{"project": "organon", "pr_id": 23, "body": "line one\nline two"},
@@ -493,7 +653,7 @@ func TestOGMCPRejectsInvalidInputsAndDaemonFailuresAsToolErrors(t *testing.T) {
 	caller := recordingOGCaller{call: func(_ context.Context, _ string, _ og.Request) (og.Response, error) {
 		return og.Response{}, fmt.Errorf("daemon unavailable")
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	tests := []struct {
 		name string
 		args map[string]any
@@ -541,7 +701,7 @@ func TestOGMCPRejectsExplicitZeroOptionalPRID(t *testing.T) {
 			return og.Response{OK: true, PR: &og.PullRequest{Index: 22}}, nil
 		}
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	tests := []struct {
 		name string
 		args map[string]any
@@ -590,13 +750,20 @@ func TestOGMCPRejectsMismatchedDaemonIdentity(t *testing.T) {
 				ID: 1, PRID: 8, Body: "body", URL: "https://forge/pr/8#comment-1",
 			}},
 		},
+		{
+			name: "clone", args: map[string]any{"url": "https://codeberg.org/tta-lab/example.git"},
+			resp: og.Response{OK: true, Clone: &og.CloneResult{
+				Path: "/tmp/example", Host: "codeberg.org", Owner: "tta-lab", Repo: "example",
+				Provider: "unknown", Remote: "https://user:secret@codeberg.org/tta-lab/example.git",
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
 				return tt.resp, nil
 			}}
-			session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+			session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 				Name: tt.name, Arguments: tt.args,
 			})
@@ -625,7 +792,7 @@ func TestOGMCPRejectsInvalidWorktreeDaemonResults(t *testing.T) {
 			caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
 				return tt.resp, nil
 			}}
-			session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+			session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 			args := map[string]any{"project": "organon"}
 			if tt.name == "pr_create" {
 				args["title"] = "title"
@@ -645,7 +812,7 @@ func TestOGMCPAcceptsWorktreePRWithoutDisplayURL(t *testing.T) {
 	caller := recordingOGCaller{call: func(context.Context, string, og.Request) (og.Response, error) {
 		return og.Response{OK: true, PR: &og.PullRequest{Index: 7, Title: "feature"}}, nil
 	}}
-	session := connectOGMCP(t, newOGMCPServer(testOGCatalog(t), caller))
+	session := connectOGMCP(t, newOGMCPServer(testOGStore(t), caller))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "pr_get", Arguments: map[string]any{"project": "organon"},
 	})
@@ -688,15 +855,98 @@ func TestOGMCPCommandTransport(t *testing.T) {
 	}
 }
 
+func TestOGMCPCommandTransportClonesAllowedForgejoHTTPAndHotRegisters(t *testing.T) {
+	home := t.TempDir()
+	writeOGMCPConfigContent(t, home, "")
+	gitServer := newDumbGitHTTPServer(t)
+	defer gitServer.Close()
+	t.Setenv("HOME", home)
+	store := project.NewStore(filepath.Join(home, ".config", "ttal", "projects.toml"))
+	service := og.NewServiceWithConfig(nil, store, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{gitServer.URL}},
+	})
+	daemon := httptest.NewServer(og.NewMux(service))
+	defer daemon.Close()
+
+	command := exec.Command(os.Args[0], "-test.run=TestOGMCPCommandHelper")
+	command.Env = append(os.Environ(), "GO_WANT_OG_MCP_HELPER=1", "HOME="+home, "OG_DAEMON_URL="+daemon.URL)
+	client := mcp.NewClient(&mcp.Implementation{Name: "og-clone-command-test", Version: "test"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatalf("connect command transport: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	remote := gitServer.URL + "/tta-lab/example.git"
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "clone", Arguments: map[string]any{"url": remote, "alias": "example"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(home, "code", "projects", "tta-lab", "example")
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), wantPath) ||
+		!strings.Contains(fmt.Sprint(result.StructuredContent), "forgejo") {
+		t.Fatalf("clone result = %#v", result)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "auth_status", Arguments: map[string]any{"project": "example"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "forgejo") {
+		t.Fatalf("hot registered auth result = %#v", result)
+	}
+}
+
 func writeOGMCPConfig(t *testing.T, home string) {
+	t.Helper()
+	writeOGMCPConfigContent(t, home,
+		"[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n"+
+			"remote = \"https://github.com/tta-lab/organon.git\"\n")
+}
+
+func writeOGMCPConfigContent(t *testing.T, home, content string) {
 	t.Helper()
 	configDir := filepath.Join(home, ".config", "ttal")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func newDumbGitHTTPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	webRoot := t.TempDir()
+	bare := filepath.Join(webRoot, "tta-lab", "example.git")
+	work := filepath.Join(t.TempDir(), "work")
+	if err := os.MkdirAll(filepath.Dir(bare), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitFixture(t, "init", "--bare", bare)
+	runGitFixture(t, "init", "-b", "main", work)
+	runGitFixture(t, "-C", work, "config", "user.name", "Test")
+	runGitFixture(t, "-C", work, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitFixture(t, "-C", work, "add", "README.md")
+	runGitFixture(t, "-C", work, "commit", "-m", "fixture")
+	runGitFixture(t, "-C", work, "remote", "add", "origin", bare)
+	runGitFixture(t, "-C", work, "push", "origin", "main")
+	runGitFixture(t, "--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGitFixture(t, "--git-dir", bare, "update-server-info")
+	return httptest.NewServer(http.FileServer(http.Dir(webRoot)))
+}
+
+func runGitFixture(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 
@@ -745,7 +995,7 @@ func newOGMCPTestDaemon(t *testing.T) *httptest.Server {
 func assertOGCommandSession(t *testing.T, session *mcp.ClientSession) {
 	t.Helper()
 	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil || len(tools.Tools) != 11 {
+	if err != nil || len(tools.Tools) != 12 {
 		t.Fatalf("tools = %#v, err = %v", tools, err)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{

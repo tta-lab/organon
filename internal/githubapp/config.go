@@ -3,8 +3,6 @@ package githubapp
 import (
 	"fmt"
 	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 // Config is the validated GitHub App section of og.toml.
@@ -15,23 +13,8 @@ type Config struct {
 	AllowedOwners []string `toml:"allowed_owners"`
 }
 
-type configFile struct {
-	GitHubApp Config `toml:"github_app"`
-}
-
-// LoadConfig reads and validates GitHub App configuration from path.
-func LoadConfig(path string) (Config, error) {
-	var file configFile
-	if _, err := toml.DecodeFile(path, &file); err != nil {
-		return Config{}, fmt.Errorf("read GitHub App config %s: %w", path, err)
-	}
-	if err := file.GitHubApp.validate(); err != nil {
-		return Config{}, err
-	}
-	return file.GitHubApp, nil
-}
-
-func (c *Config) validate() error {
+// Validate normalizes and validates a GitHub App configuration section.
+func (c *Config) Validate() error {
 	if c.AppID <= 0 {
 		return fmt.Errorf("github_app.app_id must be a positive integer")
 	}

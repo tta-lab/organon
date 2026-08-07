@@ -1,24 +1,17 @@
 package githubapp
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadConfigNormalizesAllowedOwners(t *testing.T) {
-	path := writeConfig(t, `
-[github_app]
-app_id = 12345
-key_source = "file"
-key_ref = "og/github-app.pem"
-allowed_owners = ["tta-lab", "GuionAI", "LamplitIsles"]
-`)
-
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
+func TestConfigValidateNormalizesAllowedOwners(t *testing.T) {
+	cfg := Config{
+		AppID: 12345, KeySource: "file", KeyRef: "og/github-app.pem",
+		AllowedOwners: []string{"tta-lab", "GuionAI", "LamplitIsles"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 	if cfg.AppID != 12345 || cfg.KeySource != "file" || cfg.KeyRef != "og/github-app.pem" {
 		t.Fatalf("config = %+v", cfg)
@@ -32,34 +25,37 @@ allowed_owners = ["tta-lab", "GuionAI", "LamplitIsles"]
 	}
 }
 
-func TestLoadConfigRejectsInvalidFields(t *testing.T) {
+func TestConfigValidateRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
 		name    string
-		body    string
+		config  Config
 		wantErr string
 	}{
-		{"missing app id", `key_source = "file"\nkey_ref = "key.pem"\nallowed_owners = ["tta-lab"]`, "app_id"},
-		{"missing key source", `app_id = 1\nkey_ref = "key.pem"\nallowed_owners = ["tta-lab"]`, "key_source"},
+		{"missing app id", Config{KeySource: "file", KeyRef: "key.pem", AllowedOwners: []string{"tta-lab"}}, "app_id"},
+		{"missing key source", Config{AppID: 1, KeyRef: "key.pem", AllowedOwners: []string{"tta-lab"}}, "key_source"},
 		{
 			"unknown key source",
-			`app_id = 1\nkey_source = "keychain"\nkey_ref = "key.pem"\nallowed_owners = ["tta-lab"]`,
+			Config{AppID: 1, KeySource: "keychain", KeyRef: "key.pem", AllowedOwners: []string{"tta-lab"}},
 			"key_source",
 		},
-		{"missing key ref", `app_id = 1\nkey_source = "file"\nallowed_owners = ["tta-lab"]`, "key_ref"},
-		{"missing owners", `app_id = 1\nkey_source = "file"\nkey_ref = "key.pem"`, "allowed_owners"},
-		{"empty owner", `app_id = 1\nkey_source = "file"\nkey_ref = "key.pem"\nallowed_owners = [""]`, "allowed_owners"},
+		{"missing key ref", Config{AppID: 1, KeySource: "file", AllowedOwners: []string{"tta-lab"}}, "key_ref"},
+		{"missing owners", Config{AppID: 1, KeySource: "file", KeyRef: "key.pem"}, "allowed_owners"},
+		{
+			"empty owner",
+			Config{AppID: 1, KeySource: "file", KeyRef: "key.pem", AllowedOwners: []string{""}},
+			"allowed_owners",
+		},
 		{
 			"duplicate owner",
-			`app_id = 1\nkey_source = "file"\nkey_ref = "key.pem"\nallowed_owners = ["tta-lab", "TTA-LAB"]`,
+			Config{AppID: 1, KeySource: "file", KeyRef: "key.pem", AllowedOwners: []string{"tta-lab", "TTA-LAB"}},
 			"duplicate",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := writeConfig(t, "[github_app]\n"+tt.body)
-			_, err := LoadConfig(path)
+			err := tt.config.Validate()
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("LoadConfig error = %v, want containing %q", err, tt.wantErr)
+				t.Fatalf("Validate error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
@@ -71,14 +67,4 @@ func TestConfigRejectsOwnerOutsideAllowlist(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "outsider") || !strings.Contains(err.Error(), "allowed_owners") {
 		t.Fatalf("RequireOwner error = %v", err)
 	}
-}
-
-func writeConfig(t *testing.T, body string) string {
-	t.Helper()
-	body = strings.ReplaceAll(body, `\n`, "\n")
-	path := filepath.Join(t.TempDir(), "og.toml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	return path
 }

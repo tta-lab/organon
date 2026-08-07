@@ -88,6 +88,80 @@ func TestPRCreateRejectsBlankTitleBeforeSideEffects(t *testing.T) {
 	}
 }
 
+func TestPRGetUsesRegistryIdentityWithoutInspectingPushTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/wrong/repo.git")
+	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
+		if ctx.Owner != "tta-lab" || ctx.Repo != "example" || ctx.Provider != gitprovider.ProviderGitHub {
+			t.Fatalf("provider context = %+v", ctx)
+		}
+		return fakeProvider{getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+			return &gitprovider.PullRequest{Index: index}, nil
+		}}, nil
+	})
+	defer restoreProvider()
+
+	resp, err := NewService(&recordingBroker{}).PRGet(Request{WorkDir: repo, Index: 7})
+	if err != nil {
+		t.Fatalf("PRGet: %v", err)
+	}
+	if resp.PR == nil || resp.PR.Index != 7 {
+		t.Fatalf("PR = %+v", resp.PR)
+	}
+}
+
+func TestArchivedAndGenericRepositoriesRejectPRWrites(t *testing.T) {
+	tests := []struct {
+		name     string
+		remote   string
+		archived bool
+	}{
+		{"archived GitHub", "https://github.com/tta-lab/example.git", true},
+		{"generic HTTPS", "https://codeberg.org/forgejo/forgejo.git", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, "feature/x", tt.remote, tt.archived)
+			gitCalled := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				gitCalled = true
+				return nil
+			})
+			defer restoreGit()
+			providerCalled := false
+			restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+				providerCalled = true
+				return fakeProvider{}, nil
+			})
+			defer restoreProvider()
+			title, body := "title", "body"
+			calls := map[string]func() error{
+				"create": func() error { _, err := NewService(nil).PRCreate(Request{WorkDir: repo, Title: &title}); return err },
+				"modify": func() error {
+					_, err := NewService(nil).PRModify(Request{WorkDir: repo, Index: 7, Title: &title})
+					return err
+				},
+				"comment": func() error {
+					_, err := NewService(nil).PRComment(Request{WorkDir: repo, Index: 7, Body: &body})
+					return err
+				},
+			}
+			for name, call := range calls {
+				if err := call(); err == nil || !strings.Contains(err.Error(), "read-only") {
+					t.Fatalf("%s error = %v, want read-only refusal", name, err)
+				}
+			}
+			if gitCalled || providerCalled {
+				t.Fatalf("PR write reached side effect: git=%v provider=%v", gitCalled, providerCalled)
+			}
+		})
+	}
+}
+
 func TestCreatePRRejectsInvalidProviderResult(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -492,6 +566,7 @@ func TestPRGetWithExplicitIDWorksOnDetachedHEAD(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
 	gitRun(t, repo, "checkout", "--detach")
 
 	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
@@ -520,6 +595,7 @@ func TestPRModifyMergesAbsentFieldsAndCanClearBody(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
 	gitRun(t, repo, "checkout", "--detach")
 
 	var edits [][2]string

@@ -2,12 +2,18 @@ package og
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/ogconfig"
+	"github.com/tta-lab/organon/internal/project"
 )
 
 func TestGitPushRequestsWritePurpose(t *testing.T) {
@@ -27,6 +33,126 @@ func TestGitPushRequestsWritePurpose(t *testing.T) {
 	}
 }
 
+func TestGitPushRejectsMismatchedPushURLBeforeCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(broker).GitPush(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "push target") {
+		t.Fatalf("GitPush error = %v, want push target mismatch", err)
+	}
+	if len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("write side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
+	}
+}
+
+func TestGitPullRejectsOriginThatDiffersFromRegistryBeforeCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, branchMain)
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(broker).GitPull(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("GitPull error = %v, want registry fetch-target mismatch", err)
+	}
+	if len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("side effects: broker=%v git=%d", broker.tokenCalls, runs)
+	}
+}
+
+func TestGitPullFeatureBranchRejectsOriginBeforeProviderCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	providerCalls := 0
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		providerCalls++
+		return fakeProvider{}, nil
+	})
+	defer restoreProvider()
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(broker).GitPull(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("GitPull error = %v, want registry fetch-target mismatch", err)
+	}
+	if providerCalls != 0 || len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("side effects: provider=%d broker=%v git=%d", providerCalls, broker.tokenCalls, runs)
+	}
+}
+
+func TestGitPushRunsRepositoryPrePushHook(t *testing.T) {
+	repo := testGitRepoWithRemote(t)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\nprintf ran > " + strconv.Quote(marker) + "\nexit 1\n"
+	hookPath := filepath.Join(repo, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(hookPath, []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runGitWithCredsImpl(
+		&repoContext{Provider: gitprovider.ProviderGeneric, WorkDir: repo},
+		gitAuthentication{}, "push", "origin", branchMain,
+	)
+	if err == nil {
+		t.Fatal("GitPush succeeded, want hook rejection")
+	}
+	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "ran" {
+		t.Fatalf("pre-push hook marker = %q, %v", data, readErr)
+	}
+}
+
+func TestRunGitWithCredsDoesNotExposeInjectedTokenInError(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	const token = "repo-scoped-secret"
+
+	err := runGitWithCredsImpl(
+		&repoContext{
+			Provider:  gitprovider.ProviderGitHub,
+			WorkDir:   t.TempDir(),
+			RemoteURL: "https://github.com/tta-lab/example.git",
+			Owner:     "tta-lab",
+			Repo:      "example",
+		},
+		gitAuthentication{token: token}, "push", remoteOrigin, "feature/x",
+	)
+	if err == nil {
+		t.Fatal("runGitWithCredsImpl succeeded, want failure")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("git error exposed injected token: %v", err)
+	}
+}
+
 func TestGitPullRequestsReadPurpose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -41,6 +167,52 @@ func TestGitPullRequestsReadPurpose(t *testing.T) {
 	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitRead}
 	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
 		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
+	}
+}
+
+func TestGitPullRejectsCredentialBearingOriginBeforeSideEffects(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		config ogconfig.Config
+	}{
+		{
+			name:   "generic userinfo",
+			origin: "https://user:secret@codeberg.org/tta-lab/example.git",
+		},
+		{
+			name:   "allowed Forgejo query",
+			origin: "http://forgejo.localhost:17480/tta-lab/example.git?token=secret",
+			config: ogconfig.Config{Forgejo: ogconfig.ForgejoConfig{
+				AllowedBaseURLs: []string{"http://forgejo.localhost:17480"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, branchMain)
+			gitRun(t, repo, "remote", "set-url", remoteOrigin, tt.origin)
+			broker := &recordingBroker{token: "must-not-mint"}
+			runs := 0
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				runs++
+				return nil
+			})
+			defer restoreGit()
+
+			service := NewServiceWithConfig(
+				broker, project.NewStore(config.ProjectsPath()), tt.config,
+			)
+			_, err := service.GitPull(Request{WorkDir: repo})
+			if err == nil {
+				t.Fatal("GitPull accepted credential-bearing origin")
+			}
+			if len(broker.tokenCalls) != 0 || runs != 0 {
+				t.Fatalf("side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
+			}
+		})
 	}
 }
 
@@ -79,6 +251,41 @@ func TestGitPullFeatureBranchFallsBackToAnonymousForUnmanagedRepository(t *testi
 				t.Fatalf("broker purposes = %v, want %v", gotPurposes, wantPurposes)
 			}
 		})
+	}
+}
+
+func TestCleanupRevalidatesRemoteAfterBranchSwitch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	conditional := filepath.Join(t.TempDir(), "main-remote.config")
+	if err := os.WriteFile(conditional, []byte(
+		"[url \"https://attacker.invalid/tta-lab/example.git\"]\n"+
+			"\tinsteadOf = https://github.com/tta-lab/example.git\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "--add", "includeIf.onbranch:main.path", conditional)
+	broker := &recordingBroker{token: "scoped-token"}
+	service := NewService(broker)
+	ctx, err := service.resolveRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRepoContextFor: %v", err)
+	}
+	var runs [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		runs = append(runs, append([]string(nil), args...))
+		return nil
+	})
+	defer restoreGit()
+
+	err = cleanupClosedPRBranch(ctx, true)
+	if err == nil || !strings.Contains(err.Error(), "fetch target") {
+		t.Fatalf("cleanupClosedPRBranch error = %v, want changed fetch target refusal", err)
+	}
+	if len(runs) != 1 || len(broker.tokenCalls) != 1 {
+		t.Fatalf("post-switch network side effects: git runs = %v, broker calls = %+v", runs, broker.tokenCalls)
 	}
 }
 
@@ -180,6 +387,137 @@ func TestGitPullDefaultBranch(t *testing.T) {
 	want := [][]string{{"pull", "--ff-only", remoteOrigin, branchMain}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("git calls = %v, want %v", calls, want)
+	}
+}
+
+func TestGitPullArchivedDefaultBranchIsReadOnlyFastForward(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://github.com/tta-lab/example.git", true)
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	var calls [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		t.Fatal("archived pull must not call provider API")
+		return nil, nil
+	})
+	defer restoreProvider()
+
+	if _, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	want := [][]string{{"pull", "--ff-only", remoteOrigin, branchMain}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("git calls = %v, want %v", calls, want)
+	}
+}
+
+func TestGitPullArchivedRepositoryRejectsUnsafeCheckout(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		setDefault bool
+		want       string
+	}{
+		{"feature branch", "feature/x", true, "default branch"},
+		{"unknown default", branchMain, false, "default branch is unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, tt.branch, "https://github.com/tta-lab/example.git", true)
+			if tt.setDefault {
+				gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+			}
+			called := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				called = true
+				return nil
+			})
+			defer restoreGit()
+
+			_, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GitPull error = %v, want containing %q", err, tt.want)
+			}
+			if called {
+				t.Fatal("GitPull reached the network after archived checkout refusal")
+			}
+		})
+	}
+}
+
+func TestGenericGitPullSkipsProviderAndBranchCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "must-not-leak")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://codeberg.org/forgejo/forgejo.git", false)
+	var gotAuth gitAuthentication
+	var gotArgs []string
+	restoreGit := stubRunGitWithAuthentication(t, func(
+		_ *repoContext, auth gitAuthentication, args ...string,
+	) error {
+		gotAuth = auth
+		gotArgs = append([]string(nil), args...)
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		t.Fatal("generic pull must not call provider API")
+		return nil, nil
+	})
+	defer restoreProvider()
+
+	if _, err := NewService(nil).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull: %v", err)
+	}
+	if gotAuth.token != "" {
+		t.Fatalf("generic pull token = %q, want anonymous", gotAuth.token)
+	}
+	want := []string{"pull", "--ff-only", remoteOrigin, "feature/x"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("git args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestArchivedAndGenericRepositoriesRejectGitWrites(t *testing.T) {
+	tests := []struct {
+		name     string
+		remote   string
+		archived bool
+	}{
+		{"archived GitHub", "https://github.com/tta-lab/example.git", true},
+		{"generic HTTPS", "https://codeberg.org/forgejo/forgejo.git", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredRepo(t, home, "feature/x", tt.remote, tt.archived)
+			called := false
+			restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+				called = true
+				return nil
+			})
+			defer restoreGit()
+
+			for name, call := range map[string]func() error{
+				"push": func() error { _, err := NewService(nil).GitPush(Request{WorkDir: repo}); return err },
+				"tag":  func() error { _, err := NewService(nil).GitTag(Request{WorkDir: repo, Tag: "v1.0.0"}); return err },
+			} {
+				if err := call(); err == nil || !strings.Contains(err.Error(), "read-only") {
+					t.Fatalf("%s error = %v, want read-only refusal", name, err)
+				}
+			}
+			if called {
+				t.Fatal("Git write reached network after policy refusal")
+			}
+		})
 	}
 }
 

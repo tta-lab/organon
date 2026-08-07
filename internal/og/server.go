@@ -24,6 +24,7 @@ func NewMux(service Service) *http.ServeMux {
 	mux.HandleFunc("/git/push", HTTPHandler(service.GitPush))
 	mux.HandleFunc("/git/pull", HTTPHandler(service.GitPull))
 	mux.HandleFunc("/git/tag", HTTPHandler(service.GitTag))
+	mux.HandleFunc("/git/clone", HTTPHandler(service.GitClone))
 	mux.HandleFunc("/pr/create", HTTPHandler(service.PRCreate))
 	mux.HandleFunc("/pr/view", HTTPHandler(service.PRView))
 	mux.HandleFunc("/pr/find", HTTPHandler(service.PRFind))
@@ -56,6 +57,7 @@ func HTTPHandler(fn HandlerFunc) http.HandlerFunc {
 			return
 		}
 		req := wire.Request
+		req.Context = r.Context()
 		resp, err := fn(req)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)

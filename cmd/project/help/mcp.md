@@ -1,15 +1,14 @@
-Serve typed, read-only project and org discovery tools over MCP stdio.
+Serve typed, read-only project discovery tools over MCP stdio.
 
-The server loads `projects.toml` and `orgs.toml` once at startup. Restart it
-after changing either file. Project lookup is exact and accepts only registered,
-single-layer aliases.
+Each tool reads the current `projects.toml`, so registry changes are visible on
+the next call without restarting the MCP process. Project lookup is exact and
+accepts only registered, single-layer aliases.
+Project results contain exactly alias, name, path, canonical remote, and archived.
 
 Tools:
 
-  project_list             # list projects, optionally filtered by org
+  project_list             # list projects, optionally including archived
   project_get              # get one project by exact alias
-  org_list                 # list organizations
-  org_get                  # get one organization by exact name
 
 Example MCP client configuration:
 

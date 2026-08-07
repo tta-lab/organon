@@ -12,6 +12,7 @@ type ProviderType string
 
 const (
 	ProviderForgejo ProviderType = "forgejo"
+	ProviderGeneric ProviderType = "generic"
 	ProviderGitHub  ProviderType = "github"
 )
 

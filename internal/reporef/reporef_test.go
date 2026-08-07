@@ -3,6 +3,7 @@ package reporef
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,9 +90,16 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-func TestDeriveOrg(t *testing.T) {
-	got := DeriveOrg("/home/neil/code/references/github.com/tta-lab/agon")
-	if got != "tta-lab" {
-		t.Errorf("expected tta-lab, got %s", got)
+func TestResolveMissingReferenceDoesNotClone(t *testing.T) {
+	references := t.TempDir()
+	_, err := Resolve("tta-lab/missing", references)
+	if err == nil {
+		t.Fatal("Resolve missing reference succeeded")
+	}
+	if !strings.Contains(err.Error(), "og clone --reference") {
+		t.Fatalf("Resolve error = %v, want og clone --reference guidance", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(references, "github.com", "tta-lab", "missing")); !os.IsNotExist(statErr) {
+		t.Fatalf("missing reference path was created: %v", statErr)
 	}
 }

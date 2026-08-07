@@ -28,6 +28,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newGitPushCmd())
 	cmd.AddCommand(newGitPullCmd())
 	cmd.AddCommand(newGitTagCmd())
+	cmd.AddCommand(newGitCloneCmd())
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newDaemonCmd())
 	cmd.AddCommand(newOGMCPCmd())
@@ -171,6 +172,19 @@ func newGitTagCmd() *cobra.Command {
 	return cmd
 }
 
+func newGitCloneCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "clone <project-alias|http(s)-url>",
+		Short: "Clone a repository to its derived project or reference path",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runGitClone,
+	}
+	cmd.Flags().String("alias", "", "Project alias override")
+	cmd.Flags().Bool("reference", false, "Clone under the references tree without registration")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -191,6 +205,7 @@ func newDaemonCmd() *cobra.Command {
 		RunE:  showHelp,
 	}
 	cmd.AddCommand(newRunnableCmd("run", "Run the daemon in the foreground", runDaemonRun))
+	cmd.AddCommand(newRunnableCmd("validate", "Validate daemon configuration without starting it", runDaemonValidate))
 	cmd.AddCommand(newRunnableCmd("install", "Install the daemon user service", runDaemonInstall))
 	cmd.AddCommand(newRunnableCmd("uninstall", "Remove the daemon user service", runDaemonUninstall))
 	cmd.AddCommand(newRunnableCmd("start", "Start the daemon user service", runDaemonStart))

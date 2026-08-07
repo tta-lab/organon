@@ -2,6 +2,7 @@ package og
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,36 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMuxExposesCloneRoute(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/git/clone", bytes.NewReader([]byte(`{}`)))
+	resp := httptest.NewRecorder()
+
+	NewMux(Service{}).ServeHTTP(resp, req)
+
+	if resp.Code == http.StatusNotFound {
+		t.Fatal("clone route is not registered")
+	}
+}
+
+func TestHTTPHandlerPropagatesRequestContext(t *testing.T) {
+	type key string
+	ctx := context.WithValue(context.Background(), key("request"), "present")
+	handler := HTTPHandler(func(req Request) (Response, error) {
+		if req.Context == nil || req.Context.Value(key("request")) != "present" {
+			t.Fatalf("request context = %#v", req.Context)
+		}
+		return Response{Message: "accepted"}, nil
+	})
+	req := httptest.NewRequest(http.MethodPost, "/git/clone", bytes.NewReader([]byte(`{}`))).WithContext(ctx)
+	resp := httptest.NewRecorder()
+
+	handler(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
 
 func TestHTTPHandlerRejectsTokenFields(t *testing.T) {
 	handler := HTTPHandler(func(req Request) (Response, error) {
