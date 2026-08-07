@@ -28,6 +28,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newGitPushCmd())
 	cmd.AddCommand(newGitPullCmd())
 	cmd.AddCommand(newGitTagCmd())
+	cmd.AddCommand(newGitCloneCmd())
 	cmd.AddCommand(newAuthCmd())
 	cmd.AddCommand(newDaemonCmd())
 	cmd.AddCommand(newOGMCPCmd())
@@ -168,6 +169,19 @@ func newGitTagCmd() *cobra.Command {
 		RunE:  runGitTag,
 	}
 	cmd.Flags().String("bump", "", "Bump version: major, minor, or patch")
+	return cmd
+}
+
+func newGitCloneCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "clone <http(s)-url>",
+		Short: "Clone a repository to its derived project or reference path",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runGitClone,
+	}
+	cmd.Flags().String("alias", "", "Project alias override")
+	cmd.Flags().Bool("reference", false, "Clone under the references tree without registration")
+	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
 }
 

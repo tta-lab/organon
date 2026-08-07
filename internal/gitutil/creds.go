@@ -11,6 +11,19 @@ import (
 
 const forgejoTokenEnv = "FORGEJO_TOKEN"
 
+var controlledGitEnvironmentNames = map[string]struct{}{
+	"GIT_TERMINAL_PROMPT": {},
+	"GIT_CONFIG_COUNT":    {},
+	"GIT_TOKEN_INJECT":    {},
+	"GIT_CONFIG_GLOBAL":   {},
+	"GIT_CONFIG_NOSYSTEM": {},
+	"GIT_ASKPASS":         {},
+	"SSH_ASKPASS":         {},
+	"GCM_INTERACTIVE":     {},
+	"GIT_TRACE":           {},
+	"GIT_CURL_VERBOSE":    {},
+}
+
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
 // credential source of truth and must not re-resolve from ambient env vars.
@@ -36,7 +49,7 @@ func GitCredEnvWithToken(token string) []string {
 
 // AnonymousGitEnv returns a complete child environment with credential sources disabled.
 func AnonymousGitEnv(baseEnv []string) []string {
-	clean := filterCredentialEnv(baseEnv)
+	clean := controlledCredentialEnv(baseEnv)
 	return append(clean,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_CONFIG_COUNT=2",
@@ -49,7 +62,7 @@ func AnonymousGitEnv(baseEnv []string) []string {
 
 // ForgejoGitEnv returns a complete child environment using only the resolved token.
 func ForgejoGitEnv(baseEnv []string, token string) []string {
-	env := filterCredentialEnv(baseEnv)
+	env := controlledCredentialEnv(baseEnv)
 	env = append(env,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_CONFIG_COUNT=3",
@@ -69,7 +82,7 @@ func ForgejoGitEnv(baseEnv []string, token string) []string {
 // GitHubAppGitEnv returns a complete child-process environment that routes a
 // GitHub origin through canonical HTTPS and uses only the supplied App token.
 func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
-	env := filterCredentialEnv(baseEnv)
+	env := controlledCredentialEnv(baseEnv)
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
 
 	type configPair struct{ key, value string }
@@ -104,9 +117,7 @@ func filterControlledGitEnv(baseEnv []string) []string {
 	filtered := make([]string, 0, len(baseEnv))
 	for _, entry := range baseEnv {
 		name, _, _ := strings.Cut(entry, "=")
-		if name == "GIT_TERMINAL_PROMPT" || name == "GIT_CONFIG_COUNT" || name == "GIT_TOKEN_INJECT" ||
-			name == "GIT_ASKPASS" || name == "SSH_ASKPASS" || name == "GCM_INTERACTIVE" ||
-			strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_") {
+		if controlledGitEnvironmentName(name) {
 			continue
 		}
 		filtered = append(filtered, entry)
@@ -114,11 +125,29 @@ func filterControlledGitEnv(baseEnv []string) []string {
 	return filtered
 }
 
+func controlledGitEnvironmentName(name string) bool {
+	if _, ok := controlledGitEnvironmentNames[name]; ok {
+		return true
+	}
+	return strings.HasPrefix(name, "GIT_TRACE_") || strings.HasPrefix(name, "GIT_TRACE2") ||
+		strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_")
+}
+
+func controlledCredentialEnv(baseEnv []string) []string {
+	return append(filterCredentialEnv(baseEnv),
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+}
+
 func filterCredentialEnv(baseEnv []string) []string {
 	filtered := filterControlledGitEnv(baseEnv)
 	clean := filtered[:0]
 	for _, entry := range filtered {
 		name, _, _ := strings.Cut(entry, "=")
+		if sensitiveEnvironmentName(name) {
+			continue
+		}
 		switch name {
 		case "GITHUB_TOKEN", "GH_TOKEN", forgejoTokenEnv, "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN":
 			continue
@@ -126,6 +155,18 @@ func filterCredentialEnv(baseEnv []string) []string {
 		clean = append(clean, entry)
 	}
 	return clean
+}
+
+func sensitiveEnvironmentName(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, marker := range []string{
+		"TOKEN", "SECRET", "PASSWORD", "API_KEY", "ACCESS_KEY", "PRIVATE_KEY", "CREDENTIAL",
+	} {
+		if strings.Contains(upper, marker) {
+			return true
+		}
+	}
+	return upper == "SSH_AUTH_SOCK"
 }
 
 // RemoteURL returns the origin remote URL for the given directory.

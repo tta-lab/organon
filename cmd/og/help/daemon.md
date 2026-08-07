@@ -21,8 +21,8 @@ The key should be readable only by the user and must stay outside repositories.
 
 Only Forgejo server roots listed under `forgejo.allowed_base_urls` can receive
 Forgejo credentials or API calls. Other HTTPS origins are anonymous generic Git
-and support read-only fetch operations; unlisted HTTP and non-HTTP(S) origins
-are rejected.
+and support clone plus fast-forward-only pull; provider APIs and remote writes
+are rejected. Unlisted HTTP and non-HTTP(S) origins are rejected.
 
 The macOS implementation follows the ttal launchd pattern: the plist contains
 the daemon command, log paths, PATH, and standard proxy variables present when

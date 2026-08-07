@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -33,6 +35,12 @@ type ogProjectInput struct {
 type ogPushInput struct {
 	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
 	Force   bool   `json:"force,omitempty" jsonschema:"use force-with-lease; rejected on the default branch"`
+}
+
+type ogCloneInput struct {
+	URL       string `json:"url" jsonschema:"HTTP(S) repository URL with exactly owner/repo"`
+	Alias     string `json:"alias,omitempty" jsonschema:"optional exact single-layer project alias"`
+	Reference bool   `json:"reference,omitempty" jsonschema:"clone under the references tree without registration"`
 }
 
 type ogPRCreateInput struct {
@@ -96,6 +104,10 @@ type ogMessageOutput struct {
 	Message string `json:"message"`
 }
 
+type ogCloneOutput struct {
+	Clone og.CloneResult `json:"clone"`
+}
+
 func ogBoolPointer(value bool) *bool { return &value }
 
 func ogTool(name, title, description string, readOnly, destructive, idempotent bool) *mcp.Tool {
@@ -130,6 +142,9 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	if force := schema.Properties["force"]; force != nil {
 		force.Default = json.RawMessage("false")
 	}
+	if reference := schema.Properties["reference"]; reference != nil {
+		reference.Default = json.RawMessage("false")
+	}
 	if state := schema.Properties["state"]; state != nil {
 		state.Default = json.RawMessage(`"` + stateOpen + `"`)
 		state.Enum = []any{stateOpen, "closed", stateAll}
@@ -144,12 +159,12 @@ func setInputSchema[T any](tool *mcp.Tool, tail bool) *mcp.Tool {
 
 func callOGDaemon(
 	ctx context.Context,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	alias, path string,
 	req og.Request,
 ) (og.Response, error) {
-	entry, err := projects.GetExact(alias)
+	entry, err := projects.Get(alias)
 	if err != nil {
 		return og.Response{}, fmt.Errorf("resolve project: %w", err)
 	}
@@ -168,8 +183,29 @@ func validatePositivePRID(id int64) error {
 	return nil
 }
 
-func newOGMCPServer(projects *project.Catalog, caller ogDaemonCaller) *mcp.Server {
+func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
+
+	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
+		"clone", "Clone repository",
+		"Clone an HTTP(S) repository to its daemon-derived project or reference path.",
+		false, false, true,
+	), false), func(
+		ctx context.Context,
+		_ *mcp.CallToolRequest,
+		input ogCloneInput,
+	) (*mcp.CallToolResult, ogCloneOutput, error) {
+		resp, err := caller.CallContext(ctx, "/git/clone", og.Request{
+			URL: input.URL, Alias: input.Alias, Reference: input.Reference,
+		})
+		if err != nil {
+			return nil, ogCloneOutput{}, fmt.Errorf("call og daemon: %w", err)
+		}
+		if err := validateDaemonClone(resp.Clone); err != nil {
+			return nil, ogCloneOutput{}, err
+		}
+		return nil, ogCloneOutput{Clone: *resp.Clone}, nil
+	})
 
 	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
 		"auth_status", "Inspect forge authentication",
@@ -240,7 +276,7 @@ func newOGMCPServer(projects *project.Catalog, caller ogDaemonCaller) *mcp.Serve
 }
 
 func pushHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogPushInput, ogMessageOutput] {
 	return func(
@@ -253,7 +289,7 @@ func pushHandler(
 }
 
 func prCreateHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogPRCreateInput, ogPROutput] {
 	return func(
@@ -272,7 +308,7 @@ func prCreateHandler(
 }
 
 func prFindHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogPRFindInput, ogPROutput] {
 	return func(
@@ -293,7 +329,7 @@ func prFindHandler(
 
 func callMessageTool(
 	ctx context.Context,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	alias, path string,
 	req og.Request,
@@ -310,7 +346,7 @@ func callMessageTool(
 
 func callWorktreePRTool(
 	ctx context.Context,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	alias, path string,
 	req og.Request,
@@ -326,7 +362,7 @@ func callWorktreePRTool(
 }
 
 func authStatusHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogProjectInput, ogAuthOutput] {
 	return func(
@@ -353,7 +389,7 @@ func authStatusHandler(
 }
 
 func prModifyHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogPRModifyInput, ogPROutput] {
 	return func(
@@ -391,7 +427,7 @@ func prModifyHandler(
 }
 
 func prCommentHandler(
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 ) mcp.ToolHandlerFor[ogPRCommentInput, ogCommentOutput] {
 	return func(
@@ -421,7 +457,7 @@ func prCommentHandler(
 
 func callPRTool(
 	ctx context.Context,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	alias, path string,
 	id int64,
@@ -441,7 +477,7 @@ func callPRTool(
 
 func addPRLinesTool(
 	server *mcp.Server,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	name, title, path string,
 	withTail bool,
@@ -476,7 +512,7 @@ func addPRLinesTool(
 
 func callPRLinesTool(
 	ctx context.Context,
-	projects *project.Catalog,
+	projects *project.Store,
 	caller ogDaemonCaller,
 	alias, path string,
 	idInput *int64,
@@ -542,6 +578,56 @@ func validateDaemonComment(comment *og.Comment, expectedPRID int64, expectedBody
 	return nil
 }
 
+func validateDaemonClone(result *og.CloneResult) error {
+	if result == nil {
+		return fmt.Errorf("og daemon returned no clone result")
+	}
+	if !filepath.IsAbs(result.Path) || strings.TrimSpace(result.Host) == "" ||
+		strings.TrimSpace(result.Owner) == "" || strings.TrimSpace(result.Repo) == "" ||
+		strings.TrimSpace(result.Provider) == "" || strings.TrimSpace(result.Remote) == "" {
+		return fmt.Errorf("og daemon returned an invalid clone result")
+	}
+	if err := validateDaemonCloneProvider(result.Provider); err != nil {
+		return err
+	}
+	if result.Registered {
+		if err := project.ValidateAlias(result.Alias); err != nil {
+			return fmt.Errorf("og daemon returned an invalid registered clone alias: %w", err)
+		}
+	} else if result.Alias != "" || result.Archived {
+		return fmt.Errorf("og daemon returned invalid unregistered clone state")
+	}
+	if err := validateDaemonCloneRemote(result); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDaemonCloneProvider(provider string) error {
+	switch provider {
+	case "github", "forgejo", "generic":
+		return nil
+	default:
+		return fmt.Errorf("og daemon returned invalid clone provider %q", provider)
+	}
+}
+
+func validateDaemonCloneRemote(result *og.CloneResult) error {
+	u, err := url.Parse(result.Remote)
+	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
+		(u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, result.Host) {
+		return fmt.Errorf("og daemon returned an invalid clone remote")
+	}
+	if (result.Provider == "github" || result.Provider == "generic") && u.Scheme != "https" {
+		return fmt.Errorf("og daemon returned an insecure clone remote")
+	}
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) != 2 || parts[0] != result.Owner || strings.TrimSuffix(parts[1], ".git") != result.Repo {
+		return fmt.Errorf("og daemon returned mismatched clone identity")
+	}
+	return nil
+}
+
 func newOGMCPCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
@@ -549,8 +635,8 @@ func newOGMCPCmd() *cobra.Command {
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			projects, err := project.OpenCatalog(config.ProjectsPath())
-			if err != nil {
+			projects := project.NewStore(config.ProjectsPath())
+			if _, err := projects.Snapshot(); err != nil {
 				return err
 			}
 			client := og.NewClientFromEnv()

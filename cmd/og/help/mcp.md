@@ -1,6 +1,7 @@
-Serve typed forge tools over MCP stdio. Every tool accepts an exact registered
-single-layer project alias. The server resolves that alias internally; it does
-not accept a path, working directory, MCP root, token, or file URI.
+Serve typed forge tools over MCP stdio. Repository operations accept an exact
+registered single-layer project alias. `clone` instead accepts an HTTP(S) URL,
+an optional project alias, and an optional reference flag. No tool accepts a
+destination path, working directory, MCP root, token, or file URI.
 
 The `og` daemon must already be running. All pull request tools require an
 exact project alias. Get, modify, comment, checks, log, and failures accept an
@@ -10,6 +11,7 @@ it is omitted.
 Tools:
 
   auth_status             # inspect secret-free forge authentication state
+  clone                   # clone URL to a daemon-derived project/reference path
   push                    # push current branch; optional force-with-lease
   pull                    # run the complete guarded CLI pull workflow
   pr_create               # push current branch and create its pull request
@@ -27,6 +29,11 @@ the alias.
 Force push is rejected on the default branch and otherwise uses
 `--force-with-lease`. Pull may switch to the default branch and delete a closed
 PR branch locally and remotely after the same safety checks as the CLI.
+
+Archived aliases remain readable. Their pull is restricted to fast-forwarding
+the known default branch; push, tag, PR mutation/comment, and branch cleanup are
+blocked in the daemon. Registry additions are visible on the next tool call
+without restarting this MCP process.
 
 Tag, merge, raw provider access, and daemon lifecycle operations are not
 exposed.

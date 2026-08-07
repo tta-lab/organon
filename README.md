@@ -168,6 +168,9 @@ app_id = 123456
 key_source = "file"
 key_ref = "og/github-app.pem"
 allowed_owners = ["tta-lab", "GuionAI", "LamplitIsles"]
+
+[forgejo]
+allowed_base_urls = ["http://forgejo.localhost:17480"]
 EOF
 chmod 600 ~/.config/ttal/og.toml
 
@@ -175,6 +178,24 @@ make install
 og daemon restart
 og daemon health
 ```
+
+Clone URLs through the daemon so destination, authentication, and registration
+stay on one boundary:
+
+```bash
+og clone https://github.com/tta-lab/organon.git
+og clone --alias forgejo https://codeberg.org/forgejo/forgejo.git
+og clone --reference https://github.com/modelcontextprotocol/go-sdk.git
+```
+
+Project clones derive `~/code/projects/<owner>/<repo>` and register an alias.
+Reference clones derive `~/code/references/<host>/<owner>/<repo>` and remain
+unregistered. Only GitHub, configured Forgejo roots, and anonymous generic
+HTTPS are supported; callers cannot provide a destination or credentials.
+
+Archived project entries remain useful context. They may read PR/CI state and
+fast-forward the known default branch with `og pull`, but cannot push, tag,
+create/modify/comment on PRs, or run pull's branch-cleanup path.
 
 Keep the migration PAT active during rollout. In one selected repository from
 each owner, run `og auth status` and require every permission to report ready.
@@ -222,18 +243,21 @@ them as separate processes so clients can grant only the tools a session needs:
 ```
 
 Use `project_get` or `project_list` to discover an exact registered project
-alias. Active aliases are single-layer names and cannot contain dots. The `og`
-tools accept only that alias; they do not accept a filesystem path, working
-directory, MCP root, file URI, or credential. The `og` daemon must already be
-running, resolves the registered repository, and owns forge credentials.
+alias and archive state. Active aliases are single-layer names and cannot
+contain dots. Project registry updates are visible on the next MCP call. The
+repository-oriented `og` tools accept only that alias; they do not accept a
+filesystem path, working directory, MCP root, file URI, or credential. `clone`
+accepts a URL instead. The `og` daemon must already be running and owns Git,
+registration, policy, and forge credentials.
 
-`og mcp` mirrors the CLI push, pull, PR create, find, and current-PR view
+`og mcp` exposes twelve tools: auth status, clone, push, pull, PR create/find,
+and PR get/modify/comment/checks/log/failures. It mirrors CLI current-branch
 workflows against the registered checkout's current branch. Force push uses
 force-with-lease and is rejected on the default branch. Pull retains the CLI's
 guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
 operation; `pr_get`, modify, comment, checks, log, and failures use the current
-branch when the ID is omitted. Tag remains CLI-only. Restart a long-running MCP
-server after changing project, org, or web configuration. Run
+branch when the ID is omitted. Tag remains CLI-only. Restart the daemon after
+changing `og.toml`; restart web MCP after changing web configuration. Run
 `project mcp --help`, `og mcp --help`, or `web mcp --help` for the tool lists and
 configuration details.
 

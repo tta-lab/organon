@@ -236,6 +236,50 @@ func TestDaemonLifecycleCommandsAreImplemented(t *testing.T) {
 	}
 }
 
+func TestCloneRoutesURLFlagsAndPrintsTypedJSON(t *testing.T) {
+	var got og.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/git/clone" {
+			t.Fatalf("path = %s, want /git/clone", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Clone: &og.CloneResult{
+			Alias: "sample", Path: "/home/neil/code/projects/tta-lab/example", Host: "codeberg.org",
+			Owner: "tta-lab", Repo: "example", Provider: "generic",
+			Remote: "https://codeberg.org/tta-lab/example.git", Registered: true,
+		}})
+	}))
+	defer server.Close()
+	t.Setenv("OG_DAEMON_URL", server.URL)
+
+	stdout, err := runOG(t, "clone", "--alias", "sample", "--json", "https://codeberg.org/tta-lab/example.git")
+	if err != nil {
+		t.Fatalf("runOG: %v", err)
+	}
+	if got.URL != "https://codeberg.org/tta-lab/example.git" || got.Alias != "sample" ||
+		got.Reference || got.WorkDir != "" {
+		t.Fatalf("clone request = %+v", got)
+	}
+	var result og.CloneResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout)
+	}
+	if result.Alias != "sample" || result.Path != "/home/neil/code/projects/tta-lab/example" ||
+		result.Provider != "generic" {
+		t.Fatalf("clone output = %+v", result)
+	}
+}
+
+func TestCloneReferenceRejectsAliasBeforeDaemonCall(t *testing.T) {
+	useFailingDaemon(t)
+	_, err := runOG(t, "clone", "--reference", "--alias", "sample", "https://codeberg.org/tta-lab/example.git")
+	if err == nil || !strings.Contains(err.Error(), "cannot be used") {
+		t.Fatalf("clone error = %v", err)
+	}
+}
+
 func TestGitPushRoutesThroughDaemonWithoutReadingRepoOrToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "worker-token-must-not-be-read")
 	var got map[string]any

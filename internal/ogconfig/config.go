@@ -36,7 +36,7 @@ func Load(path string) (Config, error) {
 	}
 	seen := make(map[string]struct{}, len(cfg.Forgejo.AllowedBaseURLs))
 	for i, raw := range cfg.Forgejo.AllowedBaseURLs {
-		normalized, err := normalizeBaseURL(raw)
+		normalized, err := NormalizeBaseURL(raw)
 		if err != nil {
 			return Config{}, fmt.Errorf("forgejo.allowed_base_urls[%d]: %w", i, err)
 		}
@@ -57,7 +57,7 @@ func (c Config) ClassifyRemote(info *gitprovider.RepoInfo) (gitprovider.Provider
 	if info.BaseURL == "" {
 		return "", fmt.Errorf("remote must use HTTP(S)")
 	}
-	baseURL, err := normalizeBaseURL(info.BaseURL)
+	baseURL, err := NormalizeBaseURL(info.BaseURL)
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +78,8 @@ func (c Config) ClassifyRemote(info *gitprovider.RepoInfo) (gitprovider.Provider
 	return "", fmt.Errorf("HTTP remote base URL %q is not allowed", baseURL)
 }
 
-func normalizeBaseURL(raw string) (string, error) {
+// NormalizeBaseURL canonicalizes one HTTP(S) server root for trust comparisons.
+func NormalizeBaseURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("invalid URL: %w", err)

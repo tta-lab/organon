@@ -173,6 +173,14 @@ func newCatalog(active, archived []Entry) *Catalog {
 
 func validAlias(alias string) bool { return aliasPattern.MatchString(alias) }
 
+// ValidateAlias verifies the public exact single-layer alias contract.
+func ValidateAlias(alias string) error {
+	if !validAlias(alias) {
+		return fmt.Errorf("%w %q", ErrInvalidAlias, alias)
+	}
+	return nil
+}
+
 // ListAll returns active projects and, when requested, archived projects.
 func (c *Catalog) ListAll(includeArchived bool) []Entry {
 	entries := append([]Entry(nil), c.activeEntries...)

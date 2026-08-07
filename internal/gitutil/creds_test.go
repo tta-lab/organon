@@ -175,3 +175,40 @@ func TestAnonymousGitEnvClearsAmbientCredentials(t *testing.T) {
 		t.Fatalf("anonymous git configs = %#v, want credential helpers cleared", configs)
 	}
 }
+
+func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
+	base := []string{
+		"PATH=/bin",
+		"GIT_TRACE=1",
+		"GIT_TRACE_CURL=1",
+		"GIT_CURL_VERBOSE=1",
+		"GIT_TRACE_PACKET=/tmp/packet.log",
+		"GIT_TRACE2_EVENT=/tmp/trace.json",
+		"GIT_CONFIG_GLOBAL=/tmp/leaky-global-config",
+		"GIT_CONFIG_NOSYSTEM=0",
+		"EXA_API_KEY=unrelated-api-key",
+		"CUSTOM_SECRET=unrelated-secret",
+		"CUSTOM_PASSWORD=unrelated-password",
+	}
+	environments := map[string][]string{
+		"anonymous": AnonymousGitEnv(base),
+		"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", "secret"),
+		"forgejo":   ForgejoGitEnv(base, "secret"),
+	}
+	for name, env := range environments {
+		t.Run(name, func(t *testing.T) {
+			for _, variable := range []string{
+				"GIT_TRACE", "GIT_TRACE_CURL", "GIT_CURL_VERBOSE", "GIT_TRACE_PACKET", "GIT_TRACE2_EVENT",
+				"EXA_API_KEY", "CUSTOM_SECRET", "CUSTOM_PASSWORD",
+			} {
+				if value := envValue(env, variable); value != "" {
+					t.Fatalf("environment retained %s=%q: %v", variable, value, env)
+				}
+			}
+			if envValue(env, "GIT_CONFIG_GLOBAL") != "/dev/null" ||
+				envValue(env, "GIT_CONFIG_NOSYSTEM") != "1" {
+				t.Fatal("controlled Git environment retained ambient global/system configuration")
+			}
+		})
+	}
+}

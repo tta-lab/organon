@@ -42,6 +42,9 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/docs/` — Context7 documentation client
 - `internal/sgraph/` — Sourcegraph public GraphQL code search
 - `internal/web/` — shared typed web application service used by CLI and MCP adapters
+- `internal/project/` — hot, archive-aware project registry shared by CLI, MCP, and og
+- `internal/og/` — daemon-owned Git/forge policy and typed local protocol
+- `internal/ogconfig/` — whole-file og configuration and remote trust classification
 
 ## Testing
 
