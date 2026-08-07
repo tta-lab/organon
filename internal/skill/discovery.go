@@ -3,11 +3,14 @@ package skill
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tta-lab/organon/internal/safefile"
 )
 
 // Skill represents a discovered skill with its metadata and source location.
@@ -67,11 +70,7 @@ func ListSkills(paths []string) ([]Skill, error) {
 // ListSkillsContained discovers skills while requiring every directory and
 // SKILL.md target to resolve inside root. It is intended for project-scoped MCP reads.
 func ListSkillsContained(paths []string, root string) ([]Skill, error) {
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, fmt.Errorf("resolve skill root %q: %w", root, err)
-	}
-	return listSkills(paths, realRoot)
+	return listSkills(paths, root)
 }
 
 func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
@@ -128,21 +127,27 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 		return nil, nil
 	}
 	if containmentRoot != "" {
-		if _, err := resolveContainedSkillPath(containmentRoot, skillDir); err != nil {
+		if err := safefile.CheckContained(containmentRoot, skillDir); err != nil {
 			return nil, fmt.Errorf("resolve skill directory %q: %w", skillDir, err)
 		}
 	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	readPath := skillPath
+	var data []byte
 	if containmentRoot != "" {
-		readPath, err = resolveContainedSkillPath(containmentRoot, skillPath)
+		file, err := safefile.OpenContained(containmentRoot, skillPath)
 		if err != nil {
 			return nil, fmt.Errorf("resolve skill %q: %w", skillPath, err)
 		}
-	}
-	data, err := os.ReadFile(readPath)
-	if err != nil {
-		return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
+		defer file.Close()
+		data, err = io.ReadAll(file)
+		if err != nil {
+			return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
+		}
+	} else {
+		data, err = os.ReadFile(skillPath)
+		if err != nil {
+			return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
+		}
 	}
 	meta, body := ParseFrontmatter(data)
 	if meta.Name == "" {
@@ -150,19 +155,6 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 	}
 	loaded := newSkill(meta.Name, meta, base, skillPath, string(body))
 	return &loaded, nil
-}
-
-func resolveContainedSkillPath(root, path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", err
-	}
-	relative, err := filepath.Rel(root, resolved)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
-		filepath.IsAbs(relative) {
-		return "", fmt.Errorf("resolved path %q is outside project root %q", resolved, root)
-	}
-	return resolved, nil
 }
 
 // GetSkill returns the skill matching the given frontmatter name, using priority order.

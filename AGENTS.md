@@ -33,6 +33,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/skill/` — filesystem-based skill discovery and frontmatter parsing
 - `internal/token/` — LLM token counting with tiktoken-go; sync.OnceValues lazy init, regex fallback
 - `internal/srcview/` — trusted-byte source outlines and safe registered-project file reads shared by CLI and MCP
+- `internal/safefile/` — descriptor-relative contained file opening shared by project-scoped readers
 
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files

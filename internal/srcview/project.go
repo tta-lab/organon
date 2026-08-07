@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/tta-lab/organon/internal/project"
+	"github.com/tta-lab/organon/internal/safefile"
 )
 
 const maximumSourceBytes = 16 * 1024 * 1024
@@ -51,11 +49,7 @@ func (s *ProjectService) ReadFile(projectAlias, relativePath string) (File, erro
 	if err != nil {
 		return File{}, fmt.Errorf("get project %q: %w", projectAlias, err)
 	}
-	resolved, err := resolveInsideRoot(entry.Path, cleanPath)
-	if err != nil {
-		return File{}, err
-	}
-	source, err := readTextFile(resolved, cleanPath)
+	source, err := readTextFile(entry.Path, cleanPath)
 	if err != nil {
 		return File{}, err
 	}
@@ -73,29 +67,8 @@ func cleanRelativePath(relativePath string) (string, error) {
 	return cleanPath, nil
 }
 
-type resolvedFile struct {
-	root     string
-	relative string
-}
-
-func resolveInsideRoot(root, cleanPath string) (resolvedFile, error) {
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return resolvedFile{}, fmt.Errorf("resolve project root: %w", err)
-	}
-	realTarget, err := filepath.EvalSymlinks(filepath.Join(realRoot, cleanPath))
-	if err != nil {
-		return resolvedFile{}, fmt.Errorf("resolve project file %q: %w", cleanPath, err)
-	}
-	rel, err := filepath.Rel(realRoot, realTarget)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return resolvedFile{}, fmt.Errorf("path %q resolves outside the project root", cleanPath)
-	}
-	return resolvedFile{root: realRoot, relative: rel}, nil
-}
-
-func readTextFile(resolved resolvedFile, cleanPath string) ([]byte, error) {
-	file, err := openResolvedFile(resolved)
+func readTextFile(root, cleanPath string) ([]byte, error) {
+	file, err := safefile.OpenContained(root, cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("open project file %q: %w", cleanPath, err)
 	}
@@ -129,50 +102,4 @@ func readBoundedSource(reader io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("source exceeds the 16 MiB source limit")
 	}
 	return source, nil
-}
-
-func openResolvedFile(resolved resolvedFile) (*os.File, error) {
-	directory, err := openAbsoluteDirectory(resolved.root)
-	if err != nil {
-		return nil, err
-	}
-	components := strings.Split(filepath.Clean(resolved.relative), string(filepath.Separator))
-	for _, component := range components[:len(components)-1] {
-		next, err := unix.Openat(directory, component, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		_ = unix.Close(directory)
-		if err != nil {
-			return nil, err
-		}
-		directory = next
-	}
-	fileDescriptor, err := unix.Openat(
-		directory, components[len(components)-1],
-		unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0,
-	)
-	_ = unix.Close(directory)
-	if err != nil {
-		return nil, err
-	}
-	return os.NewFile(uintptr(fileDescriptor), filepath.Join(resolved.root, resolved.relative)), nil
-}
-
-func openAbsoluteDirectory(path string) (int, error) {
-	directory, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return -1, err
-	}
-	cleanPath := strings.TrimPrefix(filepath.Clean(path), string(filepath.Separator))
-	components := strings.Split(cleanPath, string(filepath.Separator))
-	for _, component := range components {
-		if component == "" {
-			continue
-		}
-		next, err := unix.Openat(directory, component, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		_ = unix.Close(directory)
-		if err != nil {
-			return -1, err
-		}
-		directory = next
-	}
-	return directory, nil
 }

@@ -131,7 +131,7 @@ func TestListSkillsContainedRejectsProjectSymlinkEscapes(t *testing.T) {
 			}
 
 			skills, err := ListSkillsContained([]string{base}, projectRoot)
-			if err == nil || !strings.Contains(err.Error(), "outside project root") {
+			if err == nil || !strings.Contains(err.Error(), "outside root") {
 				t.Fatalf("ListSkillsContained error = %v", err)
 			}
 			if len(skills) != 0 {
