@@ -416,6 +416,26 @@ func TestGitCloneLeavesCompletedCheckoutWhenRegistrationFails(t *testing.T) {
 	}
 }
 
+func TestGitCloneRejectsExistingAliasBeforeClone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store := writeCloneProjects(t, "[example]\npath = \"/other/repository\"\n")
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called for an existing alias")
+		return nil
+	})
+
+	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already uses path") {
+		t.Fatalf("GitClone error = %v, want alias collision", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "code")); !os.IsNotExist(statErr) {
+		t.Fatalf("clone mutated filesystem before rejecting alias: %v", statErr)
+	}
+}
+
 func TestGitCloneCancellationCleansTemporaryCheckout(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

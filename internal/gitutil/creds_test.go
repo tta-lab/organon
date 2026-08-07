@@ -185,6 +185,8 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 		"GIT_TRACE_PACKET=/tmp/packet.log",
 		"GIT_TRACE2_EVENT=/tmp/trace.json",
 		"GIT_CONFIG_GLOBAL=/tmp/leaky-global-config",
+		"GIT_CONFIG_SYSTEM=/tmp/leaky-system-config",
+		"GIT_CONFIG_PARAMETERS='credential.helper=!echo leaked'",
 		"GIT_CONFIG_NOSYSTEM=0",
 		"EXA_API_KEY=unrelated-api-key",
 		"CUSTOM_SECRET=unrelated-secret",
@@ -199,6 +201,7 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, variable := range []string{
 				"GIT_TRACE", "GIT_TRACE_CURL", "GIT_CURL_VERBOSE", "GIT_TRACE_PACKET", "GIT_TRACE2_EVENT",
+				"GIT_CONFIG_SYSTEM", "GIT_CONFIG_PARAMETERS",
 				"EXA_API_KEY", "CUSTOM_SECRET", "CUSTOM_PASSWORD",
 			} {
 				if value := envValue(env, variable); value != "" {

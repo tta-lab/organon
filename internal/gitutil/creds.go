@@ -12,16 +12,18 @@ import (
 const forgejoTokenEnv = "FORGEJO_TOKEN"
 
 var controlledGitEnvironmentNames = map[string]struct{}{
-	"GIT_TERMINAL_PROMPT": {},
-	"GIT_CONFIG_COUNT":    {},
-	"GIT_TOKEN_INJECT":    {},
-	"GIT_CONFIG_GLOBAL":   {},
-	"GIT_CONFIG_NOSYSTEM": {},
-	"GIT_ASKPASS":         {},
-	"SSH_ASKPASS":         {},
-	"GCM_INTERACTIVE":     {},
-	"GIT_TRACE":           {},
-	"GIT_CURL_VERBOSE":    {},
+	"GIT_TERMINAL_PROMPT":   {},
+	"GIT_CONFIG_COUNT":      {},
+	"GIT_TOKEN_INJECT":      {},
+	"GIT_CONFIG_GLOBAL":     {},
+	"GIT_CONFIG_SYSTEM":     {},
+	"GIT_CONFIG_PARAMETERS": {},
+	"GIT_CONFIG_NOSYSTEM":   {},
+	"GIT_ASKPASS":           {},
+	"SSH_ASKPASS":           {},
+	"GCM_INTERACTIVE":       {},
+	"GIT_TRACE":             {},
+	"GIT_CURL_VERBOSE":      {},
 }
 
 // GitCredEnvWithToken returns environment variables for git network operations

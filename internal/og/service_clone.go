@@ -98,6 +98,13 @@ func (s Service) cloneRegistration(req Request, source cloneSource) (project.Ent
 	if err := project.ValidateAlias(alias); err != nil {
 		return project.Entry{}, err
 	}
+	if existing, err := s.projectStore().Get(alias); err == nil {
+		return project.Entry{}, fmt.Errorf(
+			"project alias %q already uses path %q", existing.Alias, existing.Path,
+		)
+	} else if !errors.Is(err, project.ErrNotFound) {
+		return project.Entry{}, err
+	}
 	return project.Entry{Alias: alias, Path: source.destination}, nil
 }
 
