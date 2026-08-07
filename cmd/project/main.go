@@ -2,18 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/table"
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/format"
-	"github.com/tta-lab/organon/internal/org"
 	"github.com/tta-lab/organon/internal/project"
 	"github.com/tta-lab/organon/internal/reporef"
 )
@@ -35,7 +32,6 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newGetCmd())
 	cmd.AddCommand(newResolveCmd())
 	cmd.AddCommand(newJumpCmd())
-	cmd.AddCommand(newOrgCmd())
 	cmd.AddCommand(newMCPCmd())
 
 	return cmd
@@ -44,18 +40,14 @@ func newRootCmd() *cobra.Command {
 // --- list ---
 
 func newListCmd() *cobra.Command {
-	var jsonOut bool
+	var jsonOut, includeArchived bool
 	cmd := &cobra.Command{
-		Use:   "list [org]",
+		Use:   "list",
 		Short: "List all projects",
 		Long:  helpList,
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var orgFilter string
-			if len(args) == 1 {
-				orgFilter = args[0]
-			}
-			entries, err := project.ListFiltered(config.ProjectsPath(), orgFilter)
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			entries, err := project.NewStore(config.ProjectsPath()).List(includeArchived)
 			if err != nil {
 				return err
 			}
@@ -74,6 +66,7 @@ func newListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "Include archived projects")
 	return cmd
 }
 
@@ -103,17 +96,18 @@ func newGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
+			store := project.NewStore(config.ProjectsPath())
 			if !strings.Contains(alias, "/") {
-				e, err := project.Get(config.ProjectsPath(), alias)
-				if err != nil {
-					return err
-				}
-				if e != nil {
+				e, err := store.Get(alias)
+				if err == nil {
 					if jsonOut {
 						return json.NewEncoder(os.Stdout).Encode(e)
 					}
 					fmt.Printf("%s\n", e.Path)
 					return nil
+				}
+				if !errors.Is(err, project.ErrNotFound) {
+					return err
 				}
 			}
 
@@ -123,13 +117,7 @@ func newGetCmd() *cobra.Command {
 				return repoErr
 			}
 			if jsonOut {
-				type item struct {
-					Alias string `json:"alias"`
-					Name  string `json:"name"`
-					Path  string `json:"path"`
-					Org   string `json:"org"`
-				}
-				return json.NewEncoder(os.Stdout).Encode(item{Alias: alias, Path: repoPath, Org: reporef.DeriveOrg(repoPath)})
+				return json.NewEncoder(os.Stdout).Encode(project.Entry{Alias: alias, Path: repoPath})
 			}
 			fmt.Println(repoPath)
 			return nil
@@ -144,31 +132,30 @@ func newGetCmd() *cobra.Command {
 func newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve <alias-or-path>",
-		Short: "Resolve a project alias or path to alias, path, org, and GitHub token env",
+		Short: "Resolve a project alias or path to project identity and path",
 		Long:  helpResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
+			store := project.NewStore(config.ProjectsPath())
 
 			// Absolute paths are catalog lookups; org/repo targets go directly
 			// to reference resolution instead of alias validation.
 			if filepath.IsAbs(target) {
-				e, err := project.GetByPath(config.ProjectsPath(), target)
-				if err != nil {
-					return err
-				}
-				if e != nil {
+				e, err := store.GetByPath(target)
+				if err == nil {
 					return json.NewEncoder(os.Stdout).Encode(e)
 				}
+				return err
 			}
 
 			if !strings.Contains(target, "/") {
-				e, err := project.Get(config.ProjectsPath(), target)
-				if err != nil {
-					return err
-				}
-				if e != nil {
+				e, err := store.Get(target)
+				if err == nil {
 					return json.NewEncoder(os.Stdout).Encode(e)
+				}
+				if !errors.Is(err, project.ErrNotFound) {
+					return err
 				}
 			}
 
@@ -178,16 +165,7 @@ func newResolveCmd() *cobra.Command {
 				return repoErr
 			}
 
-			type refResolved struct {
-				Alias string `json:"alias"`
-				Path  string `json:"path"`
-				Org   string `json:"org"`
-			}
-			return json.NewEncoder(os.Stdout).Encode(refResolved{
-				Alias: target,
-				Path:  repoPath,
-				Org:   reporef.DeriveOrg(repoPath),
-			})
+			return json.NewEncoder(os.Stdout).Encode(project.Entry{Alias: target, Path: repoPath})
 		},
 	}
 	return cmd
@@ -203,17 +181,18 @@ func newJumpCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
+			store := project.NewStore(config.ProjectsPath())
 
 			// 1. Try a bare project alias. org/repo targets go directly to
 			// reference resolution so strict alias validation cannot reject them.
 			if !strings.Contains(target, "/") {
-				e, err := project.Get(config.ProjectsPath(), target)
-				if err != nil {
-					return err
-				}
-				if e != nil {
+				e, err := store.Get(target)
+				if err == nil {
 					fmt.Println(e.Path)
 					return nil
+				}
+				if !errors.Is(err, project.ErrNotFound) {
+					return err
 				}
 			}
 
@@ -232,104 +211,5 @@ func newJumpCmd() *cobra.Command {
 			return fmt.Errorf("project %q not found", target)
 		},
 	}
-	return cmd
-}
-
-// --- org ---
-
-func newOrgCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "org",
-		Short: "List and get orgs from orgs.toml",
-		Long:  helpOrg,
-	}
-	cmd.AddCommand(newOrgListCmd())
-	cmd.AddCommand(newOrgGetCmd())
-	return cmd
-}
-
-func newOrgListCmd() *cobra.Command {
-	var jsonOut bool
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all orgs",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := org.Load(config.OrgsPath())
-			if err != nil {
-				return err
-			}
-
-			if jsonOut {
-				type item struct {
-					Org string `json:"org"`
-				}
-				out := make([]item, len(entries))
-				for i, e := range entries {
-					out[i] = item{Org: e.Name}
-				}
-				return json.NewEncoder(os.Stdout).Encode(out)
-			}
-
-			if len(entries) == 0 {
-				fmt.Println("No orgs found.")
-				return nil
-			}
-
-			dimColor, headerStyle, cellStyle, _ := format.TableStyles()
-
-			rows := make([][]string, len(entries))
-			for i, e := range entries {
-				rows[i] = []string{e.Name}
-			}
-
-			t := table.New().
-				Border(lipgloss.RoundedBorder()).
-				BorderStyle(lipgloss.NewStyle().Foreground(dimColor)).
-				StyleFunc(func(row, col int) lipgloss.Style {
-					if row == table.HeaderRow {
-						return headerStyle
-					}
-					return cellStyle
-				}).
-				Headers("ORG").
-				Rows(rows...)
-
-			fmt.Println(t)
-			fmt.Printf("\n%d orgs\n", len(entries))
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
-	return cmd
-}
-
-func newOrgGetCmd() *cobra.Command {
-	var jsonOut bool
-	cmd := &cobra.Command{
-		Use:   "get <name>",
-		Short: "Get a single org",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			e, err := org.Get(config.OrgsPath(), args[0])
-			if err != nil {
-				return err
-			}
-			if e == nil {
-				return fmt.Errorf("org %q not found", args[0])
-			}
-
-			if jsonOut {
-				type item struct {
-					Org string `json:"org"`
-				}
-				return json.NewEncoder(os.Stdout).Encode(item{Org: e.Name})
-			}
-
-			fmt.Printf("org: %s\n", e.Name)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	return cmd
 }

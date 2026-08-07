@@ -1,5 +1,5 @@
-List all projects from projects.toml. Optionally filter by org.
+List projects from projects.toml. Archived projects are hidden by default.
 
-  project list                 # all projects
-  project list <org>           # filter by org
-  project list --json          # JSON output
+  project list                         # active projects
+  project list --include-archived      # active and archived projects
+  project list --json                  # JSON output

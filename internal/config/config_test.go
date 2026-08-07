@@ -13,13 +13,6 @@ func TestProjectsPath(t *testing.T) {
 	}
 }
 
-func TestOrgsPath(t *testing.T) {
-	p := OrgsPath()
-	if !strings.HasSuffix(p, filepath.Join(".config", "ttal", "orgs.toml")) {
-		t.Errorf("unexpected path: %s", p)
-	}
-}
-
 func TestWebConfigPath(t *testing.T) {
 	p := WebConfigPath()
 	if !strings.HasSuffix(p, filepath.Join(".config", "ttal", "web.toml")) {

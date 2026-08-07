@@ -122,9 +122,74 @@ path = "/projects/fse-gw"
 	if err != nil {
 		t.Fatalf("OpenCatalog: %v", err)
 	}
-	entries := catalog.List("")
+	entries := catalog.ListAll(false)
 	if len(entries) != 1 || entries[0].Alias != "active" {
 		t.Fatalf("List = %+v, want only active", entries)
+	}
+}
+
+func TestOpenCatalogExposesArchivedEntriesOnRequest(t *testing.T) {
+	path := writeProjectFile(t, `[active]
+name = "Active"
+path = "/projects/active"
+
+[archived.ttal]
+name = "Archived TTAL"
+path = "/projects/ttal"
+remote = "historical context is preserved"
+`)
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		t.Fatalf("OpenCatalog: %v", err)
+	}
+
+	entries := catalog.ListAll(true)
+	if len(entries) != 2 {
+		t.Fatalf("ListAll(true) = %+v, want active and archived", entries)
+	}
+	if entries[0].Alias != "active" || entries[0].Archived {
+		t.Fatalf("active entry = %+v", entries[0])
+	}
+	if entries[1].Alias != "ttal" || !entries[1].Archived {
+		t.Fatalf("archived entry = %+v", entries[1])
+	}
+	archived, err := catalog.GetExact("ttal")
+	if err != nil {
+		t.Fatalf("GetExact(ttal): %v", err)
+	}
+	if !archived.Archived || archived.Path != "/projects/ttal" {
+		t.Fatalf("GetExact(ttal) = %+v", archived)
+	}
+}
+
+func TestOpenCatalogRejectsObsoleteActiveMetadata(t *testing.T) {
+	for _, key := range []string{"org", "github_token_env", "remote", "k8s_app", "k8s_namespace"} {
+		t.Run(key, func(t *testing.T) {
+			path := writeProjectFile(t, "[one]\npath = \"/projects/one\"\n"+key+" = \"obsolete\"\n")
+			if _, err := OpenCatalog(path); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("OpenCatalog error = %v, want ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
+func TestOpenCatalogUsesActiveEntryForDuplicateArchivedPath(t *testing.T) {
+	path := writeProjectFile(t, `[active]
+path = "/projects/shared"
+
+[archived.old]
+path = "/projects/shared"
+`)
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		t.Fatalf("OpenCatalog: %v", err)
+	}
+	entry, err := catalog.GetByPath("/projects/shared")
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+	if entry.Alias != "active" || entry.Archived {
+		t.Fatalf("GetByPath = %+v, want active entry", entry)
 	}
 }
 
@@ -177,56 +242,4 @@ func writeProjectFile(t *testing.T, content string) string {
 		t.Fatalf("write projects file: %v", err)
 	}
 	return path
-}
-
-func TestDeriveOrg(t *testing.T) {
-	tests := []struct {
-		path string
-		org  string
-	}{
-		{"/home/neil/code/projects/tta-lab/organon", "tta-lab"},
-		{"/home/neil/code/projects/GuionAI/flick-backend", "GuionAI"},
-		{"/home/neil/code/references/github.com/tta-lab/agon", "tta-lab"},
-		{"/home/neil/code/projects/neil/sustech-mar-slides", "neil"},
-	}
-
-	for _, tt := range tests {
-		got := DeriveOrg(tt.path)
-		if got != tt.org {
-			t.Errorf("DeriveOrg(%q) = %q, want %q", tt.path, got, tt.org)
-		}
-	}
-}
-
-func TestListFiltered(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "projects.toml")
-	os.WriteFile(p, []byte(`
-[organon]
-name = "Organon"
-path = "/home/neil/code/projects/tta-lab/organon"
-
-[fb]
-name = "FlickNote Backend"
-path = "/home/neil/code/projects/GuionAI/flick-backend"
-`), 0644)
-
-	all, err := ListFiltered(p, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 2 {
-		t.Errorf("expected 2, got %d", len(all))
-	}
-
-	tta, err := ListFiltered(p, "tta-lab")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tta) != 1 {
-		t.Errorf("expected 1 tta-lab project, got %d", len(tta))
-	}
-	if tta[0].Alias != "organon" {
-		t.Errorf("expected organon, got %s", tta[0].Alias)
-	}
 }

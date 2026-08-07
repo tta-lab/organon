@@ -99,6 +99,54 @@ path = "/home/neil/code/projects/tta-lab/lenos"
 	if projects[0]["alias"] != "len" || projects[0]["path"] != "/home/neil/code/projects/tta-lab/lenos" {
 		t.Fatalf("unexpected JSON project: %v", projects[0])
 	}
+	if archived, ok := projects[0]["archived"]; !ok || archived != false {
+		t.Fatalf("project archived field = %#v, want required false", projects[0]["archived"])
+	}
+}
+
+func TestProjectListIncludesArchivedOnlyWhenRequested(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[active]
+path = "/projects/active"
+
+[archived.ttal]
+path = "/projects/ttal"
+`)
+
+	stdout, err := runProject(t, []string{"list", "--include-archived", "--json"})
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
+	var projects []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &projects); err != nil {
+		t.Fatalf("decode project list: %v", err)
+	}
+	if len(projects) != 2 || projects[1]["alias"] != "ttal" || projects[1]["archived"] != true {
+		t.Fatalf("projects = %#v, want archived ttal", projects)
+	}
+
+	if _, err := runProject(t, []string{"list", "tta-lab"}); err == nil {
+		t.Fatal("project list accepted removed org argument")
+	}
+}
+
+func TestProjectGetReturnsArchivedEntry(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, "[archived.ttal]\npath = \"/projects/ttal\"\n")
+
+	stdout, err := runProject(t, []string{"get", "ttal", "--json"})
+	if err != nil {
+		t.Fatalf("project get: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode project get: %v", err)
+	}
+	if got["alias"] != "ttal" || got["archived"] != true {
+		t.Fatalf("project get = %#v", got)
+	}
 }
 
 func TestProjectList_Empty(t *testing.T) {
@@ -157,8 +205,11 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 					t.Fatalf("decode get output: %v", err)
 				}
-				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
 					t.Fatalf("get output = %#v", got)
+				}
+				if _, exists := got["org"]; exists {
+					t.Fatalf("get output still exposes org: %#v", got)
 				}
 			},
 		},
@@ -171,8 +222,11 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 					t.Fatalf("decode resolve output: %v", err)
 				}
-				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["org"] != "tta-lab" {
+				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
 					t.Fatalf("resolve output = %#v", got)
+				}
+				if _, exists := got["org"]; exists {
+					t.Fatalf("resolve output still exposes org: %#v", got)
 				}
 			},
 		},

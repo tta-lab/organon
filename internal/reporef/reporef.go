@@ -3,24 +3,12 @@ package reporef
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-var cloneGitRepo = func(url, dest string) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-		return fmt.Errorf("create clone parent: %w", err)
-	}
-	cmd := exec.Command("git", "clone", url, dest)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // Resolve resolves target as either a bare repo name or an org/repo
-// GitHub reference. Bare names only resolve existing unique local clones.
-// org/repo targets clone from GitHub when missing locally.
+// GitHub reference. Resolution is local-only and never clones.
 func Resolve(target, referencesPath string) (string, error) {
 	if org, repo, ok := parseOrgRepo(target); ok {
 		repoPath := filepath.Join(referencesPath, "github.com", org, repo)
@@ -33,11 +21,10 @@ func Resolve(target, referencesPath string) (string, error) {
 			return "", fmt.Errorf("checking repo path %s: %w", repoPath, err)
 		}
 
-		url := fmt.Sprintf("https://github.com/%s/%s.git", org, repo)
-		if err := cloneGitRepo(url, repoPath); err != nil {
-			return "", fmt.Errorf("clone %s into %s: %w", url, repoPath, err)
-		}
-		return repoPath, nil
+		return "", fmt.Errorf(
+			"reference %q not found locally at %s; clone it with: og clone --reference https://github.com/%s/%s",
+			target, repoPath, org, repo,
+		)
 	}
 
 	return FindClonedRepo(target, referencesPath)
@@ -90,8 +77,8 @@ func FindClonedRepo(name, referencesPath string) (string, error) {
 	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf(
-			"repo %q not found locally; use org/repo format (e.g. charmbracelet/%s) to clone it",
-			name, name,
+			"repo %q not found locally; use og clone --reference <https-url> before project lookup",
+			name,
 		)
 	case 1:
 		return matches[0], nil
@@ -141,22 +128,4 @@ func scanHostDir(name, hostPath string) []string {
 		}
 	}
 	return matches
-}
-
-// DeriveOrg extracts the org name from a reference repo path.
-// For paths like ~/code/references/github.com/tta-lab/agon, returns "tta-lab".
-func DeriveOrg(p string) string {
-	// Walk up: reponame/org/host/...references
-	norm := filepath.Clean(p)
-	// The repo dir itself
-	repoName := filepath.Base(norm)
-	if repoName == "" || repoName == "." || repoName == "/" {
-		return ""
-	}
-	orgDir := filepath.Dir(norm)
-	orgName := filepath.Base(orgDir)
-	if orgName == "" || orgName == "." || orgName == "/" {
-		return ""
-	}
-	return orgName
 }

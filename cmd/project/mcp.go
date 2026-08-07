@@ -8,20 +8,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/org"
 	"github.com/tta-lab/organon/internal/project"
 )
 
 type projectListInput struct {
-	Org string `json:"org,omitempty" jsonschema:"optional exact org name used to filter projects"`
+	IncludeArchived bool `json:"include_archived,omitempty" jsonschema:"include archived projects; defaults to false"`
 }
 
 type projectGetInput struct {
 	Alias string `json:"alias" jsonschema:"exact registered single-layer project alias"`
-}
-
-type orgGetInput struct {
-	Name string `json:"name" jsonschema:"exact registered single-layer org name"`
 }
 
 type projectListOutput struct {
@@ -30,14 +25,6 @@ type projectListOutput struct {
 
 type projectGetOutput struct {
 	Project project.Entry `json:"project"`
-}
-
-type orgListOutput struct {
-	Orgs []org.Entry `json:"orgs"`
-}
-
-type orgGetOutput struct {
-	Org org.Entry `json:"org"`
 }
 
 func boolPointer(value bool) *bool { return &value }
@@ -56,7 +43,7 @@ func discoveryTool(name, title, description string) *mcp.Tool {
 	}
 }
 
-func newProjectMCPServer(projects *project.Catalog, orgs *org.Catalog) *mcp.Server {
+func newProjectMCPServer(projects *project.Store) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-project", Version: "1.0.0"}, nil)
 
 	projectListHandler := func(
@@ -64,12 +51,16 @@ func newProjectMCPServer(projects *project.Catalog, orgs *org.Catalog) *mcp.Serv
 		_ *mcp.CallToolRequest,
 		input projectListInput,
 	) (*mcp.CallToolResult, projectListOutput, error) {
-		return nil, projectListOutput{Projects: projects.List(input.Org)}, nil
+		entries, err := projects.List(input.IncludeArchived)
+		if err != nil {
+			return nil, projectListOutput{}, fmt.Errorf("list projects: %w", err)
+		}
+		return nil, projectListOutput{Projects: entries}, nil
 	}
 	mcp.AddTool(server, discoveryTool(
 		"project_list",
 		"List registered projects",
-		"List registered projects, optionally filtered by exact org name.",
+		"List registered projects, optionally including archived entries.",
 	), projectListHandler)
 
 	projectGetHandler := func(
@@ -77,7 +68,7 @@ func newProjectMCPServer(projects *project.Catalog, orgs *org.Catalog) *mcp.Serv
 		_ *mcp.CallToolRequest,
 		input projectGetInput,
 	) (*mcp.CallToolResult, projectGetOutput, error) {
-		entry, err := projects.GetExact(input.Alias)
+		entry, err := projects.Get(input.Alias)
 		if err != nil {
 			return nil, projectGetOutput{}, fmt.Errorf("get project: %w", err)
 		}
@@ -89,45 +80,17 @@ func newProjectMCPServer(projects *project.Catalog, orgs *org.Catalog) *mcp.Serv
 		"Get one registered project by exact single-layer alias.",
 	), projectGetHandler)
 
-	mcp.AddTool(server, discoveryTool(
-		"org_list",
-		"List registered orgs",
-		"List registered organizations used by Organon project metadata.",
-	), func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, orgListOutput, error) {
-		return nil, orgListOutput{Orgs: orgs.List()}, nil
-	})
-
-	mcp.AddTool(server, discoveryTool(
-		"org_get",
-		"Get registered org",
-		"Get one registered organization by exact single-layer name.",
-	), func(_ context.Context, _ *mcp.CallToolRequest, input orgGetInput) (*mcp.CallToolResult, orgGetOutput, error) {
-		entry, err := orgs.GetExact(input.Name)
-		if err != nil {
-			return nil, orgGetOutput{}, fmt.Errorf("get org: %w", err)
-		}
-		return nil, orgGetOutput{Org: entry}, nil
-	})
-
 	return server
 }
 
 func newMCPCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Serve typed project and org discovery tools over stdio MCP",
+		Short: "Serve typed project discovery tools over stdio MCP",
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			projects, err := project.OpenCatalog(config.ProjectsPath())
-			if err != nil {
-				return err
-			}
-			orgs, err := org.OpenCatalog(config.OrgsPath())
-			if err != nil {
-				return err
-			}
-			return newProjectMCPServer(projects, orgs).Run(cmd.Context(), &mcp.StdioTransport{})
+			return newProjectMCPServer(project.NewStore(config.ProjectsPath())).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }
