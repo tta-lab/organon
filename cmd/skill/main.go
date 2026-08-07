@@ -37,6 +37,7 @@ func newRootCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	cmd.AddCommand(newListCmd(out, errOut, paths))
 	cmd.AddCommand(newGetCmd(out, paths))
 	cmd.AddCommand(newFindCmd(out, errOut, paths))
+	cmd.AddCommand(newMCPCmd())
 
 	return cmd
 }

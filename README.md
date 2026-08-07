@@ -236,7 +236,7 @@ reactivate or reuse the exposed migration PAT.
 
 ## MCP servers
 
-`project`, `og`, and `web` each provide a typed stdio MCP server. Configure
+`project`, `og`, `web`, `skill`, and `src` each provide a typed stdio MCP server. Configure
 them as separate processes so clients can grant only the tools a session needs:
 
 ```json
@@ -244,7 +244,9 @@ them as separate processes so clients can grant only the tools a session needs:
   "mcpServers": {
     "organon-project": { "command": "project", "args": ["mcp"] },
     "organon-og": { "command": "og", "args": ["mcp"] },
-    "organon-web": { "command": "web", "args": ["mcp"] }
+    "organon-web": { "command": "web", "args": ["mcp"] },
+    "organon-skill": { "command": "skill", "args": ["mcp"] },
+    "organon-src": { "command": "src", "args": ["mcp"] }
   }
 }
 ```
@@ -258,6 +260,19 @@ filesystem path, working directory, MCP root, file URI, or credential. `clone`
 accepts a URL instead. The `og` daemon must already be running and owns Git,
 registration, policy, and forge credentials.
 
+`skill mcp` exposes `skill_list`, `skill_find`, and `skill_get`. With no project
+argument it searches only global skill directories. With an exact registered
+alias, project-local skills take priority over global skills. Results use stable
+source labels such as `project:.agents` instead of discovery-root paths.
+Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
+
+`src mcp` exposes only `symbols` and `read`. Both require an exact registered
+project alias and repository-relative file path. `symbols` returns code symbols
+or Markdown sections with IDs; `read` accepts one ID or a bounded UTF-8 byte
+range. The server follows symlinks only when they remain inside the registered
+project and rejects source files larger than 16 MiB before reading. It has no
+mutation tools and requires no revision or SHA argument.
+
 `og mcp` exposes twelve tools: auth status, clone, push, pull, PR create/find,
 and PR get/modify/comment/checks/log/failures. It mirrors CLI current-branch
 workflows against the registered checkout's current branch. Force push uses
@@ -266,8 +281,7 @@ guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
 operation; `pr_get`, modify, comment, checks, log, and failures use the current
 branch when the ID is omitted. Tag remains CLI-only. Restart the daemon after
 changing `og.toml`; restart web MCP after changing web configuration. Run
-`project mcp --help`, `og mcp --help`, or `web mcp --help` for the tool lists and
-configuration details.
+`<tool> mcp --help` for each server's tool list and configuration details.
 
 ## Why
 
