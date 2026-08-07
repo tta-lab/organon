@@ -19,3 +19,6 @@ var helpComment string
 
 //go:embed help/edit.md
 var helpEdit string
+
+//go:embed help/mcp.md
+var helpMCP string

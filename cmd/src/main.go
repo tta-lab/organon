@@ -1,10 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -14,16 +14,22 @@ import (
 	"github.com/tta-lab/organon/internal/indent"
 	"github.com/tta-lab/organon/internal/markdown"
 	"github.com/tta-lab/organon/internal/srcop"
+	"github.com/tta-lab/organon/internal/srcview"
 	"github.com/tta-lab/organon/internal/tree"
 	"github.com/tta-lab/organon/internal/treesitter"
 )
 
 func isMarkdown(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	return ext == ".md" || ext == ".markdown" || ext == ".mdx" || ext == ".tpl"
+	return srcview.IsMarkdown(filename)
 }
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "src <file> [flags]",
 		Short: "Structure-aware source file reading and editing",
@@ -100,11 +106,8 @@ func main() {
 	editCmd.Flags().String("after-file", "",
 		"Read AFTER content from a file instead of stdin (use with --before-file)")
 
-	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd)
-
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, newMCPCmd())
+	return root
 }
 
 // getDepth reads the --depth persistent flag from the root command.
@@ -149,15 +152,12 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if isMarkdown(filename) {
-		return runMarkdownTreeOrRead(cmd, filename, source)
-	}
-
 	depth := getDepth(cmd)
 	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	treeOnly, _ := cmd.Flags().GetBool("tree")
-
-	if !hasTreeSitterSupport(filename) {
+	inspector := srcview.NewInspector(filename, source, depth)
+	outline, err := inspector.Outline()
+	if errors.Is(err, srcview.ErrNoStructure) {
 		if symbolID != "" {
 			return noStructureError(filename, "reading by --symbol-id")
 		}
@@ -167,39 +167,33 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 		fmt.Print(string(source))
 		return nil
 	}
-
-	symbols, err := treesitter.ExtractSymbols(filename, source, depth)
 	if err != nil {
 		return err
 	}
-	nodes := treesitter.SymbolTree(symbols)
-	if len(nodes) == 0 {
-		if symbolID != "" {
-			return noStructureError(filename, "reading by --symbol-id")
+
+	if symbolID != "" {
+		content, err := inspector.ReadContent(symbolID)
+		if err != nil {
+			if isMarkdown(filename) {
+				return err
+			}
+			return fmt.Errorf("symbol %q not found; run --tree to see current IDs", symbolID)
 		}
+		fmt.Print(content)
+		return nil
+	}
+	if len(outline.Symbols) == 0 && !isMarkdown(filename) {
 		if treeOnly {
 			return noSymbolTreeError(filename)
 		}
 		fmt.Print(string(source))
 		return nil
 	}
-
-	if symbolID != "" {
-		for i, n := range nodes {
-			if n.ID == symbolID {
-				sym := symbols[i]
-				start := sym.StartByte
-				if sym.DocStart >= 0 {
-					start = uint(sym.DocStart)
-				}
-				fmt.Print(string(source[start:sym.EndByte]))
-				return nil
-			}
-		}
-		return fmt.Errorf("symbol %q not found; run --tree to see current IDs", symbolID)
+	rendered, err := inspector.RenderTree()
+	if err != nil {
+		return err
 	}
-
-	fmt.Print(tree.Render(nodes))
+	fmt.Print(rendered)
 	return nil
 }
 
@@ -403,22 +397,6 @@ func writeAndShow(filename string, source, result []byte, depth int) error {
 		return nil
 	}
 	return printTree(filename, result, depth)
-}
-
-// runMarkdownTreeOrRead handles the root command for .md files.
-// --tree and --depth flags are no-ops for markdown: the heading tree is always shown
-// (unless --symbol-id is given), since markdown structure is heading-based, not depth-bounded.
-func runMarkdownTreeOrRead(cmd *cobra.Command, filename string, source []byte) error {
-	symbolID, _ := cmd.Flags().GetString("symbol-id")
-	if symbolID != "" {
-		content, err := markdown.ReadSection(source, symbolID)
-		if err != nil {
-			return err
-		}
-		fmt.Print(content)
-		return nil
-	}
-	return printMarkdownTree(filename, source)
 }
 
 func printMarkdownTree(_ string, source []byte) error {

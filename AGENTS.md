@@ -19,9 +19,9 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 ## Architecture
 
 ### Binaries
-- `cmd/src/` — tree-sitter symbol-aware file reading/editing
+- `cmd/src/` — tree-sitter symbol-aware file reading/editing plus read-only project-scoped MCP
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
-- `cmd/skill/` — filesystem-based skill discovery: list/get/find SKILL.md files from project-local and global agent skill directories
+- `cmd/skill/` — filesystem-based skill discovery plus project-aware read-only MCP
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
 - `cmd/project/` — project management CLI: list, get, resolve, and jump to registered projects
 - `cmd/goal/` — Lenos session goal file CLI: add/update/append/get/status via `$LENOS_GOAL`
@@ -32,6 +32,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
 - `internal/skill/` — filesystem-based skill discovery and frontmatter parsing
 - `internal/token/` — LLM token counting with tiktoken-go; sync.OnceValues lazy init, regex fallback
+- `internal/srcview/` — trusted-byte source outlines and safe registered-project file reads shared by CLI and MCP
 
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files

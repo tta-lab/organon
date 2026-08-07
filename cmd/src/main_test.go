@@ -81,8 +81,12 @@ func TestMarkdownDispatch_ReadSection(t *testing.T) {
 	cmd.PersistentFlags().Int("depth", 2, "")
 	require.NoError(t, cmd.Flags().Set("symbol-id", id))
 
-	err := runTreeOrRead(cmd, []string{f})
+	var err error
+	output := captureStdout(t, func() {
+		err = runTreeOrRead(cmd, []string{f})
+	})
 	assert.NoError(t, err)
+	assert.Equal(t, "## Section One\n\nContent here.\n", output)
 }
 
 func TestMarkdownDispatch_Replace(t *testing.T) {

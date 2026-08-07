@@ -56,6 +56,20 @@ func TestDiscoveryPaths_Order(t *testing.T) {
 	}
 }
 
+func TestProjectAndGlobalDiscoveryPaths(t *testing.T) {
+	projectPaths := ProjectDiscoveryPaths("/project")
+	globalPaths := GlobalDiscoveryPaths("/home/user")
+	if len(projectPaths) != 4 || len(globalPaths) != 4 {
+		t.Fatalf("got %d project and %d global paths, want 4 each", len(projectPaths), len(globalPaths))
+	}
+	if projectPaths[0] != "/project/.agents/skills" || projectPaths[3] != "/project/.cursor/skills" {
+		t.Fatalf("unexpected project paths: %v", projectPaths)
+	}
+	if globalPaths[0] != "/home/user/.agents/skills" || globalPaths[3] != "/home/user/.cursor/skills" {
+		t.Fatalf("unexpected global paths: %v", globalPaths)
+	}
+}
+
 func TestListSkills_AllPathsMissing(t *testing.T) {
 	skills, err := ListSkills([]string{"/nonexistent/path/a", "/nonexistent/path/b"})
 	if err != nil {
@@ -538,5 +552,24 @@ func TestFindSkills_NoMatch(t *testing.T) {
 	}
 	if len(skills) > 0 {
 		t.Errorf("expected empty, got %v", skills)
+	}
+}
+
+func TestFindSkills_HigherPriorityDuplicateStillShadowsLowerMatch(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	global := filepath.Join(root, "global")
+	writeSkillFile(t, project, ".agents/skills", "project-dir", "shared", "project description", "tools", "project body")
+	writeSkillFile(t, global, ".agents/skills", "global-dir", "shared", "matching keyword", "tools", "global body")
+
+	skills, err := FindSkills([]string{
+		filepath.Join(project, ".agents/skills"),
+		filepath.Join(global, ".agents/skills"),
+	}, []string{"matching"})
+	if err != nil {
+		t.Fatalf("FindSkills: %v", err)
+	}
+	if len(skills) != 0 {
+		t.Fatalf("got %#v, want higher-priority non-match to shadow lower duplicate", skills)
 	}
 }

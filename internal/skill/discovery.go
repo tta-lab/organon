@@ -32,18 +32,29 @@ func newSkill(name string, meta Meta, source, path, body string) Skill {
 	}
 }
 
-// DiscoveryPaths returns the 8 discovery paths in priority order.
-func DiscoveryPaths(cwd, home string) []string {
+// ProjectDiscoveryPaths returns project-local discovery paths in priority order.
+func ProjectDiscoveryPaths(root string) []string {
 	return []string{
-		filepath.Join(cwd, ".agents", "skills"),
-		filepath.Join(cwd, ".crush", "skills"),
-		filepath.Join(cwd, ".claude", "skills"),
-		filepath.Join(cwd, ".cursor", "skills"),
+		filepath.Join(root, ".agents", "skills"),
+		filepath.Join(root, ".crush", "skills"),
+		filepath.Join(root, ".claude", "skills"),
+		filepath.Join(root, ".cursor", "skills"),
+	}
+}
+
+// GlobalDiscoveryPaths returns user-global discovery paths in priority order.
+func GlobalDiscoveryPaths(home string) []string {
+	return []string{
 		filepath.Join(home, ".agents", "skills"),
 		filepath.Join(home, ".crush", "skills"),
 		filepath.Join(home, ".claude", "skills"),
 		filepath.Join(home, ".cursor", "skills"),
 	}
+}
+
+// DiscoveryPaths returns project-local paths followed by global paths.
+func DiscoveryPaths(root, home string) []string {
+	return append(ProjectDiscoveryPaths(root), GlobalDiscoveryPaths(home)...)
 }
 
 // ListSkills walks all discovery paths and returns all skills, deduplicated by name.
@@ -126,85 +137,14 @@ func FindSkills(paths []string, keywords []string) ([]Skill, error) {
 		lowerKeywords[i] = strings.ToLower(k)
 	}
 
-	seen := make(map[string]bool)
-	result := make([]Skill, 0, 8)
-	errs := make([]error, 0, 4)
-
-	for _, base := range paths {
-		skills, scanErrs := scanSkillDir(base, lowerKeywords, seen)
-		errs = append(errs, scanErrs...)
-		result = append(result, skills...)
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
-	})
-	if len(errs) > 0 {
-		return result, errors.Join(errs...)
-	}
-	return result, nil
-}
-
-// scanSkillDir scans a single discovery directory for matching skills.
-// Returns skills found and any non-ENOENT errors encountered.
-func scanSkillDir(base string, lowerKeywords []string, seen map[string]bool) ([]Skill, []error) {
-	var result []Skill
-	var errs []error
-
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, []error{fmt.Errorf("read skills directory %q: %w", base, err)}
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		skill, scanErr := scanSkill(base, entry.Name(), lowerKeywords, seen)
-		if scanErr != nil {
-			if os.IsNotExist(scanErr) {
-				continue
-			}
-			errs = append(errs, scanErr)
-			continue
-		}
-		if skill != nil {
-			result = append(result, *skill)
+	skills, err := ListSkills(paths)
+	result := make([]Skill, 0, len(skills))
+	for _, candidate := range skills {
+		if matchesKeywords(candidate.Name, candidate.Description, lowerKeywords) {
+			result = append(result, candidate)
 		}
 	}
-
-	return result, errs
-}
-
-// scanSkill reads and checks a single skill directory for keyword match.
-// Returns nil skill if no SKILL.md or no match; returns the error if the file couldn't be read.
-func scanSkill(base, dirName string, lowerKeywords []string, seen map[string]bool) (*Skill, error) {
-	skillPath := filepath.Join(base, dirName, "SKILL.md")
-	data, err := os.ReadFile(skillPath)
-	if err != nil {
-		return nil, err
-	}
-
-	meta, body := ParseFrontmatter(data)
-	if meta.Name == "" {
-		return nil, nil
-	}
-	name := meta.Name
-
-	if seen[name] {
-		return nil, nil
-	}
-
-	if !matchesKeywords(name, meta.Description, lowerKeywords) {
-		return nil, nil
-	}
-
-	seen[name] = true
-	s := newSkill(name, meta, base, skillPath, string(body))
-	return &s, nil
+	return result, err
 }
 
 // matchesKeywords checks if any keyword appears in the skill's name or description.
