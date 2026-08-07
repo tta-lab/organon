@@ -542,6 +542,7 @@ func TestPRGetWithExplicitIDWorksOnDetachedHEAD(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
 	gitRun(t, repo, "checkout", "--detach")
 
 	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
@@ -570,6 +571,7 @@ func TestPRModifyMergesAbsentFieldsAndCanClearBody(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
 	gitRun(t, repo, "checkout", "--detach")
 
 	var edits [][2]string

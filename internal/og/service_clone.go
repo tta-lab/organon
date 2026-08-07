@@ -291,6 +291,16 @@ func (s Service) cloneAuthentication(ctx context.Context, source cloneSource) (g
 
 func ensureCloneParent(destination string) error {
 	parent := filepath.Dir(destination)
+	if err := validateCloneParentChain(parent); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create clone destination parent: %w", err)
+	}
+	return validateCloneParentChain(parent)
+}
+
+func validateCloneParentChain(parent string) error {
 	for current := parent; ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
 		if err == nil {
@@ -308,13 +318,13 @@ func ensureCloneParent(destination string) error {
 			break
 		}
 	}
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("create clone destination parent: %w", err)
-	}
 	return nil
 }
 
 func (s Service) validateExistingClone(source cloneSource) (bool, error) {
+	if err := validateCloneParentChain(filepath.Dir(source.destination)); err != nil {
+		return false, err
+	}
 	info, err := os.Lstat(source.destination)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -332,6 +342,9 @@ func (s Service) validateExistingClone(source cloneSource) (bool, error) {
 }
 
 func validateClonedRepository(directory string, source cloneSource) error {
+	if err := validateLocalGitControl(directory); err != nil {
+		return err
+	}
 	root, err := gitOutput(directory, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("validate cloned repository: %w", err)
@@ -363,6 +376,32 @@ func validateClonedRepository(directory string, source cloneSource) error {
 		info.Owner != source.info.Owner || info.Repo != source.info.Repo ||
 		!strings.EqualFold(normalizedBaseURL, source.info.BaseURL) {
 		return fmt.Errorf("existing origin %q does not match requested repository %q", remote, source.remote)
+	}
+	return nil
+}
+
+func validateLocalGitControl(directory string) error {
+	gitControlPath := filepath.Join(directory, ".git")
+	gitControl, err := os.Lstat(gitControlPath)
+	if err != nil {
+		return fmt.Errorf("validate git control directory: %w", err)
+	}
+	if gitControl.Mode()&os.ModeSymlink != 0 || !gitControl.IsDir() {
+		return fmt.Errorf("git control directory %q must be a local directory", gitControlPath)
+	}
+	absoluteGitDir, err := controlledGitOutput(directory, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return fmt.Errorf("validate git control directory: %w", err)
+	}
+	if filepath.Clean(absoluteGitDir) != filepath.Clean(gitControlPath) {
+		return fmt.Errorf("git control directory %q escapes clone destination", absoluteGitDir)
+	}
+	absoluteCommonDir, err := controlledGitOutput(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return fmt.Errorf("validate git control directory: %w", err)
+	}
+	if filepath.Clean(absoluteCommonDir) != filepath.Clean(gitControlPath) {
+		return fmt.Errorf("git control directory %q escapes clone destination", absoluteCommonDir)
 	}
 	return nil
 }

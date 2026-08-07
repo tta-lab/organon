@@ -27,6 +27,28 @@ func TestGitPushRequestsWritePurpose(t *testing.T) {
 	}
 }
 
+func TestGitPushRejectsMismatchedPushURLBeforeCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "remote", "set-url", "--push", remoteOrigin, "https://attacker.invalid/tta-lab/example.git")
+	broker := &recordingBroker{token: "must-not-mint"}
+	runs := 0
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error {
+		runs++
+		return nil
+	})
+	defer restoreGit()
+
+	_, err := NewService(broker).GitPush(Request{WorkDir: repo})
+	if err == nil || !strings.Contains(err.Error(), "push target") {
+		t.Fatalf("GitPush error = %v, want push target mismatch", err)
+	}
+	if len(broker.tokenCalls) != 0 || runs != 0 {
+		t.Fatalf("write side effects: broker calls = %+v, git runs = %d", broker.tokenCalls, runs)
+	}
+}
+
 func TestGitPullRequestsReadPurpose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

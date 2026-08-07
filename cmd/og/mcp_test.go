@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -790,20 +789,16 @@ func TestOGMCPCommandTransport(t *testing.T) {
 	}
 }
 
-func TestOGMCPCommandTransportClonesGenericHTTPSAndHotRegisters(t *testing.T) {
+func TestOGMCPCommandTransportClonesAllowedForgejoHTTPAndHotRegisters(t *testing.T) {
 	home := t.TempDir()
 	writeOGMCPConfigContent(t, home, "")
-	gitServer := newDumbGitHTTPSServer(t)
+	gitServer := newDumbGitHTTPServer(t)
 	defer gitServer.Close()
-	caPath := filepath.Join(t.TempDir(), "git-test-ca.pem")
-	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: gitServer.Certificate().Raw})
-	if err := os.WriteFile(caPath, certificate, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("HOME", home)
-	t.Setenv("GIT_SSL_CAINFO", caPath)
 	store := project.NewStore(filepath.Join(home, ".config", "ttal", "projects.toml"))
-	service := og.NewServiceWithConfig(nil, store, ogconfig.Config{})
+	service := og.NewServiceWithConfig(nil, store, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{gitServer.URL}},
+	})
 	daemon := httptest.NewServer(og.NewMux(service))
 	defer daemon.Close()
 
@@ -825,7 +820,7 @@ func TestOGMCPCommandTransportClonesGenericHTTPSAndHotRegisters(t *testing.T) {
 	}
 	wantPath := filepath.Join(home, "code", "projects", "tta-lab", "example")
 	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), wantPath) ||
-		!strings.Contains(fmt.Sprint(result.StructuredContent), "generic") {
+		!strings.Contains(fmt.Sprint(result.StructuredContent), "forgejo") {
 		t.Fatalf("clone result = %#v", result)
 	}
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -834,7 +829,7 @@ func TestOGMCPCommandTransportClonesGenericHTTPSAndHotRegisters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "anonymous") {
+	if result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "forgejo") {
 		t.Fatalf("hot registered auth result = %#v", result)
 	}
 }
@@ -855,7 +850,7 @@ func writeOGMCPConfigContent(t *testing.T, home, content string) {
 	}
 }
 
-func newDumbGitHTTPSServer(t *testing.T) *httptest.Server {
+func newDumbGitHTTPServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	webRoot := t.TempDir()
 	bare := filepath.Join(webRoot, "tta-lab", "example.git")
@@ -876,7 +871,7 @@ func newDumbGitHTTPSServer(t *testing.T) *httptest.Server {
 	runGitFixture(t, "-C", work, "push", "origin", "main")
 	runGitFixture(t, "--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main")
 	runGitFixture(t, "--git-dir", bare, "update-server-info")
-	return httptest.NewTLSServer(http.FileServer(http.Dir(webRoot)))
+	return httptest.NewServer(http.FileServer(http.Dir(webRoot)))
 }
 
 func runGitFixture(t *testing.T, args ...string) {

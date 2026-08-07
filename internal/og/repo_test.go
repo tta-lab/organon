@@ -48,6 +48,25 @@ func TestResolveRemoteRepoContextIgnoresAmbientURLRewrite(t *testing.T) {
 	}
 }
 
+func TestResolveRepoContextIgnoresAmbientRepositorySelectors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredRepo(t, home, branchMain, "https://github.com/tta-lab/example.git", false)
+	decoy := filepath.Join(t.TempDir(), "decoy")
+	gitRun(t, "", "init", decoy)
+	gitRun(t, decoy, "switch", "-c", "redirected")
+	t.Setenv("GIT_DIR", filepath.Join(decoy, ".git"))
+	t.Setenv("GIT_WORK_TREE", repo)
+
+	ctx, err := NewService(nil).resolveRepoContextFor(repo)
+	if err != nil {
+		t.Fatalf("resolveRepoContextFor: %v", err)
+	}
+	if ctx.WorkDir != repo || ctx.Branch != branchMain || ctx.RemoteURL != "https://github.com/tta-lab/example.git" {
+		t.Fatalf("context = %+v, want registered repository metadata", ctx)
+	}
+}
+
 func TestResolveRemoteRepoContextUsesOnlyAllowedForgejoBase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

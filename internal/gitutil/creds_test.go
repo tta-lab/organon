@@ -2,6 +2,7 @@ package gitutil
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -188,6 +189,14 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 		"GIT_CONFIG_SYSTEM=/tmp/leaky-system-config",
 		"GIT_CONFIG_PARAMETERS='credential.helper=!echo leaked'",
 		"GIT_CONFIG_NOSYSTEM=0",
+		"GIT_DIR=/tmp/other.git",
+		"GIT_WORK_TREE=/tmp/other-worktree",
+		"GIT_COMMON_DIR=/tmp/other-common",
+		"GIT_INDEX_FILE=/tmp/other-index",
+		"GIT_OBJECT_DIRECTORY=/tmp/other-objects",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES=/tmp/alternate-objects",
+		"GIT_EXEC_PATH=/tmp/fake-git-exec",
+		"GIT_TEMPLATE_DIR=/tmp/fake-template",
 		"EXA_API_KEY=unrelated-api-key",
 		"CUSTOM_SECRET=unrelated-secret",
 		"CUSTOM_PASSWORD=unrelated-password",
@@ -201,7 +210,9 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, variable := range []string{
 				"GIT_TRACE", "GIT_TRACE_CURL", "GIT_CURL_VERBOSE", "GIT_TRACE_PACKET", "GIT_TRACE2_EVENT",
-				"GIT_CONFIG_SYSTEM", "GIT_CONFIG_PARAMETERS",
+				"GIT_CONFIG_SYSTEM", "GIT_CONFIG_PARAMETERS", "GIT_DIR", "GIT_WORK_TREE",
+				"GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+				"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR",
 				"EXA_API_KEY", "CUSTOM_SECRET", "CUSTOM_PASSWORD",
 			} {
 				if value := envValue(env, variable); value != "" {
@@ -211,6 +222,10 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 			if envValue(env, "GIT_CONFIG_GLOBAL") != "/dev/null" ||
 				envValue(env, "GIT_CONFIG_NOSYSTEM") != "1" {
 				t.Fatal("controlled Git environment retained ambient global/system configuration")
+			}
+			configs := gitConfigPairs(t, env)
+			if configs["core.hooksPath"] != os.DevNull || configs["http.sslVerify"] != "true" {
+				t.Fatalf("controlled git configs = %#v, want hooks disabled and TLS verification enabled", configs)
 			}
 		})
 	}

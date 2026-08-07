@@ -11,21 +11,6 @@ import (
 
 const forgejoTokenEnv = "FORGEJO_TOKEN"
 
-var controlledGitEnvironmentNames = map[string]struct{}{
-	"GIT_TERMINAL_PROMPT":   {},
-	"GIT_CONFIG_COUNT":      {},
-	"GIT_TOKEN_INJECT":      {},
-	"GIT_CONFIG_GLOBAL":     {},
-	"GIT_CONFIG_SYSTEM":     {},
-	"GIT_CONFIG_PARAMETERS": {},
-	"GIT_CONFIG_NOSYSTEM":   {},
-	"GIT_ASKPASS":           {},
-	"SSH_ASKPASS":           {},
-	"GCM_INTERACTIVE":       {},
-	"GIT_TRACE":             {},
-	"GIT_CURL_VERBOSE":      {},
-}
-
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
 // credential source of truth and must not re-resolve from ambient env vars.
@@ -54,11 +39,15 @@ func AnonymousGitEnv(baseEnv []string) []string {
 	clean := controlledCredentialEnv(baseEnv)
 	return append(clean,
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_COUNT=4",
 		"GIT_CONFIG_KEY_0=credential.helper",
 		"GIT_CONFIG_VALUE_0=",
 		"GIT_CONFIG_KEY_1=core.askPass",
 		"GIT_CONFIG_VALUE_1=",
+		"GIT_CONFIG_KEY_2=core.hooksPath",
+		"GIT_CONFIG_VALUE_2="+os.DevNull,
+		"GIT_CONFIG_KEY_3=http.sslVerify",
+		"GIT_CONFIG_VALUE_3=true",
 	)
 }
 
@@ -67,13 +56,17 @@ func ForgejoGitEnv(baseEnv []string, token string) []string {
 	env := controlledCredentialEnv(baseEnv)
 	env = append(env,
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_COUNT=5",
 		"GIT_CONFIG_KEY_0=credential.helper",
 		"GIT_CONFIG_VALUE_0=",
 		"GIT_CONFIG_KEY_1=core.askPass",
 		"GIT_CONFIG_VALUE_1=",
 		"GIT_CONFIG_KEY_2=credential.helper",
 		"GIT_CONFIG_VALUE_2=!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
+		"GIT_CONFIG_KEY_3=core.hooksPath",
+		"GIT_CONFIG_VALUE_3="+os.DevNull,
+		"GIT_CONFIG_KEY_4=http.sslVerify",
+		"GIT_CONFIG_VALUE_4=true",
 	)
 	if token != "" {
 		env = append(env, "GIT_TOKEN_INJECT="+token)
@@ -91,6 +84,8 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 	configs := []configPair{
 		{key: "credential.helper", value: ""},
 		{key: "core.askPass", value: ""},
+		{key: "core.hooksPath", value: os.DevNull},
+		{key: "http.sslVerify", value: "true"},
 	}
 	if token != "" {
 		configs = append(configs, configPair{
@@ -128,11 +123,7 @@ func filterControlledGitEnv(baseEnv []string) []string {
 }
 
 func controlledGitEnvironmentName(name string) bool {
-	if _, ok := controlledGitEnvironmentNames[name]; ok {
-		return true
-	}
-	return strings.HasPrefix(name, "GIT_TRACE_") || strings.HasPrefix(name, "GIT_TRACE2") ||
-		strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_")
+	return strings.HasPrefix(name, "GIT_") || name == "SSH_ASKPASS" || name == "GCM_INTERACTIVE"
 }
 
 func controlledCredentialEnv(baseEnv []string) []string {

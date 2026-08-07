@@ -358,11 +358,19 @@ func TestGitCloneRejectsDestinationConflictsWithoutMutation(t *testing.T) {
 		if err := os.MkdirAll(destination, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		_, err := NewServiceWithConfig(nil, writeCloneProjects(t, ""), ogconfig.Config{}).GitClone(Request{
+		store := writeCloneProjects(t, "")
+		withCloneRunner(t, func(context.Context, cloneInvocation) error {
+			t.Fatal("clone runner called for existing non-repository")
+			return nil
+		})
+		_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
 			URL: "https://codeberg.org/tta-lab/example.git",
 		})
-		if err == nil || !strings.Contains(err.Error(), "validate cloned repository") {
-			t.Fatalf("GitClone error = %v", err)
+		if err == nil {
+			t.Fatal("GitClone accepted an existing non-repository")
+		}
+		if _, getErr := store.Get("example"); !errors.Is(getErr, project.ErrNotFound) {
+			t.Fatalf("existing non-repository was registered: %v", getErr)
 		}
 	})
 
@@ -387,6 +395,84 @@ func TestGitCloneRejectsDestinationConflictsWithoutMutation(t *testing.T) {
 			t.Fatalf("symlink target mutated: %+v", entries)
 		}
 	})
+
+}
+
+func TestGitCloneRejectsExistingCheckoutUnderSymlinkParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	outside := t.TempDir()
+	code := filepath.Join(home, "code")
+	if err := os.MkdirAll(code, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(code, "projects")); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(outside, "tta-lab", "example")
+	initCloneRepository(t, destination, "https://codeberg.org/tta-lab/example.git")
+	store := writeCloneProjects(t, "")
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called for existing checkout")
+		return nil
+	})
+
+	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err == nil {
+		t.Fatal("GitClone accepted an existing checkout under a symlink parent")
+	}
+	if _, getErr := store.Get("example"); !errors.Is(getErr, project.ErrNotFound) {
+		t.Fatalf("existing unsafe checkout was registered: %v", getErr)
+	}
+}
+
+func TestGitCloneRejectsExternalGitControlDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
+	external := filepath.Join(t.TempDir(), "external")
+	initCloneRepository(t, external, "https://codeberg.org/tta-lab/example.git")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(external, ".git"), filepath.Join(destination, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	assertUnsafeExistingCloneRejected(t, destination)
+}
+
+func TestGitCloneRejectsExternalGitCommonDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, "code", "projects", "tta-lab", "example")
+	initCloneRepository(t, destination, "https://codeberg.org/tta-lab/example.git")
+	external := filepath.Join(t.TempDir(), "common.git")
+	gitRun(t, "", "init", "--bare", external)
+	if err := os.WriteFile(filepath.Join(destination, ".git", "commondir"), []byte(external+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertUnsafeExistingCloneRejected(t, destination)
+}
+
+func assertUnsafeExistingCloneRejected(t *testing.T, destination string) {
+	t.Helper()
+	store := writeCloneProjects(t, "")
+	withCloneRunner(t, func(context.Context, cloneInvocation) error {
+		t.Fatal("clone runner called for existing checkout")
+		return nil
+	})
+
+	_, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://codeberg.org/tta-lab/example.git",
+	})
+	if err == nil || !strings.Contains(err.Error(), "git control directory") {
+		t.Fatalf("GitClone error = %v, want Git control directory rejection for %s", err, destination)
+	}
+	if _, getErr := store.Get("example"); !errors.Is(getErr, project.ErrNotFound) {
+		t.Fatalf("existing unsafe checkout was registered: %v", getErr)
+	}
 }
 
 func TestGitCloneLeavesCompletedCheckoutWhenRegistrationFails(t *testing.T) {
@@ -495,7 +581,7 @@ func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 	if strings.Contains(environment, "ambient-token") || strings.Contains(environment, "GIT_TOKEN_INJECT=") {
 		t.Fatal("public Forgejo clone retained credentials")
 	}
-	if !strings.Contains(environment, "GIT_CONFIG_COUNT=2") ||
+	if !strings.Contains(environment, "GIT_CONFIG_COUNT=4") ||
 		!strings.Contains(environment, "GIT_CONFIG_KEY_1=core.askPass") {
 		t.Fatal("public Forgejo clone did not use anonymous Git environment")
 	}

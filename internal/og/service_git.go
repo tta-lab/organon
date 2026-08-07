@@ -109,6 +109,9 @@ func (s Service) GitTag(req Request) (Response, error) {
 	if err := requireRemoteWrite(ctx, "tag"); err != nil {
 		return Response{}, err
 	}
+	if err := requireGitPushTarget(ctx, "tag"); err != nil {
+		return Response{}, err
+	}
 	if req.Bump != "" && req.Tag != "" {
 		return Response{}, fmt.Errorf("--bump and a positional version are mutually exclusive")
 	}
