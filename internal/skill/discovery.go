@@ -13,6 +13,8 @@ import (
 	"github.com/tta-lab/organon/internal/safefile"
 )
 
+const maximumSkillBytes = 1024 * 1024
+
 // Skill represents a discovered skill with its metadata and source location.
 type Skill struct {
 	Name        string
@@ -132,22 +134,9 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 		}
 	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	var data []byte
-	if containmentRoot != "" {
-		file, err := safefile.OpenContained(containmentRoot, skillPath)
-		if err != nil {
-			return nil, fmt.Errorf("resolve skill %q: %w", skillPath, err)
-		}
-		defer file.Close()
-		data, err = io.ReadAll(file)
-		if err != nil {
-			return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
-		}
-	} else {
-		data, err = os.ReadFile(skillPath)
-		if err != nil {
-			return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
-		}
+	data, err := readSkillData(skillPath, containmentRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
 	}
 	meta, body := ParseFrontmatter(data)
 	if meta.Name == "" {
@@ -155,6 +144,35 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 	}
 	loaded := newSkill(meta.Name, meta, base, skillPath, string(body))
 	return &loaded, nil
+}
+
+func readSkillData(skillPath, containmentRoot string) ([]byte, error) {
+	var file *os.File
+	var err error
+	if containmentRoot != "" {
+		file, err = safefile.OpenContained(containmentRoot, skillPath)
+	} else {
+		file, err = os.Open(skillPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maximumSkillBytes {
+		return nil, fmt.Errorf("SKILL.md exceeds the 1 MiB skill limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maximumSkillBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maximumSkillBytes {
+		return nil, fmt.Errorf("SKILL.md exceeds the 1 MiB skill limit")
+	}
+	return data, nil
 }
 
 // GetSkill returns the skill matching the given frontmatter name, using priority order.

@@ -141,6 +141,28 @@ func TestListSkillsContainedRejectsProjectSymlinkEscapes(t *testing.T) {
 	}
 }
 
+func TestListSkillsRejectsOversizedSkillBeforeParsing(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".agents", "skills", "oversized")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maximumSkillBytes + 1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListSkills([]string{filepath.Dir(dir)}); err == nil || !strings.Contains(err.Error(), "1 MiB") {
+		t.Fatalf("ListSkills oversized error = %v", err)
+	}
+}
+
 func TestListSkills_SinglePath_MultipleSkills(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "zebra", "a zebra skill", "animals", "zebra body")
