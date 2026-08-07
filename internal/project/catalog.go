@@ -9,6 +9,8 @@ import (
 	"sort"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 var (
@@ -25,6 +27,7 @@ type Catalog struct {
 	archivedEntries []Entry
 	byAlias         map[string]Entry
 	byPath          map[string]Entry
+	byRemote        map[string]Entry
 }
 
 // OpenCatalog reads and validates one projects.toml snapshot.
@@ -46,16 +49,12 @@ func OpenCatalog(path string) (*Catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	archived := parseArchivedEntries(raw["archived"])
-
-	activeAliases := make(map[string]struct{}, len(active))
-	for _, entry := range active {
-		activeAliases[entry.Alias] = struct{}{}
+	archived, err := parseArchivedEntries(raw["archived"])
+	if err != nil {
+		return nil, err
 	}
-	for _, entry := range archived {
-		if _, collision := activeAliases[entry.Alias]; collision {
-			return nil, fmt.Errorf("%w: active and archived entries use alias %q", ErrInvalidConfig, entry.Alias)
-		}
+	if err := validateGlobalUniqueness(append(append([]Entry(nil), active...), archived...)); err != nil {
+		return nil, err
 	}
 
 	sort.Slice(active, func(i, j int) bool { return active[i].Alias < active[j].Alias })
@@ -65,7 +64,6 @@ func OpenCatalog(path string) (*Catalog, error) {
 
 func parseActiveEntries(raw map[string]any) ([]Entry, error) {
 	entries := make([]Entry, 0, len(raw))
-	paths := make(map[string]string, len(raw))
 	for alias, value := range raw {
 		if alias == "archived" {
 			continue
@@ -74,13 +72,6 @@ func parseActiveEntries(raw map[string]any) ([]Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		if previous, duplicate := paths[entry.Path]; duplicate {
-			return nil, fmt.Errorf(
-				"%w: projects %q and %q use the same path %q",
-				ErrInvalidConfig, previous, alias, entry.Path,
-			)
-		}
-		paths[entry.Path] = alias
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -104,7 +95,7 @@ func parseActiveEntry(alias string, value any) (Entry, error) {
 				ErrInvalidAlias, alias+"."+key,
 			)
 		}
-		if key != "name" && key != "path" {
+		if key != "name" && key != "path" && key != "remote" {
 			return Entry{}, fmt.Errorf("%w for %q: unsupported active field %q", ErrInvalidConfig, alias, key)
 		}
 	}
@@ -124,33 +115,98 @@ func parseActiveEntry(alias string, value any) (Entry, error) {
 		)
 	}
 	entry.Path = filepath.Clean(entry.Path)
+	var err error
+	entry.Remote, err = canonicalRemote(alias, table["remote"])
+	if err != nil {
+		return Entry{}, err
+	}
 	return entry, nil
 }
 
-func parseArchivedEntries(value any) []Entry {
+func parseArchivedEntries(value any) ([]Entry, error) {
+	if value == nil {
+		return nil, nil
+	}
 	tables, ok := value.(map[string]any)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("%w: archived must be a table", ErrInvalidConfig)
 	}
 	entries := make([]Entry, 0, len(tables))
 	for alias, rawEntry := range tables {
 		if !validAlias(alias) {
-			continue
+			return nil, fmt.Errorf("%w %q", ErrInvalidAlias, alias)
 		}
 		table, ok := rawEntry.(map[string]any)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("%w for archived %q: expected a table", ErrInvalidConfig, alias)
+		}
+		for key, field := range table {
+			if _, nested := field.(map[string]any); nested {
+				return nil, fmt.Errorf("%w %q: nested archived tables are not allowed", ErrInvalidAlias, alias+"."+key)
+			}
 		}
 		entry := Entry{Alias: alias, Archived: true}
 		entry.Name, _ = table["name"].(string)
+		if name, exists := table["name"]; exists {
+			if entry.Name, ok = name.(string); !ok {
+				return nil, fmt.Errorf("%w for archived %q: name must be a string", ErrInvalidConfig, alias)
+			}
+		}
 		entry.Path, _ = table["path"].(string)
 		if entry.Path == "" || !filepath.IsAbs(entry.Path) {
-			continue
+			return nil, fmt.Errorf("%w for archived %q: path must be a non-empty absolute path", ErrInvalidConfig, alias)
 		}
 		entry.Path = filepath.Clean(entry.Path)
+		var err error
+		entry.Remote, err = canonicalRemote(alias, table["remote"])
+		if err != nil {
+			return nil, err
+		}
 		entries = append(entries, entry)
 	}
-	return entries
+	return entries, nil
+}
+
+func canonicalRemote(alias string, value any) (string, error) {
+	remote, ok := value.(string)
+	if !ok || remote == "" {
+		return "", fmt.Errorf(
+			"%w for %q: remote must be a non-empty canonical HTTP(S) repository URL",
+			ErrInvalidConfig, alias,
+		)
+	}
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
+	if err != nil {
+		return "", fmt.Errorf("%w for %q: invalid remote: %v", ErrInvalidConfig, alias, err)
+	}
+	if remote != info.CanonicalURL {
+		return "", fmt.Errorf("%w for %q: remote must use canonical form %q", ErrInvalidConfig, alias, info.CanonicalURL)
+	}
+	return info.CanonicalURL, nil
+}
+
+func validateGlobalUniqueness(entries []Entry) error {
+	aliases := make(map[string]string, len(entries))
+	paths := make(map[string]string, len(entries))
+	remotes := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if previous, ok := aliases[entry.Alias]; ok {
+			return fmt.Errorf("%w: projects %q and %q use alias %q", ErrInvalidConfig, previous, entry.Alias, entry.Alias)
+		}
+		if previous, ok := paths[entry.Path]; ok {
+			return fmt.Errorf("%w: projects %q and %q use the same path %q", ErrInvalidConfig, previous, entry.Alias, entry.Path)
+		}
+		if previous, ok := remotes[entry.Remote]; ok {
+			return fmt.Errorf(
+				"%w: projects %q and %q use the same remote %q",
+				ErrInvalidConfig, previous, entry.Alias, entry.Remote,
+			)
+		}
+		aliases[entry.Alias] = entry.Alias
+		paths[entry.Path] = entry.Alias
+		remotes[entry.Remote] = entry.Alias
+	}
+	return nil
 }
 
 func newCatalog(active, archived []Entry) *Catalog {
@@ -159,16 +215,32 @@ func newCatalog(active, archived []Entry) *Catalog {
 		archivedEntries: append([]Entry(nil), archived...),
 		byAlias:         make(map[string]Entry, len(active)+len(archived)),
 		byPath:          make(map[string]Entry, len(active)+len(archived)),
+		byRemote:        make(map[string]Entry, len(active)+len(archived)),
 	}
 	for _, entry := range archived {
 		catalog.byAlias[entry.Alias] = entry
 		catalog.byPath[entry.Path] = entry
+		catalog.byRemote[entry.Remote] = entry
 	}
 	for _, entry := range active {
 		catalog.byAlias[entry.Alias] = entry
 		catalog.byPath[entry.Path] = entry
+		catalog.byRemote[entry.Remote] = entry
 	}
 	return catalog
+}
+
+// GetByRemote returns one project by canonical HTTP(S) repository identity.
+func (c *Catalog) GetByRemote(remote string) (Entry, error) {
+	info, err := gitprovider.ParseHTTPRemoteURL(remote)
+	if err != nil {
+		return Entry{}, fmt.Errorf("%w: invalid lookup remote: %v", ErrInvalidConfig, err)
+	}
+	entry, ok := c.byRemote[info.CanonicalURL]
+	if !ok {
+		return Entry{}, fmt.Errorf("%w for remote %q", ErrNotFound, info.CanonicalURL)
+	}
+	return entry, nil
 }
 
 func validAlias(alias string) bool { return aliasPattern.MatchString(alias) }

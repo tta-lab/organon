@@ -14,10 +14,12 @@ func TestLoad(t *testing.T) {
 [organon]
 name = "Organon"
 path = "/home/neil/code/projects/tta-lab/organon"
+remote = "https://github.com/tta-lab/organon.git"
 
 [len]
 name = "Lenos agent cli"
 path = "/home/neil/code/projects/tta-lab/lenos"
+remote = "https://github.com/tta-lab/lenos.git"
 `), 0644)
 
 	entries, err := Load(p)
@@ -51,6 +53,7 @@ func TestGet(t *testing.T) {
 [organon]
 name = "Organon"
 path = "/home/neil/code/projects/tta-lab/organon"
+remote = "https://github.com/tta-lab/organon.git"
 `), 0644)
 
 	e, err := Get(p, "organon")
@@ -73,6 +76,7 @@ func TestCatalogGetExactDoesNotFallBackToParentAlias(t *testing.T) {
 [fb]
 name = "FlickNote Backend"
 path = "/home/neil/code/projects/GuionAI/flick-backend"
+remote = "https://github.com/guionai/flick-backend.git"
 `), 0644)
 
 	catalog, err := OpenCatalog(p)
@@ -109,22 +113,19 @@ path = "/projects/fse-gw"
 	}
 }
 
-func TestOpenCatalogSkipsArchivedNamespace(t *testing.T) {
+func TestOpenCatalogRejectsNestedArchivedAlias(t *testing.T) {
 	path := writeProjectFile(t, `[active]
 name = "Active"
 path = "/projects/active"
+remote = "https://example.com/owner/active.git"
 
 [archived.fse.gw]
 name = "Archived gateway"
 path = "/projects/fse-gw"
+remote = "https://example.com/owner/gateway.git"
 `)
-	catalog, err := OpenCatalog(path)
-	if err != nil {
-		t.Fatalf("OpenCatalog: %v", err)
-	}
-	entries := catalog.ListAll(false)
-	if len(entries) != 1 || entries[0].Alias != "active" {
-		t.Fatalf("List = %+v, want only active", entries)
+	if _, err := OpenCatalog(path); !errors.Is(err, ErrInvalidAlias) {
+		t.Fatalf("OpenCatalog error = %v, want ErrInvalidAlias", err)
 	}
 }
 
@@ -132,11 +133,13 @@ func TestOpenCatalogExposesArchivedEntriesOnRequest(t *testing.T) {
 	path := writeProjectFile(t, `[active]
 name = "Active"
 path = "/projects/active"
+remote = "https://example.com/owner/active.git"
 
 [archived.ttal]
 name = "Archived TTAL"
 path = "/projects/ttal"
-remote = "historical context is preserved"
+remote = "https://example.com/owner/ttal.git"
+historical_context = "preserved"
 `)
 	catalog, err := OpenCatalog(path)
 	if err != nil {
@@ -163,33 +166,15 @@ remote = "historical context is preserved"
 }
 
 func TestOpenCatalogRejectsObsoleteActiveMetadata(t *testing.T) {
-	for _, key := range []string{"org", "github_token_env", "remote", "k8s_app", "k8s_namespace"} {
+	for _, key := range []string{"org", "github_token_env", "k8s_app", "k8s_namespace"} {
 		t.Run(key, func(t *testing.T) {
-			path := writeProjectFile(t, "[one]\npath = \"/projects/one\"\n"+key+" = \"obsolete\"\n")
+			content := "[one]\npath = \"/projects/one\"\n" +
+				"remote = \"https://example.com/owner/one.git\"\n" + key + " = \"obsolete\"\n"
+			path := writeProjectFile(t, content)
 			if _, err := OpenCatalog(path); !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("OpenCatalog error = %v, want ErrInvalidConfig", err)
 			}
 		})
-	}
-}
-
-func TestOpenCatalogUsesActiveEntryForDuplicateArchivedPath(t *testing.T) {
-	path := writeProjectFile(t, `[active]
-path = "/projects/shared"
-
-[archived.old]
-path = "/projects/shared"
-`)
-	catalog, err := OpenCatalog(path)
-	if err != nil {
-		t.Fatalf("OpenCatalog: %v", err)
-	}
-	entry, err := catalog.GetByPath("/projects/shared")
-	if err != nil {
-		t.Fatalf("GetByPath: %v", err)
-	}
-	if entry.Alias != "active" || entry.Archived {
-		t.Fatalf("GetByPath = %+v, want active entry", entry)
 	}
 }
 
@@ -203,9 +188,11 @@ path = "projects/one"
 `,
 		"duplicate cleaned": `[one]
 path = "/projects/shared/../repo"
+remote = "https://example.com/owner/one.git"
 
 [two]
 path = "/projects/repo"
+remote = "https://example.com/owner/two.git"
 `,
 	}
 	for name, content := range tests {
@@ -221,6 +208,7 @@ path = "/projects/repo"
 func TestCatalogGetByPathUsesCleanedAbsolutePath(t *testing.T) {
 	path := writeProjectFile(t, `[one]
 path = "/projects/shared/../one"
+remote = "https://example.com/owner/one.git"
 `)
 	catalog, err := OpenCatalog(path)
 	if err != nil {
@@ -232,6 +220,63 @@ path = "/projects/shared/../one"
 	}
 	if entry.Alias != "one" || entry.Path != "/projects/one" {
 		t.Fatalf("entry = %+v", entry)
+	}
+}
+
+func TestOpenCatalogRequiresCanonicalUniqueRemotesAcrossArchiveStates(t *testing.T) {
+	tests := map[string]string{
+		"missing active remote": `[one]
+path = "/projects/one"
+`,
+		"noncanonical active remote": `[one]
+path = "/projects/one"
+remote = "https://github.com/TTA-Lab/Organon"
+`,
+		"missing archived remote": `[archived.one]
+path = "/projects/one"
+`,
+		"duplicate remote": `[one]
+path = "/projects/one"
+remote = "https://github.com/tta-lab/organon.git"
+
+[archived.old]
+path = "/projects/old"
+remote = "https://github.com/tta-lab/organon.git"
+`,
+		"duplicate path across states": `[one]
+path = "/projects/shared"
+remote = "https://example.com/owner/one.git"
+
+[archived.old]
+path = "/projects/shared"
+remote = "https://example.com/owner/old.git"
+`,
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := OpenCatalog(writeProjectFile(t, content)); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("OpenCatalog error = %v, want ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
+func TestCatalogGetByRemoteUsesCanonicalExactIdentity(t *testing.T) {
+	path := writeProjectFile(t, `[one]
+name = "One"
+path = "/projects/one"
+remote = "https://github.com/tta-lab/organon.git"
+`)
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		t.Fatalf("OpenCatalog: %v", err)
+	}
+	entry, err := catalog.GetByRemote("https://github.com/TTA-LAB/ORGANON")
+	if err != nil {
+		t.Fatalf("GetByRemote: %v", err)
+	}
+	if entry.Remote != "https://github.com/tta-lab/organon.git" || entry.Name != "One" {
+		t.Fatalf("GetByRemote = %+v", entry)
 	}
 }
 

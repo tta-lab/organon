@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestStoreReloadsCurrentSnapshotForEveryRead(t *testing.T) {
-	path := writeProjectFile(t, "[one]\npath = \"/projects/one\"\n")
+	path := writeProjectFile(t, "[one]\npath = \"/projects/one\"\nremote = \"https://example.com/owner/one.git\"\n")
 	store := NewStore(path)
 
 	first, err := store.List(false)
@@ -21,7 +22,9 @@ func TestStoreReloadsCurrentSnapshotForEveryRead(t *testing.T) {
 		t.Fatalf("first List = %+v", first)
 	}
 
-	if err := os.WriteFile(path, []byte("[two]\npath = \"/projects/two\"\n"), 0644); err != nil {
+	secondConfig := "[two]\npath = \"/projects/two\"\n" +
+		"remote = \"https://example.com/owner/two.git\"\n"
+	if err := os.WriteFile(path, []byte(secondConfig), 0644); err != nil {
 		t.Fatalf("replace projects file: %v", err)
 	}
 	second, err := store.List(false)
@@ -38,6 +41,7 @@ func TestStoreRegisterAppendsMinimalTableAndPreservesContext(t *testing.T) {
 [one]
 name = "One"
 path = "/projects/one"
+remote = "https://example.com/owner/one.git"
 
 [archived.legacy]
 path = "/projects/legacy"
@@ -46,9 +50,10 @@ remote = "https://old.example/owner/legacy.git"
 	store := NewStore(path)
 
 	entry, created, err := store.Register(context.Background(), Entry{
-		Alias: "two",
-		Name:  "Two",
-		Path:  "/projects/two",
+		Alias:  "two",
+		Name:   "Two",
+		Path:   "/projects/two",
+		Remote: "https://example.com/owner/two.git",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -69,6 +74,7 @@ remote = "https://old.example/owner/legacy.git"
 		"[two]",
 		`name = "Two"`,
 		`path = "/projects/two"`,
+		`remote = "https://example.com/owner/two.git"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("projects file missing %q:\n%s", want, text)
@@ -76,13 +82,14 @@ remote = "https://old.example/owner/legacy.git"
 	}
 }
 
-func TestStoreRegisterRepairsByReusingExistingPath(t *testing.T) {
-	path := writeProjectFile(t, "[existing]\npath = \"/projects/repo\"\n")
+func TestStoreRegisterReusesExactExistingIdentity(t *testing.T) {
+	path := writeProjectFile(t, "[existing]\npath = \"/projects/repo\"\nremote = \"https://example.com/owner/repo.git\"\n")
 	store := NewStore(path)
 
 	entry, created, err := store.Register(context.Background(), Entry{
-		Alias: "requested",
-		Path:  "/projects/repo",
+		Alias:  "existing",
+		Path:   "/projects/repo",
+		Remote: "https://example.com/owner/repo.git",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -93,12 +100,16 @@ func TestStoreRegisterRepairsByReusingExistingPath(t *testing.T) {
 }
 
 func TestStoreRegisterPreservesArchivedStatusAtPath(t *testing.T) {
-	path := writeProjectFile(t, "[archived.ttal]\npath = \"/projects/ttal\"\n")
+	path := writeProjectFile(t, `[archived.ttal]
+path = "/projects/ttal"
+remote = "https://example.com/owner/ttal.git"
+`)
 	store := NewStore(path)
 
 	entry, created, err := store.Register(context.Background(), Entry{
-		Alias: "ttal-new",
-		Path:  "/projects/ttal",
+		Alias:  "ttal",
+		Path:   "/projects/ttal",
+		Remote: "https://example.com/owner/ttal.git",
 	})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -121,8 +132,9 @@ func TestStoreRegisterSerializesConcurrentWriters(t *testing.T) {
 			defer wg.Done()
 			alias := string(rune('a' + i))
 			_, _, err := store.Register(context.Background(), Entry{
-				Alias: alias,
-				Path:  "/projects/" + alias,
+				Alias:  alias,
+				Path:   "/projects/" + alias,
+				Remote: "https://example.com/owner/" + alias + ".git",
 			})
 			errs <- err
 		}()
@@ -149,11 +161,61 @@ func TestStoreRegisterHonorsCanceledContextBeforeMutation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := NewStore(path).Register(ctx, Entry{Alias: "one", Path: "/projects/one"})
+	_, _, err := NewStore(path).Register(ctx, Entry{
+		Alias: "one", Path: "/projects/one", Remote: "https://example.com/owner/one.git",
+	})
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("Register error = %v, want context canceled", err)
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("projects file was mutated: %v", statErr)
+	}
+}
+
+func TestStoreRegisterWritesCanonicalRemoteAndRequiresExactTripleForRetry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	store := NewStore(path)
+	requested := Entry{
+		Alias:  "organon",
+		Name:   "Organon",
+		Path:   "/projects/organon",
+		Remote: "https://GitHub.com/TTA-Lab/Organon",
+	}
+	entry, created, err := store.Register(context.Background(), requested)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !created || entry.Remote != "https://github.com/tta-lab/organon.git" {
+		t.Fatalf("Register = (%+v, %v)", entry, created)
+	}
+	retried, created, err := store.Register(context.Background(), requested)
+	if err != nil || created || retried != entry {
+		t.Fatalf("retry Register = (%+v, %v, %v), want exact reuse", retried, created, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `remote = "https://github.com/tta-lab/organon.git"`) {
+		t.Fatalf("projects file =\n%s", data)
+	}
+}
+
+func TestStoreRegisterRejectsPartialAliasPathOrRemoteCollision(t *testing.T) {
+	path := writeProjectFile(t, `[one]
+path = "/projects/one"
+remote = "https://example.com/owner/one.git"
+`)
+	store := NewStore(path)
+	for name, entry := range map[string]Entry{
+		"alias":  {Alias: "one", Path: "/projects/two", Remote: "https://example.com/owner/two.git"},
+		"path":   {Alias: "two", Path: "/projects/one", Remote: "https://example.com/owner/two.git"},
+		"remote": {Alias: "two", Path: "/projects/two", Remote: "https://example.com/owner/one.git"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := store.Register(context.Background(), entry); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("Register error = %v, want ErrInvalidConfig", err)
+			}
+		})
 	}
 }

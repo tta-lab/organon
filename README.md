@@ -242,9 +242,10 @@ them as separate processes so clients can grant only the tools a session needs:
 }
 ```
 
-Use `project_get` or `project_list` to discover an exact registered project
-alias and archive state. Active aliases are single-layer names and cannot
-contain dots. Project registry updates are visible on the next MCP call. The
+Use `project_get` or `project_list` to discover the exact five-field project
+record: alias, name, path, canonical remote, and archive state. Active aliases
+are single-layer names and cannot contain dots. Project registry updates are
+visible on the next MCP call. The
 repository-oriented `og` tools accept only that alias; they do not accept a
 filesystem path, working directory, MCP root, file URI, or credential. `clone`
 accepts a URL instead. The `og` daemon must already be running and owns Git,

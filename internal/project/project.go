@@ -5,8 +5,9 @@ import "errors"
 // Entry represents a project from projects.toml.
 type Entry struct {
 	Alias    string `toml:"-"    json:"alias"`
-	Name     string `toml:"name" json:"name,omitempty"`
+	Name     string `toml:"name" json:"name"`
 	Path     string `toml:"path" json:"path"`
+	Remote   string `toml:"remote" json:"remote"`
 	Archived bool   `toml:"-"    json:"archived"`
 }
 

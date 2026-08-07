@@ -22,10 +22,12 @@ func testProjectMCPServer(t *testing.T) *mcp.Server {
 [organon]
 name = "Organon"
 path = "/work/code/projects/tta-lab/organon"
+remote = "https://github.com/tta-lab/organon.git"
 
 [archived.ttal]
 name = "TTAL"
 path = "/work/code/projects/tta-lab/ttal-cli"
+remote = "https://github.com/tta-lab/ttal-cli.git"
 `)
 	return newProjectMCPServer(project.NewStore(filepath.Join(home, ".config", "ttal", "projects.toml")))
 }
@@ -86,7 +88,9 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 			args: map[string]any{},
 			want: map[string]any{"projects": []any{
 				map[string]any{
-					"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon", "archived": false,
+					"alias": "organon", "name": "Organon",
+					"path":   "/work/code/projects/tta-lab/organon",
+					"remote": "https://github.com/tta-lab/organon.git", "archived": false,
 				},
 			}},
 		},
@@ -96,16 +100,21 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 			want: map[string]any{"projects": []any{
 				map[string]any{
 					"alias": "organon", "name": "Organon",
-					"path": "/work/code/projects/tta-lab/organon", "archived": false,
+					"path":   "/work/code/projects/tta-lab/organon",
+					"remote": "https://github.com/tta-lab/organon.git", "archived": false,
 				},
-				map[string]any{"alias": "ttal", "name": "TTAL", "path": "/work/code/projects/tta-lab/ttal-cli", "archived": true},
+				map[string]any{
+					"alias": "ttal", "name": "TTAL", "path": "/work/code/projects/tta-lab/ttal-cli",
+					"remote": "https://github.com/tta-lab/ttal-cli.git", "archived": true,
+				},
 			}},
 		},
 		{
 			name: "project_get",
 			args: map[string]any{"alias": "organon"},
 			want: map[string]any{"project": map[string]any{
-				"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon", "archived": false,
+				"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon",
+				"remote": "https://github.com/tta-lab/organon.git", "archived": false,
 			}},
 		},
 	}
@@ -136,10 +145,10 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 func TestProjectMCPReloadsRegistryOnEveryCall(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".config", "ttal", "projects.toml")
-	writeProjectsConfig(t, home, "[one]\npath = \"/projects/one\"\n")
+	writeProjectsConfig(t, home, "[one]\npath = \"/projects/one\"\nremote = \"https://example.com/owner/one.git\"\n")
 	session := connectProjectMCP(t, newProjectMCPServer(project.NewStore(path)))
 
-	writeProjectsConfig(t, home, "[two]\npath = \"/projects/two\"\n")
+	writeProjectsConfig(t, home, "[two]\npath = \"/projects/two\"\nremote = \"https://example.com/owner/two.git\"\n")
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "project_get", Arguments: map[string]any{"alias": "two"},
 	})
@@ -182,7 +191,10 @@ func TestProjectMCPCommandHelper(_ *testing.T) {
 
 func TestProjectMCPCommandTransport(t *testing.T) {
 	home := t.TempDir()
-	writeProjectsConfig(t, home, "[organon]\npath = \"/work/code/projects/tta-lab/organon\"\n")
+	writeProjectsConfig(t, home, `[organon]
+path = "/work/code/projects/tta-lab/organon"
+remote = "https://github.com/tta-lab/organon.git"
+`)
 	command := exec.Command(os.Args[0], "-test.run=TestProjectMCPCommandHelper")
 	command.Env = append(os.Environ(), "GO_WANT_PROJECT_MCP_HELPER=1", "HOME="+home)
 	client := mcp.NewClient(&mcp.Implementation{Name: "project-command-test", Version: "test"}, nil)

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 const registryLockTimeout = 5 * time.Second
@@ -53,6 +55,15 @@ func (s *Store) GetByPath(path string) (Entry, error) {
 	return catalog.GetByPath(path)
 }
 
+// GetByRemote reads the current registry and returns a canonical repository identity.
+func (s *Store) GetByRemote(remote string) (Entry, error) {
+	catalog, err := s.Snapshot()
+	if err != nil {
+		return Entry{}, err
+	}
+	return catalog.GetByRemote(remote)
+}
+
 // Register atomically appends one active entry. Existing paths are reused,
 // including archived entries, so clone retries never reactivate a repository.
 func (s *Store) Register(ctx context.Context, requested Entry) (Entry, bool, error) {
@@ -69,6 +80,11 @@ func (s *Store) Register(ctx context.Context, requested Entry) (Entry, bool, err
 		)
 	}
 	requested.Path = filepath.Clean(requested.Path)
+	info, err := gitprovider.ParseHTTPRemoteURL(requested.Remote)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("%w for %q: invalid remote: %v", ErrInvalidConfig, requested.Alias, err)
+	}
+	requested.Remote = info.CanonicalURL
 	if err := ctx.Err(); err != nil {
 		return Entry{}, false, fmt.Errorf("registering project: %w", err)
 	}
@@ -90,24 +106,45 @@ func (s *Store) Register(ctx context.Context, requested Entry) (Entry, bool, err
 	if err != nil {
 		return Entry{}, false, err
 	}
-	if existing, err := catalog.GetByPath(requested.Path); err == nil {
-		return existing, false, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		return Entry{}, false, err
-	}
-	if existing, err := catalog.GetExact(requested.Alias); err == nil {
-		return Entry{}, false, fmt.Errorf(
-			"%w: alias %q already uses path %q",
-			ErrInvalidConfig, existing.Alias, existing.Path,
-		)
-	} else if !errors.Is(err, ErrNotFound) {
-		return Entry{}, false, err
+	if existing, found, err := registrationCollision(catalog, requested); err != nil || found {
+		return existing, false, err
 	}
 
 	if err := s.appendEntry(requested); err != nil {
 		return Entry{}, false, err
 	}
 	return requested, true, nil
+}
+
+func registrationCollision(catalog *Catalog, requested Entry) (Entry, bool, error) {
+	if existing, err := catalog.GetExact(requested.Alias); err == nil {
+		if existing.Path == requested.Path && existing.Remote == requested.Remote {
+			return existing, true, nil
+		}
+		return Entry{}, false, fmt.Errorf(
+			"%w: alias %q conflicts with registered project",
+			ErrInvalidConfig, requested.Alias,
+		)
+	} else if !errors.Is(err, ErrNotFound) {
+		return Entry{}, false, err
+	}
+	if existing, err := catalog.GetByPath(requested.Path); err == nil {
+		return Entry{}, false, fmt.Errorf(
+			"%w: path %q already belongs to alias %q",
+			ErrInvalidConfig, requested.Path, existing.Alias,
+		)
+	} else if !errors.Is(err, ErrNotFound) {
+		return Entry{}, false, err
+	}
+	if existing, err := catalog.GetByRemote(requested.Remote); err == nil {
+		return Entry{}, false, fmt.Errorf(
+			"%w: remote %q already belongs to alias %q",
+			ErrInvalidConfig, requested.Remote, existing.Alias,
+		)
+	} else if !errors.Is(err, ErrNotFound) {
+		return Entry{}, false, err
+	}
+	return Entry{}, false, nil
 }
 
 func lockFile(ctx context.Context, file *os.File) error {
@@ -154,6 +191,7 @@ func (s *Store) appendEntry(entry Entry) error {
 		fmt.Fprintf(&appended, "name = %s\n", strconv.Quote(entry.Name))
 	}
 	fmt.Fprintf(&appended, "path = %s\n", strconv.Quote(entry.Path))
+	fmt.Fprintf(&appended, "remote = %s\n", strconv.Quote(entry.Remote))
 
 	return writeRegistryFile(s.path, appended.String(), mode)
 }
