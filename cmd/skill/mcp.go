@@ -27,8 +27,9 @@ type skillListInput struct {
 }
 
 type skillFindInput struct {
-	Project  string   `json:"project,omitempty" jsonschema:"exact project alias; omit for global skills only"`
-	Keywords []string `json:"keywords" jsonschema:"one or more case-insensitive keywords matched with OR semantics"`
+	Project string `json:"project,omitempty" jsonschema:"exact project alias; omit for global skills only"`
+	Query   string `json:"query" jsonschema:"search query matched against skill names, descriptions, and categories"`
+	Limit   *int   `json:"limit,omitempty" jsonschema:"maximum results; defaults to 8 and is capped at 32"`
 }
 
 type skillGetInput struct {
@@ -183,24 +184,26 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 	})
 
 	mcp.AddTool(server, skillTool(
-		"skill_find", "Find agent skills", "Find deduplicated skills by case-insensitive keyword OR match.",
+		"skill_find", "Find agent skills", "Find and rank skills for a natural-language query.",
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input skillFindInput,
 	) (*mcp.CallToolResult, skillListOutput, error) {
-		keywords := make([]string, 0, len(input.Keywords))
-		for _, keyword := range input.Keywords {
-			if keyword = strings.TrimSpace(keyword); keyword != "" {
-				keywords = append(keywords, keyword)
-			}
+		query := strings.TrimSpace(input.Query)
+		if query == "" {
+			return nil, skillListOutput{}, fmt.Errorf("query must not be blank")
 		}
-		if len(keywords) == 0 {
-			return nil, skillListOutput{}, fmt.Errorf("keywords must contain at least one non-blank value")
+		limit := 8
+		if input.Limit != nil {
+			if *input.Limit <= 0 {
+				return nil, skillListOutput{}, fmt.Errorf("limit must be greater than zero")
+			}
+			limit = min(*input.Limit, 32)
 		}
 		skills, sources, err := service.list(input.Project)
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
 		}
-		skills = skill.FilterSkills(skills, keywords)
+		skills = skill.SearchSkills(skills, query, limit)
 		return nil, skillListOutput{Skills: skillSummaries(skills, sources)}, nil
 	})
 

@@ -7,5 +7,5 @@ Individual SKILL.md files larger than 1 MiB are rejected before parsing.
 
 ## Tools
   skill_list   List discovered skill metadata
-  skill_find   Find skills by case-insensitive keyword OR match
+  skill_find   Find and rank skills for a natural-language query
   skill_get    Read one skill by its exact frontmatter name

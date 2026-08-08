@@ -264,6 +264,8 @@ registration, policy, and forge credentials.
 argument it searches only global skill directories. With an exact registered
 alias, project-local skills take priority over global skills. Results use stable
 source labels such as `project:.agents` instead of discovery-root paths.
+`skill_find` accepts one natural-language `query` and an optional `limit`, then
+ranks token matches across skill names, descriptions, and categories.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
 `src mcp` exposes only `symbols` and `read`. Both require an exact registered

@@ -118,31 +118,30 @@ func TestSkillMCPProjectSkillsShadowGlobalSkills(t *testing.T) {
 	}
 }
 
-func TestSkillMCPFindNormalizesKeywordsAfterDeduplication(t *testing.T) {
+func TestSkillMCPFindRanksTokenizedQueryAndAppliesLimit(t *testing.T) {
 	home := t.TempDir()
-	root := t.TempDir()
-	writeSkillAt(t, root, "shared", "project source", "tool", "body")
-	writeSkillAt(t, home, "shared", "global needle", "tool", "body")
-	writeSkillAt(t, home, "research", "Current facts", "tool", "body")
-	registry := writeSkillProjects(t, home,
-		"[ko]\npath = "+strconvQuote(root)+"\nremote = \"https://example.com/tta/ko.git\"\n")
+	writeSkillAt(t, home, "pr-review-loop", "Review pull requests in a repeated loop", "workflow", "body")
+	writeSkillAt(t, home, "plan-triage", "Triage implementation plans", "workflow", "body")
+	writeSkillAt(t, home, "review-notes", "Review collected notes", "workflow", "body")
+	registry := writeSkillProjects(t, home, "")
 	session := connectSkillMCP(t, newSkillMCPServer(home, project.NewStore(registry)))
 
 	output := callSkillTool(t, session, "skill_find", map[string]any{
-		"project": "ko", "keywords": []any{"  FACTS  ", " "},
+		"query": "review loop triage", "limit": 2,
 	})
 	got := output["skills"].([]any)
-	if len(got) != 1 || got[0].(map[string]any)["name"] != "research" {
+	if len(got) != 2 || got[0].(map[string]any)["name"] != "pr-review-loop" ||
+		got[1].(map[string]any)["name"] != "plan-triage" {
 		t.Fatalf("find result = %#v", got)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "skill_find", Arguments: map[string]any{"keywords": []any{" ", ""}},
+		Name: "skill_find", Arguments: map[string]any{"query": " "},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.IsError {
-		t.Fatalf("blank keywords result = %#v, want tool error", result)
+		t.Fatalf("blank query result = %#v, want tool error", result)
 	}
 }
 
