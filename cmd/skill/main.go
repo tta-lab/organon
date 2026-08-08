@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/tta-lab/organon/internal/skill"
@@ -86,12 +87,17 @@ func newGetCmd(out io.Writer, paths []string) *cobra.Command {
 
 func newFindCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	var jsonOut bool
+	var limit int
 	cmd := &cobra.Command{
-		Use:   "find <keyword>...",
-		Short: "Find skills by keyword (OR match)",
+		Use:   "find <query>...",
+		Short: "Find and rank skills for a natural-language query",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			skills, err := skill.FindSkills(paths, args)
+			skills, err := skill.ListSkills(paths)
+			if err != nil {
+				return err
+			}
+			skills, err = skill.SearchSkills(skills, strings.Join(args, " "), limit)
 			if err != nil {
 				return err
 			}
@@ -99,6 +105,7 @@ func newFindCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
+	cmd.Flags().IntVar(&limit, "limit", skill.DefaultSearchLimit, "Maximum results (capped at 32)")
 	return cmd
 }
 

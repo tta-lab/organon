@@ -214,6 +214,37 @@ func TestSkillFind_Match(t *testing.T) {
 	}
 }
 
+func TestSkillFind_RanksNaturalLanguageQueryAndAppliesLimit(t *testing.T) {
+	tmp := t.TempDir()
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	writeSkillAt(t, tmpHome, "pr-review-loop", "Review pull requests in a repeated loop", "workflow", "body")
+	writeSkillAt(t, tmpHome, "plan-triage", "Triage implementation plans", "workflow", "body")
+	writeSkillAt(t, tmpHome, "review-notes", "Review collected notes", "workflow", "body")
+
+	origCwd, _ := os.Getwd()
+	os.Chdir(tmp)                           //nolint:errcheck // test isolation
+	t.Cleanup(func() { os.Chdir(origCwd) }) //nolint:errcheck // test isolation
+
+	stdout, stderr, err := runSkill(t, []string{
+		"find", "review loop triage", "--limit", "2", "--json",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty for --json, got: %q", stderr)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
+	}
+	if len(skills) != 2 || skills[0]["name"] != "pr-review-loop" || skills[1]["name"] != "plan-triage" {
+		t.Fatalf("find result = %#v", skills)
+	}
+}
+
 func TestSkillFind_NoMatch(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()

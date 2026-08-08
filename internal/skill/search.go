@@ -1,9 +1,15 @@
 package skill
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
+)
+
+const (
+	DefaultSearchLimit = 8
+	MaxSearchLimit     = 32
 )
 
 type skillSearchRank struct {
@@ -16,12 +22,18 @@ type skillSearchRank struct {
 	descriptionMatches int
 }
 
-// SearchSkills returns ranked skills that match at least one token from query.
-func SearchSkills(skills []Skill, query string, limit int) []Skill {
-	queryTokens := skillSearchTokens(query)
-	if len(queryTokens) == 0 || limit <= 0 {
-		return nil
+// SearchSkills validates a natural-language query and returns ranked skills
+// that match at least one query token.
+func SearchSkills(skills []Skill, query string, limit int) ([]Skill, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query must not be blank")
 	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be greater than zero")
+	}
+	limit = min(limit, MaxSearchLimit)
+	queryTokens := skillSearchTokens(query)
 	querySet := tokenSet(queryTokens)
 	queryName := strings.Join(queryTokens, " ")
 	ranked := make([]skillSearchRank, 0, len(skills))
@@ -39,7 +51,7 @@ func SearchSkills(skills []Skill, query string, limit int) []Skill {
 	for _, rank := range ranked[:limit] {
 		result = append(result, rank.skill)
 	}
-	return result
+	return result, nil
 }
 
 func rankSkillSearch(
@@ -47,6 +59,9 @@ func rankSkillSearch(
 ) skillSearchRank {
 	nameTokens := skillSearchTokens(candidate.Name)
 	nameSet := tokenSet(nameTokens)
+	if len(nameTokens) > 1 {
+		nameSet[strings.Join(nameTokens, "")] = struct{}{}
+	}
 	descriptionSet := tokenSet(skillSearchTokens(candidate.Description))
 	categorySet := tokenSet(skillSearchTokens(candidate.Category))
 	rank := skillSearchRank{

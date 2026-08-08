@@ -188,22 +188,18 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input skillFindInput,
 	) (*mcp.CallToolResult, skillListOutput, error) {
-		query := strings.TrimSpace(input.Query)
-		if query == "" {
-			return nil, skillListOutput{}, fmt.Errorf("query must not be blank")
-		}
-		limit := 8
+		limit := skill.DefaultSearchLimit
 		if input.Limit != nil {
-			if *input.Limit <= 0 {
-				return nil, skillListOutput{}, fmt.Errorf("limit must be greater than zero")
-			}
-			limit = min(*input.Limit, 32)
+			limit = *input.Limit
 		}
 		skills, sources, err := service.list(input.Project)
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
 		}
-		skills = skill.SearchSkills(skills, query, limit)
+		skills, err = skill.SearchSkills(skills, input.Query, limit)
+		if err != nil {
+			return nil, skillListOutput{}, err
+		}
 		return nil, skillListOutput{Skills: skillSummaries(skills, sources)}, nil
 	})
 

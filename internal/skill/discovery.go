@@ -189,38 +189,3 @@ func GetSkill(paths []string, name string) (*Skill, error) {
 	}
 	return nil, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist)
 }
-
-// FindSkills returns skills matching any of the keywords (OR match).
-// Matching is case-insensitive and checks both Name and Description.
-// Results are deduplicated and sorted by Name.
-func FindSkills(paths []string, keywords []string) ([]Skill, error) {
-	skills, err := ListSkills(paths)
-	return FilterSkills(skills, keywords), err
-}
-
-// FilterSkills returns skills matching any keyword in name or description.
-func FilterSkills(skills []Skill, keywords []string) []Skill {
-	lowerKeywords := make([]string, len(keywords))
-	for i, keyword := range keywords {
-		lowerKeywords[i] = strings.ToLower(keyword)
-	}
-	result := make([]Skill, 0, len(skills))
-	for _, candidate := range skills {
-		if matchesKeywords(candidate.Name, candidate.Description, lowerKeywords) {
-			result = append(result, candidate)
-		}
-	}
-	return result
-}
-
-// matchesKeywords checks if any keyword appears in the skill's name or description.
-func matchesKeywords(name, description string, lowerKeywords []string) bool {
-	lowerName := strings.ToLower(name)
-	lowerDesc := strings.ToLower(description)
-	for _, kw := range lowerKeywords {
-		if strings.Contains(lowerName, kw) || strings.Contains(lowerDesc, kw) {
-			return true
-		}
-	}
-	return false
-}
