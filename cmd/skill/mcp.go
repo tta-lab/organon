@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -122,10 +120,10 @@ func (s skillMCPService) discovery(projectAlias string) (skillDiscovery, error) 
 	return discovery, nil
 }
 
-func (s skillMCPService) list(projectAlias string) ([]skill.Skill, map[string]skillSource, error) {
+func (s skillMCPService) catalog(projectAlias string) (skill.Catalog, map[string]skillSource, error) {
 	discovery, err := s.discovery(projectAlias)
 	if err != nil {
-		return nil, nil, err
+		return skill.Catalog{}, nil, err
 	}
 	projectSkills := []skill.Skill(nil)
 	var projectErr error
@@ -134,25 +132,9 @@ func (s skillMCPService) list(projectAlias string) ([]skill.Skill, map[string]sk
 	}
 	globalSkills, globalErr := skill.ListSkills(discovery.globalPaths)
 	if err := errors.Join(projectErr, globalErr); err != nil {
-		return nil, nil, err
+		return skill.Catalog{}, nil, err
 	}
-	return mergeSkillPriority(projectSkills, globalSkills), discovery.sources, nil
-}
-
-func mergeSkillPriority(groups ...[]skill.Skill) []skill.Skill {
-	seen := make(map[string]bool)
-	merged := make([]skill.Skill, 0)
-	for _, group := range groups {
-		for _, candidate := range group {
-			if seen[candidate.Name] {
-				continue
-			}
-			seen[candidate.Name] = true
-			merged = append(merged, candidate)
-		}
-	}
-	sort.Slice(merged, func(i, j int) bool { return merged[i].Name < merged[j].Name })
-	return merged
+	return skill.NewCatalog(projectSkills, globalSkills), discovery.sources, nil
 }
 
 func skillSummaries(skills []skill.Skill, sources map[string]skillSource) []skillSummaryOutput {
@@ -176,11 +158,11 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input skillListInput,
 	) (*mcp.CallToolResult, skillListOutput, error) {
-		skills, sources, err := service.list(input.Project)
+		catalog, sources, err := service.catalog(input.Project)
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("list skills: %w", err)
 		}
-		return nil, skillListOutput{Skills: skillSummaries(skills, sources)}, nil
+		return nil, skillListOutput{Skills: skillSummaries(catalog.List(), sources)}, nil
 	})
 
 	mcp.AddTool(server, skillTool(
@@ -192,11 +174,11 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if input.Limit != nil {
 			limit = *input.Limit
 		}
-		skills, sources, err := service.list(input.Project)
+		catalog, sources, err := service.catalog(input.Project)
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
 		}
-		skills, err = skill.SearchSkills(skills, input.Query, limit)
+		skills, err := catalog.Find(input.Query, limit)
 		if err != nil {
 			return nil, skillListOutput{}, err
 		}
@@ -208,23 +190,13 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input skillGetInput,
 	) (*mcp.CallToolResult, skillGetOutput, error) {
-		name := strings.TrimSpace(input.Name)
-		if name == "" {
-			return nil, skillGetOutput{}, fmt.Errorf("name must not be blank")
-		}
-		skills, sources, err := service.list(input.Project)
+		catalog, sources, err := service.catalog(input.Project)
 		if err != nil {
 			return nil, skillGetOutput{}, fmt.Errorf("get skill: %w", err)
 		}
-		var found *skill.Skill
-		for i := range skills {
-			if skills[i].Name == name {
-				found = &skills[i]
-				break
-			}
-		}
-		if found == nil {
-			return nil, skillGetOutput{}, fmt.Errorf("get skill %q: %w", name, fs.ErrNotExist)
+		found, err := catalog.Get(input.Name)
+		if err != nil {
+			return nil, skillGetOutput{}, err
 		}
 		source := sources[filepath.Clean(found.Source)]
 		return nil, skillGetOutput{Skill: skillDetailOutput{

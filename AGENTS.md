@@ -61,6 +61,12 @@ the shared core so both adapters inherit the change. Project aliases versus CLI
 filesystem paths, structured MCP results versus human CLI output, and process
 lifecycle are valid adapter differences; search or mutation semantics are not.
 
+Prefer small tool-specific services over a generic CLI-to-MCP bridge. Keep MCP
+results typed and structured; do not implement MCP by spawning the CLI or
+parsing human-readable output. Extract shared adapter helpers only after the
+same protocol boilerplate repeats across multiple tools without erasing their
+different schemas, safety annotations, or targeting rules.
+
 ## Testing
 
 Fixture files live in `testdata/`. Tests include both unit tests and CLI integration tests.

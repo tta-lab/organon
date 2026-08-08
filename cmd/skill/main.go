@@ -58,11 +58,11 @@ func newListCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 		Short: "List all discovered skills",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			skills, err := skill.ListSkills(paths)
+			catalog, err := skill.LoadCatalog(paths)
 			if err != nil {
 				return err
 			}
-			return emitSkills(out, errOut, skills, jsonOut)
+			return emitSkills(out, errOut, catalog.List(), jsonOut)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON array to stdout")
@@ -93,11 +93,11 @@ func newFindCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 		Short: "Find and rank skills for a natural-language query",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			skills, err := skill.ListSkills(paths)
+			catalog, err := skill.LoadCatalog(paths)
 			if err != nil {
 				return err
 			}
-			skills, err = skill.SearchSkills(skills, strings.Join(args, " "), limit)
+			skills, err := catalog.Find(strings.Join(args, " "), limit)
 			if err != nil {
 				return err
 			}

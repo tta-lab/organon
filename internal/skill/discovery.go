@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/tta-lab/organon/internal/safefile"
@@ -76,7 +75,6 @@ func ListSkillsContained(paths []string, root string) ([]Skill, error) {
 }
 
 func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
-	seen := make(map[string]bool)
 	result := make([]Skill, 0, 8)
 	errs := make([]error, 0, 4)
 
@@ -102,17 +100,11 @@ func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
 			if candidate == nil {
 				continue
 			}
-			if seen[candidate.Name] {
-				continue
-			}
-			seen[candidate.Name] = true
 			result = append(result, *candidate)
 		}
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
-	})
+	result = NewCatalog(result).List()
 	if len(errs) > 0 {
 		return result, errors.Join(errs...)
 	}
@@ -178,14 +170,10 @@ func readSkillData(skillPath, containmentRoot string) ([]byte, error) {
 // GetSkill returns the skill matching the given frontmatter name, using priority order.
 // Returns an error wrapping fs.ErrNotExist if no matching skill is found.
 func GetSkill(paths []string, name string) (*Skill, error) {
-	skills, err := ListSkills(paths)
-	for i := range skills {
-		if skills[i].Name == name {
-			return &skills[i], nil
-		}
+	catalog, discoveryErr := LoadCatalog(paths)
+	found, getErr := catalog.Get(name)
+	if getErr == nil {
+		return &found, nil
 	}
-	if err != nil {
-		return nil, errors.Join(err, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist))
-	}
-	return nil, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist)
+	return nil, errors.Join(discoveryErr, getErr)
 }
