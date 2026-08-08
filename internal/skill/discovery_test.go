@@ -656,3 +656,46 @@ func TestFindSkills_HigherPriorityDuplicateStillShadowsLowerMatch(t *testing.T) 
 		t.Fatalf("got %#v, want higher-priority non-match to shadow lower duplicate", skills)
 	}
 }
+
+func TestSearchSkillsRanksQueryCoverageBeforeSingleTermMatches(t *testing.T) {
+	skills := []Skill{
+		{Name: "plan-triage", Description: "Triage implementation plans"},
+		{Name: "pr-review-loop", Description: "Review pull requests in a repeated loop"},
+		{Name: "review-notes", Description: "Review collected notes"},
+	}
+
+	got := SearchSkills(skills, "review loop triage", 2)
+	if len(got) != 2 || got[0].Name != "pr-review-loop" || got[1].Name != "plan-triage" {
+		t.Fatalf("SearchSkills() = %#v", got)
+	}
+}
+
+func TestSearchSkillsSplitsCamelCaseAndPunctuation(t *testing.T) {
+	skills := []Skill{
+		{Name: "http-client", Description: "Send network requests"},
+		{Name: "HTTPServerAudit", Description: "Inspect service configuration"},
+	}
+
+	got := SearchSkills(skills, "http server", 8)
+	if len(got) != 2 || got[0].Name != "HTTPServerAudit" {
+		t.Fatalf("SearchSkills() = %#v", got)
+	}
+}
+
+func TestSearchSkillsMatchesDescriptions(t *testing.T) {
+	skills := []Skill{{Name: "research", Description: "Collect current evidence"}}
+
+	got := SearchSkills(skills, "evidence", 8)
+	if len(got) != 1 || got[0].Name != "research" {
+		t.Fatalf("SearchSkills() = %#v", got)
+	}
+}
+
+func TestSearchSkillsMatchesCategories(t *testing.T) {
+	skills := []Skill{{Name: "research", Category: "methodology"}}
+
+	got := SearchSkills(skills, "methodology", 8)
+	if len(got) != 1 || got[0].Name != "research" {
+		t.Fatalf("SearchSkills() = %#v", got)
+	}
+}
