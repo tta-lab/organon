@@ -524,16 +524,26 @@ func TestGetSkill_SkipsMissingFrontmatterName(t *testing.T) {
 	}
 }
 
-func TestFindSkills_NameMatch(t *testing.T) {
+func searchDiscoveredSkills(t *testing.T, paths []string, query string) []Skill {
+	t.Helper()
+	skills, err := ListSkills(paths)
+	if err != nil {
+		t.Fatalf("ListSkills: %v", err)
+	}
+	result, err := SearchSkills(skills, query, DefaultSearchLimit)
+	if err != nil {
+		t.Fatalf("SearchSkills: %v", err)
+	}
+	return result
+}
+
+func TestSearchDiscoveredSkills_NameMatch(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "git-omz", "git plugin abbreviations", "git", "git body")
 	writeSkill(t, root, ".agents/skills", "taskwarrior", "task management", "tools", "task body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"git"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "git")
 	if len(skills) != 1 {
 		t.Fatalf("got %d skills, want 1", len(skills))
 	}
@@ -542,16 +552,13 @@ func TestFindSkills_NameMatch(t *testing.T) {
 	}
 }
 
-func TestFindSkills_UsesFrontmatterNameOnly(t *testing.T) {
+func TestSearchDiscoveredSkills_UsesFrontmatterNameOnly(t *testing.T) {
 	root := t.TempDir()
 	writeSkillFile(t, root, ".agents/skills", "storage-dir", "visible-name", "visible description", "tools", "body")
 	writeSkillFile(t, root, ".agents/skills", "missing-name-dir", "", "missing name", "tools", "body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"visible"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "visible")
 	if len(skills) != 1 {
 		t.Fatalf("got %d skills, want 1", len(skills))
 	}
@@ -559,33 +566,24 @@ func TestFindSkills_UsesFrontmatterNameOnly(t *testing.T) {
 		t.Fatalf("Name = %q, want visible-name", skills[0].Name)
 	}
 
-	skills, err = FindSkills(paths, []string{"storage-dir"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills = searchDiscoveredSkills(t, paths, "storage-dir")
 	if len(skills) != 0 {
 		t.Fatalf("got %d skills for directory-name match, want 0", len(skills))
 	}
 
-	skills, err = FindSkills(paths, []string{"missing"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills = searchDiscoveredSkills(t, paths, "missing")
 	if len(skills) != 0 {
 		t.Fatalf("got %d missing-name skills, want 0", len(skills))
 	}
 }
 
-func TestFindSkills_DescriptionMatch(t *testing.T) {
+func TestSearchDiscoveredSkills_DescriptionMatch(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "taskwarrior", "task management using taskwarrior", "tools", "body")
 	writeSkill(t, root, ".agents/skills", "git-omz", "git plugin abbreviations", "git", "body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"taskwarrior"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "taskwarrior")
 	if len(skills) != 1 {
 		t.Fatalf("got %d skills, want 1", len(skills))
 	}
@@ -594,64 +592,52 @@ func TestFindSkills_DescriptionMatch(t *testing.T) {
 	}
 }
 
-func TestFindSkills_CaseInsensitive(t *testing.T) {
+func TestSearchDiscoveredSkills_CaseInsensitive(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "TaskWarrior", "TASK MANAGEMENT", "tools", "body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"taskwarrior"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "taskwarrior")
 	if len(skills) != 1 {
 		t.Fatalf("got %d skills, want 1", len(skills))
 	}
 }
 
-func TestFindSkills_MultipleKeywordsOR(t *testing.T) {
+func TestSearchDiscoveredSkills_MatchesAnyQueryToken(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "taskwarrior", "task management", "tools", "body")
 	writeSkill(t, root, ".agents/skills", "git-omz", "git plugin", "git", "body")
 	writeSkill(t, root, ".agents/skills", "treemd", "read markdown docs", "docs", "body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"task", "git"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "task git")
 	if len(skills) != 2 {
 		t.Fatalf("got %d skills, want 2", len(skills))
 	}
 }
 
-func TestFindSkills_NoMatch(t *testing.T) {
+func TestSearchDiscoveredSkills_NoMatch(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, ".agents/skills", "taskwarrior", "task management", "tools", "body")
 
 	paths := []string{filepath.Join(root, ".agents/skills")}
-	skills, err := FindSkills(paths, []string{"nonexistent"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	skills := searchDiscoveredSkills(t, paths, "nonexistent")
 	if len(skills) > 0 {
 		t.Errorf("expected empty, got %v", skills)
 	}
 }
 
-func TestFindSkills_HigherPriorityDuplicateStillShadowsLowerMatch(t *testing.T) {
+func TestSearchDiscoveredSkills_HigherPriorityDuplicateStillShadowsLowerMatch(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	global := filepath.Join(root, "global")
 	writeSkillFile(t, project, ".agents/skills", "project-dir", "shared", "project description", "tools", "project body")
 	writeSkillFile(t, global, ".agents/skills", "global-dir", "shared", "matching keyword", "tools", "global body")
 
-	skills, err := FindSkills([]string{
+	skills := searchDiscoveredSkills(t, []string{
 		filepath.Join(project, ".agents/skills"),
 		filepath.Join(global, ".agents/skills"),
-	}, []string{"matching"})
-	if err != nil {
-		t.Fatalf("FindSkills: %v", err)
-	}
+	}, "matching")
 	if len(skills) != 0 {
 		t.Fatalf("got %#v, want higher-priority non-match to shadow lower duplicate", skills)
 	}
@@ -664,7 +650,10 @@ func TestSearchSkillsRanksQueryCoverageBeforeSingleTermMatches(t *testing.T) {
 		{Name: "review-notes", Description: "Review collected notes"},
 	}
 
-	got := SearchSkills(skills, "review loop triage", 2)
+	got, err := SearchSkills(skills, "review loop triage", 2)
+	if err != nil {
+		t.Fatalf("SearchSkills: %v", err)
+	}
 	if len(got) != 2 || got[0].Name != "pr-review-loop" || got[1].Name != "plan-triage" {
 		t.Fatalf("SearchSkills() = %#v", got)
 	}
@@ -676,7 +665,10 @@ func TestSearchSkillsSplitsCamelCaseAndPunctuation(t *testing.T) {
 		{Name: "HTTPServerAudit", Description: "Inspect service configuration"},
 	}
 
-	got := SearchSkills(skills, "http server", 8)
+	got, err := SearchSkills(skills, "http server", DefaultSearchLimit)
+	if err != nil {
+		t.Fatalf("SearchSkills: %v", err)
+	}
 	if len(got) != 2 || got[0].Name != "HTTPServerAudit" {
 		t.Fatalf("SearchSkills() = %#v", got)
 	}
@@ -685,7 +677,10 @@ func TestSearchSkillsSplitsCamelCaseAndPunctuation(t *testing.T) {
 func TestSearchSkillsMatchesDescriptions(t *testing.T) {
 	skills := []Skill{{Name: "research", Description: "Collect current evidence"}}
 
-	got := SearchSkills(skills, "evidence", 8)
+	got, err := SearchSkills(skills, "evidence", DefaultSearchLimit)
+	if err != nil {
+		t.Fatalf("SearchSkills: %v", err)
+	}
 	if len(got) != 1 || got[0].Name != "research" {
 		t.Fatalf("SearchSkills() = %#v", got)
 	}
@@ -694,7 +689,10 @@ func TestSearchSkillsMatchesDescriptions(t *testing.T) {
 func TestSearchSkillsMatchesCategories(t *testing.T) {
 	skills := []Skill{{Name: "research", Category: "methodology"}}
 
-	got := SearchSkills(skills, "methodology", 8)
+	got, err := SearchSkills(skills, "methodology", DefaultSearchLimit)
+	if err != nil {
+		t.Fatalf("SearchSkills: %v", err)
+	}
 	if len(got) != 1 || got[0].Name != "research" {
 		t.Fatalf("SearchSkills() = %#v", got)
 	}

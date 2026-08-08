@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/tta-lab/organon/internal/safefile"
@@ -76,7 +75,6 @@ func ListSkillsContained(paths []string, root string) ([]Skill, error) {
 }
 
 func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
-	seen := make(map[string]bool)
 	result := make([]Skill, 0, 8)
 	errs := make([]error, 0, 4)
 
@@ -102,17 +100,11 @@ func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
 			if candidate == nil {
 				continue
 			}
-			if seen[candidate.Name] {
-				continue
-			}
-			seen[candidate.Name] = true
 			result = append(result, *candidate)
 		}
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
-	})
+	result = NewCatalog(result).List()
 	if len(errs) > 0 {
 		return result, errors.Join(errs...)
 	}
@@ -178,49 +170,10 @@ func readSkillData(skillPath, containmentRoot string) ([]byte, error) {
 // GetSkill returns the skill matching the given frontmatter name, using priority order.
 // Returns an error wrapping fs.ErrNotExist if no matching skill is found.
 func GetSkill(paths []string, name string) (*Skill, error) {
-	skills, err := ListSkills(paths)
-	for i := range skills {
-		if skills[i].Name == name {
-			return &skills[i], nil
-		}
+	catalog, discoveryErr := LoadCatalog(paths)
+	found, getErr := catalog.Get(name)
+	if getErr == nil {
+		return &found, nil
 	}
-	if err != nil {
-		return nil, errors.Join(err, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist))
-	}
-	return nil, fmt.Errorf("skill %q not found: %w", name, fs.ErrNotExist)
-}
-
-// FindSkills returns skills matching any of the keywords (OR match).
-// Matching is case-insensitive and checks both Name and Description.
-// Results are deduplicated and sorted by Name.
-func FindSkills(paths []string, keywords []string) ([]Skill, error) {
-	skills, err := ListSkills(paths)
-	return FilterSkills(skills, keywords), err
-}
-
-// FilterSkills returns skills matching any keyword in name or description.
-func FilterSkills(skills []Skill, keywords []string) []Skill {
-	lowerKeywords := make([]string, len(keywords))
-	for i, keyword := range keywords {
-		lowerKeywords[i] = strings.ToLower(keyword)
-	}
-	result := make([]Skill, 0, len(skills))
-	for _, candidate := range skills {
-		if matchesKeywords(candidate.Name, candidate.Description, lowerKeywords) {
-			result = append(result, candidate)
-		}
-	}
-	return result
-}
-
-// matchesKeywords checks if any keyword appears in the skill's name or description.
-func matchesKeywords(name, description string, lowerKeywords []string) bool {
-	lowerName := strings.ToLower(name)
-	lowerDesc := strings.ToLower(description)
-	for _, kw := range lowerKeywords {
-		if strings.Contains(lowerName, kw) || strings.Contains(lowerDesc, kw) {
-			return true
-		}
-	}
-	return false
+	return nil, errors.Join(discoveryErr, getErr)
 }

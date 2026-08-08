@@ -30,7 +30,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/id/` — base62 ID generation and collision resolution
 - `internal/tree/` — generic box-drawing tree renderer
 - `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
-- `internal/skill/` — filesystem-based skill discovery and frontmatter parsing
+- `internal/skill/` — filesystem-based skill discovery, frontmatter parsing, and shared CLI/MCP search behavior
 - `internal/token/` — LLM token counting with tiktoken-go; sync.OnceValues lazy init, regex fallback
 - `internal/srcview/` — trusted-byte source outlines and safe registered-project file reads shared by CLI and MCP
 - `internal/safefile/` — descriptor-relative contained file opening shared by project-scoped readers
@@ -47,6 +47,25 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/project/` — hot, archive-aware path and canonical-remote registry shared by CLI, MCP, and og
 - `internal/og/` — daemon-owned Git/forge policy and typed local protocol
 - `internal/ogconfig/` — whole-file og configuration and remote trust classification
+
+### CLI and MCP Parity
+
+When a capability is exposed through both CLI and MCP, keep its domain behavior
+the same unless the transport requires a documented difference. Put discovery,
+normalization, validation, defaults and limits, ordering, and error semantics in
+a shared `internal/` package. Keep `cmd/` handlers thin: parse transport-specific
+inputs, call the shared behavior, and render transport-specific outputs.
+
+Before adding MCP-only behavior, check the equivalent CLI operation and update
+the shared core so both adapters inherit the change. Project aliases versus CLI
+filesystem paths, structured MCP results versus human CLI output, and process
+lifecycle are valid adapter differences; search or mutation semantics are not.
+
+Prefer small tool-specific services over a generic CLI-to-MCP bridge. Keep MCP
+results typed and structured; do not implement MCP by spawning the CLI or
+parsing human-readable output. Extract shared adapter helpers only after the
+same protocol boilerplate repeats across multiple tools without erasing their
+different schemas, safety annotations, or targeting rules.
 
 ## Testing
 

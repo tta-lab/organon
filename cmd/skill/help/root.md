@@ -19,5 +19,5 @@ Within each scope: .agents > .crush > .claude > .cursor.
 ## Subcommands
   list   List all discovered skills as name, description, and SKILL.md path
   get    Print a skill's full body to stdout (frontmatter stripped)
-  find   Search skills by keyword (case-insensitive OR match)
+  find   Find and rank skills for a natural-language query (default limit 8)
   mcp    Serve typed read-only skill discovery tools over stdio MCP

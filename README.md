@@ -85,7 +85,7 @@ List, find, and read agent skills from project-local and global skill directorie
 
 ```bash
 skill list
-skill find web
+skill find "review and repair pull requests" --limit 3
 skill get organon-web
 ```
 
@@ -266,6 +266,8 @@ alias, project-local skills take priority over global skills. Results use stable
 source labels such as `project:.agents` instead of discovery-root paths.
 `skill_find` accepts one natural-language `query` and an optional `limit`, then
 ranks token matches across skill names, descriptions, and categories.
+The CLI `skill find` command uses the same query validation, defaults, limits,
+and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
 `src mcp` exposes only `symbols` and `read`. Both require an exact registered
