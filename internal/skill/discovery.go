@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/tta-lab/organon/internal/safefile"
 )
 
 const maximumSkillBytes = 1024 * 1024
@@ -36,45 +34,69 @@ func newSkill(name string, meta Meta, source, path, body string) Skill {
 	}
 }
 
-// ProjectDiscoveryPaths returns project-local discovery paths in priority order.
-func ProjectDiscoveryPaths(root string) []string {
-	return []string{
-		filepath.Join(root, ".agents", "skills"),
-		filepath.Join(root, ".crush", "skills"),
-		filepath.Join(root, ".claude", "skills"),
-		filepath.Join(root, ".cursor", "skills"),
+// DiscoveryPath is one skills root directory. Builtin marks the ~/.agents/skills
+// default; configured extras are not built-in and may legitimately be absent on
+// a given machine (worth warning about, but not fatal).
+type DiscoveryPath struct {
+	Dir     string
+	Builtin bool
+}
+
+// GlobalDiscoveryPaths returns user-global discovery paths in priority order,
+// starting with the built-in .agents convention followed by configured extras.
+// A leading "~" in a configured entry expands against home; when home is empty
+// such entries are skipped rather than resolved to the current directory.
+func GlobalDiscoveryPaths(home string, cfg Config) []DiscoveryPath {
+	paths := make([]DiscoveryPath, 0, len(cfg.Global)+1)
+	paths = append(paths, DiscoveryPath{Dir: filepath.Join(home, ".agents", "skills"), Builtin: true})
+	for _, extra := range cfg.Global {
+		if expanded, ok := expandHome(extra, home); ok {
+			paths = append(paths, DiscoveryPath{Dir: expanded})
+		}
+	}
+	return dedupePaths(paths)
+}
+
+// expandHome expands a leading "~" against home. It reports false (entry
+// skipped) when the entry starts with "~" but home is empty, so a "~" entry
+// never silently resolves to ".".
+func expandHome(path, home string) (string, bool) {
+	switch {
+	case path == "~":
+		if home == "" {
+			return "", false
+		}
+		return home, true
+	case strings.HasPrefix(path, "~"+string(filepath.Separator)):
+		if home == "" {
+			return "", false
+		}
+		return filepath.Join(home, path[2:]), true
+	default:
+		return path, true
 	}
 }
 
-// GlobalDiscoveryPaths returns user-global discovery paths in priority order.
-func GlobalDiscoveryPaths(home string) []string {
-	return []string{
-		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(home, ".crush", "skills"),
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".cursor", "skills"),
+// dedupePaths removes duplicate discovery directories while preserving order.
+func dedupePaths(paths []DiscoveryPath) []DiscoveryPath {
+	seen := make(map[string]bool, len(paths))
+	out := make([]DiscoveryPath, 0, len(paths))
+	for _, p := range paths {
+		dir := filepath.Clean(p.Dir)
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		p.Dir = dir
+		out = append(out, p)
 	}
-}
-
-// DiscoveryPaths returns project-local paths followed by global paths.
-func DiscoveryPaths(root, home string) []string {
-	return append(ProjectDiscoveryPaths(root), GlobalDiscoveryPaths(home)...)
+	return out
 }
 
 // ListSkills walks all discovery paths and returns all skills, deduplicated by name.
 // First-seen wins (paths earlier in the slice have higher priority).
 // Returns skills sorted by Name.
 func ListSkills(paths []string) ([]Skill, error) {
-	return listSkills(paths, "")
-}
-
-// ListSkillsContained discovers skills while requiring every directory and
-// SKILL.md target to resolve inside root. It is intended for project-scoped MCP reads.
-func ListSkillsContained(paths []string, root string) ([]Skill, error) {
-	return listSkills(paths, root)
-}
-
-func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
 	result := make([]Skill, 0, 8)
 	errs := make([]error, 0, 4)
 
@@ -89,7 +111,7 @@ func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
 		}
 
 		for _, entry := range entries {
-			candidate, err := loadSkill(base, entry.Name(), containmentRoot)
+			candidate, err := loadSkill(base, entry.Name())
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
@@ -111,7 +133,7 @@ func listSkills(paths []string, containmentRoot string) ([]Skill, error) {
 	return result, nil
 }
 
-func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
+func loadSkill(base, entryName string) (*Skill, error) {
 	skillDir := filepath.Join(base, entryName)
 	info, err := os.Stat(skillDir)
 	if err != nil {
@@ -120,13 +142,8 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 	if !info.IsDir() {
 		return nil, nil
 	}
-	if containmentRoot != "" {
-		if err := safefile.CheckContained(containmentRoot, skillDir); err != nil {
-			return nil, fmt.Errorf("resolve skill directory %q: %w", skillDir, err)
-		}
-	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	data, err := readSkillData(skillPath, containmentRoot)
+	data, err := readSkillData(skillPath)
 	if err != nil {
 		return nil, fmt.Errorf("read skill %q: %w", skillPath, err)
 	}
@@ -138,14 +155,8 @@ func loadSkill(base, entryName, containmentRoot string) (*Skill, error) {
 	return &loaded, nil
 }
 
-func readSkillData(skillPath, containmentRoot string) ([]byte, error) {
-	var file *os.File
-	var err error
-	if containmentRoot != "" {
-		file, err = safefile.OpenContained(containmentRoot, skillPath)
-	} else {
-		file, err = os.Open(skillPath)
-	}
+func readSkillData(skillPath string) ([]byte, error) {
+	file, err := os.Open(skillPath)
 	if err != nil {
 		return nil, err
 	}

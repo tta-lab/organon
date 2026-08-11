@@ -21,7 +21,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 ### Binaries
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing plus read-only project-scoped MCP
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
-- `cmd/skill/` — filesystem-based skill discovery plus project-aware read-only MCP
+- `cmd/skill/` — filesystem-based skill discovery plus read-only MCP
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
 - `cmd/project/` — project management CLI: list, get, resolve, and jump to registered projects
 - `cmd/goal/` — Lenos session goal file CLI: add/update/append/get/status via `$LENOS_GOAL`

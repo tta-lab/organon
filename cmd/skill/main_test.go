@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,7 @@ func runSkill(t *testing.T, args []string) (stdout, stderr string, err error) {
 	home := os.Getenv("HOME")
 	paths := []string{}
 	if home != "" {
-		paths, _ = resolvePaths(home) //nolint:errcheck // test isolation
+		paths, _, _ = resolvePaths(home) //nolint:errcheck // test isolation
 	}
 	cmd := newRootCmd(&outBuf, &errBuf, paths)
 	cmd.SetArgs(args)
@@ -85,8 +86,7 @@ func TestSkillList_PrintsModelFriendlyBullets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantPath := filepath.Join(tmpHome, ".agents", "skills", "my-skill", "SKILL.md")
-	want := "Available skills:\n- my-skill: " + longDesc + " (file: " + wantPath + ")\n"
+	want := "Available skills:\n- my-skill: " + longDesc + "\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
@@ -132,8 +132,7 @@ func TestSkillGet_UsesFrontmatterNameNotDirectoryName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantPath := filepath.Join(tmpHome, ".agents", "skills", "storage-dir", "SKILL.md")
-	want := "Available skills:\n- frontmatter-name: A test skill (file: " + wantPath + ")\n"
+	want := "Available skills:\n- frontmatter-name: A test skill\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
@@ -417,7 +416,7 @@ func TestListCmd_JSONOutput_MultipleSkills(t *testing.T) {
 	}
 }
 
-func TestSkillList_EmptyDescriptionRendersNameAndPath(t *testing.T) {
+func TestSkillList_EmptyDescriptionRendersNameAndDescription(t *testing.T) {
 	tmp := t.TempDir()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -432,9 +431,41 @@ func TestSkillList_EmptyDescriptionRendersNameAndPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantPath := filepath.Join(tmpHome, ".agents", "skills", "no-category-skill", "SKILL.md")
-	want := "Available skills:\n- no-category-skill: A skill with no category (file: " + wantPath + ")\n"
+	want := "Available skills:\n- no-category-skill: A skill with no category\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestResolvePaths_WarnsOnMissingConfiguredDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	configDir := filepath.Join(tmpHome, ".config", "ttal")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpHome, "present", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := "global = [\"~/missing/skills\", \"~/present/skills\"]\n"
+	if err := os.WriteFile(filepath.Join(configDir, "skills.toml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, warnings, err := resolvePaths(tmpHome)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "missing") {
+		t.Fatalf("warnings = %v, want exactly one about the missing dir", warnings)
+	}
+	wantPaths := []string{
+		filepath.Join(tmpHome, ".agents", "skills"),
+		filepath.Join(tmpHome, "missing", "skills"),
+		filepath.Join(tmpHome, "present", "skills"),
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("paths = %v, want %v", paths, wantPaths)
 	}
 }

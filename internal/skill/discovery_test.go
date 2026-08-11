@@ -35,39 +35,126 @@ func writeSkillFile(t *testing.T, root, path, dirName, frontmatterName, desc, ca
 	}
 }
 
-func TestDiscoveryPaths_Order(t *testing.T) {
-	paths := DiscoveryPaths("/my/cwd", "/home/user")
-	want := []string{
-		"/my/cwd/.agents/skills",
-		"/my/cwd/.crush/skills",
-		"/my/cwd/.claude/skills",
-		"/my/cwd/.cursor/skills",
-		"/home/user/.agents/skills",
-		"/home/user/.crush/skills",
-		"/home/user/.claude/skills",
-		"/home/user/.cursor/skills",
+func TestGlobalDiscoveryPaths_Order(t *testing.T) {
+	paths := GlobalDiscoveryPaths("/home/user", Config{})
+	want := []DiscoveryPath{
+		{Dir: "/home/user/.agents/skills", Builtin: true},
 	}
 	if len(paths) != len(want) {
 		t.Fatalf("got %d paths, want %d", len(paths), len(want))
 	}
 	for i := range paths {
 		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %q, want %q", i, paths[i], want[i])
+			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
 		}
 	}
 }
 
-func TestProjectAndGlobalDiscoveryPaths(t *testing.T) {
-	projectPaths := ProjectDiscoveryPaths("/project")
-	globalPaths := GlobalDiscoveryPaths("/home/user")
-	if len(projectPaths) != 4 || len(globalPaths) != 4 {
-		t.Fatalf("got %d project and %d global paths, want 4 each", len(projectPaths), len(globalPaths))
+func TestGlobalDiscoveryPaths_ConfigExtras(t *testing.T) {
+	cfg := Config{
+		Global: []string{"/home/user/work/skills", "/srv/shared/skills", "/srv/shared/skills"},
 	}
-	if projectPaths[0] != "/project/.agents/skills" || projectPaths[3] != "/project/.cursor/skills" {
-		t.Fatalf("unexpected project paths: %v", projectPaths)
+	paths := GlobalDiscoveryPaths("/home/user", cfg)
+	want := []DiscoveryPath{
+		{Dir: "/home/user/.agents/skills", Builtin: true},
+		{Dir: "/home/user/work/skills"},
+		{Dir: "/srv/shared/skills"},
 	}
-	if globalPaths[0] != "/home/user/.agents/skills" || globalPaths[3] != "/home/user/.cursor/skills" {
-		t.Fatalf("unexpected global paths: %v", globalPaths)
+	if len(paths) != len(want) {
+		t.Fatalf("got %d paths, want %d", len(paths), len(want))
+	}
+	for i := range paths {
+		if paths[i] != want[i] {
+			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
+		}
+	}
+}
+
+func TestGlobalDiscoveryPaths_ExpandsTilde(t *testing.T) {
+	cfg := Config{
+		Global: []string{"~/work/skills", "~", "/srv/shared/skills", "~/work/skills"},
+	}
+	paths := GlobalDiscoveryPaths("/home/user", cfg)
+	want := []DiscoveryPath{
+		{Dir: "/home/user/.agents/skills", Builtin: true},
+		{Dir: "/home/user/work/skills"},
+		{Dir: "/home/user"},
+		{Dir: "/srv/shared/skills"},
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("got %d paths, want %d", len(paths), len(want))
+	}
+	for i := range paths {
+		if paths[i] != want[i] {
+			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
+		}
+	}
+}
+
+func TestGlobalDiscoveryPaths_SkipsTildeWhenHomeEmpty(t *testing.T) {
+	cfg := Config{
+		Global: []string{"~/work/skills", "/srv/shared/skills", "~"},
+	}
+	paths := GlobalDiscoveryPaths("", cfg)
+	want := []DiscoveryPath{
+		{Dir: ".agents/skills", Builtin: true},
+		{Dir: "/srv/shared/skills"},
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("got %d paths, want %d", len(paths), len(want))
+	}
+	for i := range paths {
+		if paths[i] != want[i] {
+			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
+		}
+	}
+	for _, p := range paths {
+		if p.Dir == "." {
+			t.Fatalf("tilde entry resolved to current directory: %#v", paths)
+		}
+	}
+}
+
+func TestLoadConfig_MissingFile(t *testing.T) {
+	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "does-not-exist.toml"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Global) != 0 {
+		t.Fatalf("cfg = %#v, want empty", cfg)
+	}
+}
+
+func TestLoadConfig_TrimsDropsBlanksAndKeepsTilde(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skills.toml")
+	content := `
+global = ["~/work/skills", "  ", "/srv/shared/skills", " ~/other/skills "]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantGlobal := []string{"~/work/skills", "/srv/shared/skills", "~/other/skills"}
+	if len(cfg.Global) != len(wantGlobal) {
+		t.Fatalf("Global = %v, want %v", cfg.Global, wantGlobal)
+	}
+	for i := range wantGlobal {
+		if cfg.Global[i] != wantGlobal[i] {
+			t.Errorf("Global[%d] = %q, want %q", i, cfg.Global[i], wantGlobal[i])
+		}
+	}
+}
+
+func TestLoadConfig_InvalidTOML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skills.toml")
+	if err := os.WriteFile(path, []byte("global = [not closed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for invalid TOML")
 	}
 }
 
@@ -97,47 +184,6 @@ func TestListSkills_FollowsDeployedDirectorySymlink(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].Description != "current" || skills[0].Body != "new body" {
 		t.Fatalf("skills = %#v, want current symlink target to shadow backup", skills)
-	}
-}
-
-func TestListSkillsContainedRejectsProjectSymlinkEscapes(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		linkSkill bool
-	}{
-		{name: "directory"},
-		{name: "skill file", linkSkill: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			projectRoot := t.TempDir()
-			base := filepath.Join(projectRoot, ".agents", "skills")
-			outsideRoot := t.TempDir()
-			writeSkill(t, outsideRoot, "external", "escaped", "outside", "tool", "outside body")
-			outsideSkillDir := filepath.Join(outsideRoot, "external", "escaped")
-			if err := os.MkdirAll(base, 0755); err != nil {
-				t.Fatal(err)
-			}
-			if test.linkSkill {
-				insideDir := filepath.Join(base, "escaped")
-				if err := os.MkdirAll(insideDir, 0755); err != nil {
-					t.Fatal(err)
-				}
-				outsideSkill := filepath.Join(outsideSkillDir, "SKILL.md")
-				if err := os.Symlink(outsideSkill, filepath.Join(insideDir, "SKILL.md")); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := os.Symlink(outsideSkillDir, filepath.Join(base, "escaped")); err != nil {
-				t.Fatal(err)
-			}
-
-			skills, err := ListSkillsContained([]string{base}, projectRoot)
-			if err == nil || !strings.Contains(err.Error(), "outside root") {
-				t.Fatalf("ListSkillsContained error = %v", err)
-			}
-			if len(skills) != 0 {
-				t.Fatalf("skills = %#v, want none", skills)
-			}
-		})
 	}
 }
 
@@ -235,34 +281,30 @@ func TestListSkills_DedupFirstWins(t *testing.T) {
 
 func TestListSkills_CrossDirDedup(t *testing.T) {
 	root := t.TempDir()
-	cwdCrush := filepath.Join(root, "cwd/.crush/skills/foo")
-	homeAgents := filepath.Join(root, "home/.agents/skills/foo")
-	if err := os.MkdirAll(cwdCrush, 0755); err != nil {
+	// Same skill name in the default dir and a configured extra dir;
+	// the earlier path (default) wins.
+	defaultDir := filepath.Join(root, ".agents", "skills", "foo")
+	extraDir := filepath.Join(root, "work", "skills", "foo")
+	if err := os.MkdirAll(defaultDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	crushSkillPath := filepath.Join(cwdCrush, "SKILL.md")
-	crushContent := "---\nname: foo\ndescription: crush version\n---\ncrush body"
-	if err := os.WriteFile(crushSkillPath, []byte(crushContent), 0644); err != nil {
+	defaultSkillPath := filepath.Join(defaultDir, "SKILL.md")
+	defaultContent := "---\nname: foo\ndescription: default version\n---\ndefault body"
+	if err := os.WriteFile(defaultSkillPath, []byte(defaultContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(homeAgents, 0755); err != nil {
+	if err := os.MkdirAll(extraDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	agentsSkillPath := filepath.Join(homeAgents, "SKILL.md")
-	agentsContent := "---\nname: foo\ndescription: agents version\n---\nagents body"
-	if err := os.WriteFile(agentsSkillPath, []byte(agentsContent), 0644); err != nil {
+	extraSkillPath := filepath.Join(extraDir, "SKILL.md")
+	extraContent := "---\nname: foo\ndescription: extra version\n---\nextra body"
+	if err := os.WriteFile(extraSkillPath, []byte(extraContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	paths := []string{
-		filepath.Join(root, "cwd/.agents/skills"),
-		filepath.Join(root, "cwd/.crush/skills"),
-		filepath.Join(root, "cwd/.claude/skills"),
-		filepath.Join(root, "cwd/.cursor/skills"),
-		filepath.Join(root, "home/.agents/skills"),
-		filepath.Join(root, "home/.crush/skills"),
-		filepath.Join(root, "home/.claude/skills"),
-		filepath.Join(root, "home/.cursor/skills"),
+		filepath.Join(root, ".agents", "skills"),
+		filepath.Join(root, "work", "skills"),
 	}
 	skills, err := ListSkills(paths)
 	if err != nil {
@@ -272,11 +314,11 @@ func TestListSkills_CrossDirDedup(t *testing.T) {
 		t.Fatalf("got %d skills, want 1", len(skills))
 	}
 	s := skills[0]
-	if s.Description != "crush version" {
-		t.Errorf("Description = %q, want %q", s.Description, "crush version")
+	if s.Description != "default version" {
+		t.Errorf("Description = %q, want %q", s.Description, "default version")
 	}
-	if s.Source != filepath.Join(root, "cwd/.crush/skills") {
-		t.Errorf("Source = %q, want %q", s.Source, filepath.Join(root, "cwd/.crush/skills"))
+	if s.Source != filepath.Join(root, ".agents", "skills") {
+		t.Errorf("Source = %q, want %q", s.Source, filepath.Join(root, ".agents", "skills"))
 	}
 }
 

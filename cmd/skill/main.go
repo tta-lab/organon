@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/skill"
 )
 
@@ -17,10 +18,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
 		os.Exit(1)
 	}
-	paths, err := resolvePaths(home)
+	paths, warnings, err := resolvePaths(home)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
+	}
+	for _, warning := range warnings {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	cmd := newRootCmd(os.Stdout, os.Stderr, paths)
 	if err := cmd.Execute(); err != nil {
@@ -43,12 +47,29 @@ func newRootCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	return cmd
 }
 
-func resolvePaths(home string) ([]string, error) {
-	cwd, err := os.Getwd()
+// resolvePaths returns the discovery directories in priority order plus
+// warnings for configured extra directories that do not exist. Missing
+// configured dirs are not fatal — they may be absent on this machine — but a
+// typo should not pass silently.
+func resolvePaths(home string) ([]string, []string, error) {
+	cfg, err := skill.LoadConfig(config.SkillsConfigPath())
 	if err != nil {
-		return nil, fmt.Errorf("getwd: %w", err)
+		return nil, nil, err
 	}
-	return skill.DiscoveryPaths(cwd, home), nil
+	roots := skill.GlobalDiscoveryPaths(home, cfg)
+	paths := make([]string, 0, len(roots))
+	warnings := make([]string, 0, 1)
+	for _, root := range roots {
+		paths = append(paths, root.Dir)
+		if root.Builtin {
+			continue
+		}
+		if _, err := os.Stat(root.Dir); err != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning: configured skills directory %q not found (skills.toml global)", root.Dir))
+		}
+	}
+	return paths, warnings, nil
 }
 
 func newListCmd(out, errOut io.Writer, paths []string) *cobra.Command {
@@ -151,6 +172,6 @@ func emitSkills(out, errOut io.Writer, skills []skill.Skill, jsonOut bool) error
 func printSkillBullets(out io.Writer, skills []skill.Skill) {
 	_, _ = fmt.Fprintln(out, "Available skills:")
 	for _, s := range skills {
-		fmt.Fprintf(out, "- %s: %s (file: %s)\n", s.Name, s.Description, s.Path)
+		fmt.Fprintf(out, "- %s: %s\n", s.Name, s.Description)
 	}
 }
