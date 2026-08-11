@@ -51,4 +51,4 @@ skill get <name>                    # print skill body to stdout
 skill find <keyword>...             # find skills by keyword (OR match)
 ```
 
-Discovery paths (priority order): project-local `{.agents,.crush,.claude,.cursor}/skills` first, then global `~/.{agents,crush,claude,cursor}/skills`. Skills are directories containing `SKILL.md` with YAML frontmatter.
+Discovery path: global `~/.agents/skills`. Extra directories can be added via `~/.config/ttal/skills.toml` (`global = [...]`), searched after the default. Skills are directories containing `SKILL.md` with YAML frontmatter.

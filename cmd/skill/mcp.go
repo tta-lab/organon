@@ -2,54 +2,40 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/project"
 	"github.com/tta-lab/organon/internal/skill"
 )
 
-type skillProjectGetter interface {
-	Get(alias string) (project.Entry, error)
-}
-
-type skillListInput struct {
-	Project string `json:"project,omitempty" jsonschema:"exact project alias; omit for global skills only"`
-}
+type skillListInput struct{}
 
 type skillFindInput struct {
-	Project string `json:"project,omitempty" jsonschema:"exact project alias; omit for global skills only"`
-	Query   string `json:"query" jsonschema:"search query matched against skill names, descriptions, and categories"`
-	Limit   *int   `json:"limit,omitempty" jsonschema:"maximum results; defaults to 8 and is capped at 32"`
+	Query string `json:"query" jsonschema:"search query matched against skill names, descriptions, and categories"`
+	Limit *int   `json:"limit,omitempty" jsonschema:"maximum results; defaults to 8 and is capped at 32"`
 }
 
 type skillGetInput struct {
-	Project string `json:"project,omitempty" jsonschema:"exact project alias; omit for global skills only"`
-	Name    string `json:"name" jsonschema:"exact case-sensitive skill name from frontmatter"`
+	Name string `json:"name" jsonschema:"exact case-sensitive skill name from frontmatter"`
 }
 
 type skillSummaryOutput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
-	Scope       string `json:"scope"`
-	Source      string `json:"source"`
+	Source      string `json:"source"` // absolute path of the discovery directory
 }
 
 type skillDetailOutput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
-	Scope       string `json:"scope"`
-	Source      string `json:"source"`
-	Path        string `json:"path"`
+	Source      string `json:"source"` // absolute path of the discovery directory
+	Path        string `json:"path"`   // absolute path to SKILL.md
 	Body        string `json:"body"`
 }
 
@@ -61,21 +47,12 @@ type skillGetOutput struct {
 	Skill skillDetailOutput `json:"skill"`
 }
 
-type skillSource struct {
-	scope string
-	name  string
-}
-
+// skillMCPService serves skill tools. Skills are discovered from the global
+// ~/.agents/skills directory plus configured extras. loadCfg reloads the
+// skills.toml config on every request so edits take effect without a restart.
 type skillMCPService struct {
-	home     string
-	projects skillProjectGetter
-}
-
-type skillDiscovery struct {
-	projectRoot  string
-	projectPaths []string
-	globalPaths  []string
-	sources      map[string]skillSource
+	home    string
+	loadCfg func() (skill.Config, error)
 }
 
 func skillBoolPointer(value bool) *bool { return &value }
@@ -95,74 +72,53 @@ func skillTool(name, title, description string) *mcp.Tool {
 	}
 }
 
-func (s skillMCPService) discovery(projectAlias string) (skillDiscovery, error) {
-	discovery := skillDiscovery{}
-	sources := make(map[string]skillSource, 8)
-	add := func(scope string, target *[]string, discoveryPaths []string) {
-		labels := []string{".agents", ".crush", ".claude", ".cursor"}
-		for i, path := range discoveryPaths {
-			*target = append(*target, path)
-			sources[filepath.Clean(path)] = skillSource{scope: scope, name: scope + ":" + labels[i]}
-		}
-	}
-
-	projectAlias = strings.TrimSpace(projectAlias)
-	if projectAlias != "" {
-		entry, err := s.projects.Get(projectAlias)
-		if err != nil {
-			return skillDiscovery{}, fmt.Errorf("get project %q: %w", projectAlias, err)
-		}
-		discovery.projectRoot = entry.Path
-		add("project", &discovery.projectPaths, skill.ProjectDiscoveryPaths(entry.Path))
-	}
-	add("global", &discovery.globalPaths, skill.GlobalDiscoveryPaths(s.home))
-	discovery.sources = sources
-	return discovery, nil
-}
-
-func (s skillMCPService) catalog(projectAlias string) (skill.Catalog, map[string]skillSource, error) {
-	discovery, err := s.discovery(projectAlias)
+func (s skillMCPService) catalog() (skill.Catalog, error) {
+	cfg, err := s.loadCfg()
 	if err != nil {
-		return skill.Catalog{}, nil, err
+		return skill.Catalog{}, err
 	}
-	projectSkills := []skill.Skill(nil)
-	var projectErr error
-	if discovery.projectRoot != "" {
-		projectSkills, projectErr = skill.ListSkillsContained(discovery.projectPaths, discovery.projectRoot)
+	roots := skill.GlobalDiscoveryPaths(s.home, cfg)
+	dirs := make([]string, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, root.Dir)
 	}
-	globalSkills, globalErr := skill.ListSkills(discovery.globalPaths)
-	if err := errors.Join(projectErr, globalErr); err != nil {
-		return skill.Catalog{}, nil, err
+	globalSkills, err := skill.ListSkills(dirs)
+	if err != nil {
+		return skill.Catalog{}, err
 	}
-	return skill.NewCatalog(projectSkills, globalSkills), discovery.sources, nil
+	return skill.NewCatalog(globalSkills), nil
 }
 
-func skillSummaries(skills []skill.Skill, sources map[string]skillSource) []skillSummaryOutput {
+func skillSummaries(skills []skill.Skill) []skillSummaryOutput {
 	result := make([]skillSummaryOutput, 0, len(skills))
 	for _, candidate := range skills {
-		source := sources[filepath.Clean(candidate.Source)]
 		result = append(result, skillSummaryOutput{
-			Name: candidate.Name, Description: candidate.Description, Category: candidate.Category,
-			Scope: source.scope, Source: source.name,
+			Name:        candidate.Name,
+			Description: candidate.Description,
+			Category:    candidate.Category,
+			Source:      candidate.Source,
 		})
 	}
 	return result
 }
 
-func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
-	service := skillMCPService{home: home, projects: projects}
+func newSkillMCPServer(home string, loadCfg func() (skill.Config, error)) *mcp.Server {
+	if loadCfg == nil {
+		loadCfg = func() (skill.Config, error) { return skill.LoadConfig(config.SkillsConfigPath()) }
+	}
+	service := skillMCPService{home: home, loadCfg: loadCfg}
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-skill", Version: "1.0.0"}, nil)
 
 	mcp.AddTool(server, skillTool(
 		"skill_list", "List agent skills", "List deduplicated skill metadata in discovery priority order.",
 	), func(
-		_ context.Context, _ *mcp.CallToolRequest, input skillListInput,
+		_ context.Context, _ *mcp.CallToolRequest, _ skillListInput,
 	) (*mcp.CallToolResult, skillListOutput, error) {
-		catalog, sources, err := service.catalog(input.Project)
+		catalog, err := service.catalog()
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("list skills: %w", err)
 		}
-		return nil, skillListOutput{Skills: skillSummaries(catalog.List(), sources)}, nil
+		return nil, skillListOutput{Skills: skillSummaries(catalog.List())}, nil
 	})
 
 	mcp.AddTool(server, skillTool(
@@ -174,7 +130,7 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if input.Limit != nil {
 			limit = *input.Limit
 		}
-		catalog, sources, err := service.catalog(input.Project)
+		catalog, err := service.catalog()
 		if err != nil {
 			return nil, skillListOutput{}, fmt.Errorf("find skills: %w", err)
 		}
@@ -182,7 +138,7 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if err != nil {
 			return nil, skillListOutput{}, err
 		}
-		return nil, skillListOutput{Skills: skillSummaries(skills, sources)}, nil
+		return nil, skillListOutput{Skills: skillSummaries(skills)}, nil
 	})
 
 	mcp.AddTool(server, skillTool(
@@ -190,7 +146,7 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input skillGetInput,
 	) (*mcp.CallToolResult, skillGetOutput, error) {
-		catalog, sources, err := service.catalog(input.Project)
+		catalog, err := service.catalog()
 		if err != nil {
 			return nil, skillGetOutput{}, fmt.Errorf("get skill: %w", err)
 		}
@@ -198,10 +154,13 @@ func newSkillMCPServer(home string, projects skillProjectGetter) *mcp.Server {
 		if err != nil {
 			return nil, skillGetOutput{}, err
 		}
-		source := sources[filepath.Clean(found.Source)]
 		return nil, skillGetOutput{Skill: skillDetailOutput{
-			Name: found.Name, Description: found.Description, Category: found.Category,
-			Scope: source.scope, Source: source.name, Path: found.Path, Body: found.Body,
+			Name:        found.Name,
+			Description: found.Description,
+			Category:    found.Category,
+			Source:      found.Source,
+			Path:        found.Path,
+			Body:        found.Body,
 		}}, nil
 	})
 
@@ -219,7 +178,7 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("determine home directory: %w", err)
 			}
-			return newSkillMCPServer(home, project.NewStore(config.ProjectsPath())).Run(cmd.Context(), &mcp.StdioTransport{})
+			return newSkillMCPServer(home, nil).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }
