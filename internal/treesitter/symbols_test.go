@@ -2,6 +2,7 @@ package treesitter
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,36 @@ func TestExtractSymbols_Go(t *testing.T) {
 	assert.Contains(t, names, "Port")
 	assert.Contains(t, names, "Validate")
 	assert.Contains(t, names, "main")
+}
+
+func TestExtractSymbols_GoTypeSwitch(t *testing.T) {
+	source, err := os.ReadFile("../../testdata/src/example_typeswitch.go")
+	require.NoError(t, err)
+
+	symbols, err := ExtractSymbols("example_typeswitch.go", source, 2)
+	require.NoError(t, err)
+
+	names := symbolNames(symbols)
+	// Declarations before, containing, and after the type switch are extracted.
+	assert.Contains(t, names, "Config")
+	assert.Contains(t, names, "Describe")
+	assert.Contains(t, names, "DefaultConfig")
+
+	// The type-switch function is extracted as a function symbol.
+	describe := findSymbol(symbols, "Describe")
+	require.NotNil(t, describe)
+	assert.Equal(t, kindFunction, describe.Kind)
+
+	// The declaration after the type switch is extracted.
+	defaultConfig := findSymbol(symbols, "DefaultConfig")
+	require.NotNil(t, defaultConfig)
+	assert.Equal(t, kindFunction, defaultConfig.Kind)
+
+	// The parse covers the complete source: the last symbol ends on the final
+	// line of the file rather than silently truncating before the type switch.
+	last := symbols[len(symbols)-1]
+	srcLines := strings.Count(string(source), "\n")
+	assert.Equal(t, srcLines, last.EndLine, "parse should cover the complete source")
 }
 
 func TestExtractSymbols_GoDocComments(t *testing.T) {
