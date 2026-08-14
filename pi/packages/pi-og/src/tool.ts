@@ -14,6 +14,7 @@ import {
 const require = createRequire(import.meta.url);
 
 const projectDesc = "Exact registered single-layer project alias";
+const requiredProject = Type.String({ description: projectDesc, minLength: 1 });
 const prIdDesc = "Optional positive PR ID; omitted uses the registered checkout's current branch";
 
 const positivePrId = Type.Integer({
@@ -25,21 +26,21 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["auth_status"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       action: StringEnum(["pull"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       action: StringEnum(["push"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       force: Type.Optional(
         Type.Boolean({
           description: "Use force-with-lease; rejected on the default branch",
@@ -52,7 +53,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["clone"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
     },
     { additionalProperties: false },
   ),
@@ -75,7 +76,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_create"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       title: Type.String({ description: "Non-blank pull request title" }),
       body: Type.Optional(
         Type.String({ description: "Optional pull request body (may be multiline)" }),
@@ -86,7 +87,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_find"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       state: Type.Optional(
         StringEnum(["open", "closed", "all"] as const, {
           description: "Pull request state to search",
@@ -99,7 +100,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_get"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
     },
     { additionalProperties: false },
@@ -107,7 +108,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_checks"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
     },
     { additionalProperties: false },
@@ -115,7 +116,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       title: Type.String({ description: "Replacement pull request title" }),
       body: Type.Optional(
@@ -127,7 +128,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
       body: Type.String({
@@ -139,7 +140,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_comment"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       body: Type.String({ description: "Non-blank pull request comment body (may be multiline)" }),
     },
@@ -148,7 +149,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_log"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(
         Type.Integer({
@@ -164,7 +165,7 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: StringEnum(["pr_failures"] as const, { description: "Action to perform" }),
-      project: Type.String({ description: projectDesc }),
+      project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(
         Type.Integer({
@@ -276,9 +277,7 @@ export function ogTool() {
 }
 
 function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
-  const project = (
-    "project" in input && input.project ? ["--project", input.project] : []
-  ) as string[];
+  const project = projectArgs(input);
   if (isAction(input, "auth_status")) {
     return { args: ["auth", "status", ...project, "--json"] };
   }
@@ -349,6 +348,16 @@ function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
   }
   args.push("--json");
   return { args };
+}
+
+function projectArgs(input: OgInput): string[] {
+  if (!("project" in input)) {
+    return [];
+  }
+  if (input.project === "") {
+    throw new Error("project alias must not be empty");
+  }
+  return ["--project", input.project];
 }
 
 function prIdArgs(input: { pr_id?: number }): string[] {

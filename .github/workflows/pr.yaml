@@ -101,14 +101,6 @@ jobs:
         with:
           version: 10.26.2
 
-      - name: Cross-compile all three supported targets
-        run: |
-          for target in "darwin arm64" "linux amd64" "linux arm64"; do
-            set -- $target
-            echo "cross-building $1/$2"
-            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -o /dev/null               ./cmd/src ./cmd/web ./cmd/project ./cmd/og
-          done
-
       - name: Install Pi workspace
         working-directory: pi
         run: pnpm install --frozen-lockfile

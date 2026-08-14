@@ -24,6 +24,44 @@ const TARGETS = [
   ["linux", "arm64", "linux-arm64"],
 ];
 const tmp = mkdtempSync(join(tmpdir(), "pi-pack-all-"));
+const hostileNpmUserConfig = join(tmp, "hostile-npmrc");
+writeFileSync(hostileNpmUserConfig, "omit=optional\nignore-scripts=false\n");
+const hostileNpmEnv = {
+  ...process.env,
+  NPM_CONFIG_USERCONFIG: hostileNpmUserConfig,
+  NPM_CONFIG_OMIT: "optional",
+  npm_config_registry: "https://registry.invalid",
+};
+const isolatedNpmUserConfig = join(tmp, "npmrc");
+const isolatedNpmGlobalConfig = join(tmp, "npm-globalrc");
+const isolatedNpmHome = join(tmp, "npm-home");
+const isolatedNpmCache = join(tmp, "npm-cache");
+writeFileSync(isolatedNpmUserConfig, "");
+writeFileSync(isolatedNpmGlobalConfig, "");
+mkdirSync(isolatedNpmHome, { recursive: true });
+mkdirSync(isolatedNpmCache, { recursive: true });
+
+function isolatedNpmEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(
+    Object.entries(base).filter(([key]) => !key.toLowerCase().startsWith("npm_config_")),
+  );
+  delete env.NODE_AUTH_TOKEN;
+  delete env.NPM_TOKEN;
+  return {
+    ...env,
+    HOME: isolatedNpmHome,
+    NPM_CONFIG_USERCONFIG: isolatedNpmUserConfig,
+    NPM_CONFIG_GLOBALCONFIG: isolatedNpmGlobalConfig,
+    NPM_CONFIG_CACHE: isolatedNpmCache,
+    NPM_CONFIG_OFFLINE: "true",
+    NPM_CONFIG_LEGACY_PEER_DEPS: "true",
+    NPM_CONFIG_IGNORE_SCRIPTS: "true",
+    NPM_CONFIG_AUDIT: "false",
+    NPM_CONFIG_FUND: "false",
+  };
+}
+
+const offlineNpmEnv = isolatedNpmEnv(hostileNpmEnv);
 const readManifest = (tgz: string) =>
   JSON.parse(execFileSync("tar", ["-xOf", tgz, "package/package.json"], { encoding: "utf8" }));
 
@@ -150,7 +188,7 @@ describe("all sixteen package manifests", () => {
           "--no-fund",
           mainTgz,
         ],
-        { cwd: installRoot, stdio: "pipe" },
+        { cwd: installRoot, stdio: "pipe", env: offlineNpmEnv },
       );
 
       const pkg = join(installRoot, "node_modules", `@tta-lab/pi-${tool}`);

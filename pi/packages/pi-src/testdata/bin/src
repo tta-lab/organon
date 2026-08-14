@@ -128,8 +128,8 @@ if (cmd === "read") {
   const userLimited = limit > 0 && limit < selectedLines.length;
   if (userLimited) selectedLines = selectedLines.slice(0, limit);
   const selected = selectedLines.join("\n");
-  // Mirror Pi truncateHead's counted lines while retaining the final empty
-  // segment in selected_lines for addressable pagination.
+  // Mirror Pi truncateHead's counted-line behavior; selectedLines remains
+  // internal so the public result only exposes observable pagination metadata.
   const outputLines =
     selected === ""
       ? 0
@@ -144,7 +144,6 @@ if (cmd === "read") {
       symbol_id: symbolId_,
       content: selected,
       start_line,
-      selected_lines: selectedLines.length,
       total_lines,
       truncation_total_lines: outputLines,
       total_bytes: Buffer.byteLength(content),
@@ -253,21 +252,22 @@ if (cmd === "edit") {
     next = next.replace(edit.oldText, edit.newText);
   }
   writeFileSync(path, next);
+  const oldLines = source.split("\n");
+  const newLines = next.split("\n");
   const diff =
-    source
-      .split("\n")
-      .map((l) => "-" + l)
-      .join("\n") +
+    oldLines.map((line, index) => `-${index + 1} ${line}`).join("\n") +
     "\n" +
-    next
-      .split("\n")
-      .map((l) => "+" + l)
-      .join("\n");
+    newLines.map((line, index) => `+${index + 1} ${line}`).join("\n");
+  const patch =
+    `--- a/${path}\n+++ b/${path}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n` +
+    oldLines.map((line) => `-${line}`).join("\n") +
+    "\n" +
+    newLines.map((line) => `+${line}`).join("\n");
   process.stdout.write(
     JSON.stringify({
       path,
       diff,
-      patch: diff,
+      patch,
       first_changed_line: 1,
       edits_applied: envelope.edits.length,
     }) + "\n",

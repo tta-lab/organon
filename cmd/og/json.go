@@ -60,11 +60,15 @@ func jsonFlag(cmd *cobra.Command) bool {
 
 // resolveDaemonWorkDir returns the work directory for a guarded og call: the
 // exact registered project path when --project is set, otherwise the current
-// working directory. The alias must resolve exactly through the project store;
-// callers can never select a worktree path, root, URI, or credential.
+// working directory. An explicit empty --project is invalid rather than an
+// alias for the current directory. The alias must resolve exactly through the
+// project store; callers can never select a worktree path, root, URI, or credential.
 func resolveDaemonWorkDir(cmd *cobra.Command) (workDir, alias string, err error) {
 	alias, _ = cmd.Flags().GetString("project")
 	if alias == "" {
+		if cmd.Flags().Changed("project") {
+			return "", "", fmt.Errorf("project alias must not be empty")
+		}
 		workDir, err = os.Getwd()
 		if err != nil {
 			return "", "", fmt.Errorf("get working directory: %w", err)

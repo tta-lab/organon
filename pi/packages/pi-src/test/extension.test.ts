@@ -174,15 +174,14 @@ describe("pi-src read and symbols", () => {
     );
     const result = await call({ action: "read", path, limit: 2 }, { cwd });
     const details = result.details as {
-      selected_lines: number;
       output_lines: number;
       output_end_line: number;
       remaining_lines: number;
       next_offset: number;
     };
 
+    expect(details).not.toHaveProperty("selected_lines");
     expect(details).toMatchObject({
-      selected_lines: 2,
       output_lines: 2,
       output_end_line: 2,
       remaining_lines: 3,
@@ -378,8 +377,17 @@ describe("pi-src mutations", () => {
       },
       { cwd },
     );
-    const details = result.details as { edits_applied: number; diff: string };
+    const details = result.details as { edits_applied: number; diff: string; patch: string };
     expect(details.edits_applied).toBe(2);
+    expect((result.content[0] as { text: string }).text).toBe(
+      `Successfully replaced 2 block(s) in ${path}.`,
+    );
+    expect((result.content[0] as { text: string }).text).not.toContain("return 11");
+    expect(details.diff).toContain("-1");
+    expect(details.diff).not.toContain("--- ");
+    expect(details.patch).toContain("--- a/");
+    expect(details.patch).toContain("@@");
+    expect(details.diff).not.toBe(details.patch);
     const after = readFileSync(path, "utf8");
     expect(after).toContain("return 11");
     expect(after).toContain("return 22");

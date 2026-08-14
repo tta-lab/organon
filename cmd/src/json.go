@@ -26,15 +26,14 @@ type symbolOutlineJSON struct {
 // readJSON is the machine-readable result of `src read --json`. Line
 // positions (StartLine, TotalLines, NextOffset) are relative to the selected
 // content: the whole file, or the exact symbol/section when symbol_id is
-// present. TotalLines and SelectedLines use pagination's addressable-line
-// model; TruncationTotalLines and OutputLines use Pi truncateHead's counted
+// present. TotalLines uses pagination's addressable-line model;
+// TruncationTotalLines and OutputLines use Pi truncateHead's counted
 // line model. Offset and limit are 1-indexed line positions in the same frame.
 type readJSON struct {
 	Path                  string     `json:"path"`
 	SymbolID              string     `json:"symbol_id,omitempty"`
 	Content               string     `json:"content"`
 	StartLine             int        `json:"start_line"`
-	SelectedLines         int        `json:"selected_lines"`
 	TotalLines            int        `json:"total_lines"`
 	TruncationTotalLines  int        `json:"truncation_total_lines"`
 	TotalBytes            int        `json:"total_bytes"`
@@ -347,7 +346,6 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		SymbolID:              symbolID,
 		Content:               window.Content,
 		StartLine:             window.StartLine,
-		SelectedLines:         window.SelectedLines,
 		TotalLines:            window.TotalLines,
 		TruncationTotalLines:  window.TruncationTotalLines,
 		TotalBytes:            window.TotalBytes,

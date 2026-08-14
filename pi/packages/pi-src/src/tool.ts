@@ -151,7 +151,6 @@ export interface ReadResult {
   symbol_id?: string;
   content: string;
   start_line: number;
-  selected_lines: number;
   total_lines: number;
   truncation_total_lines: number;
   total_bytes: number;

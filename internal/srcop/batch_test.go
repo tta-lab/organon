@@ -22,11 +22,47 @@ func TestApplyBatchMultipleDisjointReplacements(t *testing.T) {
 	if result.FirstChangedLine != 2 {
 		t.Fatalf("first changed line = %d, want 2", result.FirstChangedLine)
 	}
-	if !strings.Contains(result.Diff, "-bbb") || !strings.Contains(result.Diff, "+BB") {
-		t.Fatalf("diff missing edits: %q", result.Diff)
+	wantDiff := " 1 a\n-2 bbb\n+2 BB\n 3 c\n-4 ddd\n+4 DD\n 5 e"
+	if result.Diff != wantDiff {
+		t.Fatalf("display diff = %q, want %q", result.Diff, wantDiff)
 	}
-	if result.Patch == "" {
-		t.Fatal("patch is empty")
+	if strings.Contains(result.Diff, "--- ") ||
+		strings.Contains(result.Diff, "+++ ") ||
+		strings.Contains(result.Diff, "@@") {
+		t.Fatalf("display diff contains unified patch headers: %q", result.Diff)
+	}
+	if !strings.Contains(result.Patch, "--- a/f.txt") || !strings.Contains(result.Patch, "+++ b/f.txt") ||
+		!strings.Contains(result.Patch, "@@") || !strings.Contains(result.Patch, "-bbb") ||
+		!strings.Contains(result.Patch, "+BB") {
+		t.Fatalf("unified patch missing headers or edits: %q", result.Patch)
+	}
+	if result.Diff == result.Patch {
+		t.Fatal("display diff and unified patch must use distinct formats")
+	}
+}
+
+func TestApplyBatchUsesPiDisplayDiffContext(t *testing.T) {
+	source := []byte("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\n")
+	result, err := ApplyBatch("f.txt", source, []BatchEdit{{OldText: "one", NewText: "ONE"}})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	want := "- 1 one\n+ 1 ONE\n  2 two\n  3 three\n  4 four\n  5 five\n    ..."
+	if result.Diff != want {
+		t.Fatalf("display diff = %q, want %q", result.Diff, want)
+	}
+}
+
+func TestApplyBatchUsesPiRepeatedLineAlignment(t *testing.T) {
+	source := []byte("b\na\nc\nb\n")
+	replacement := "a\na\na\na\nb\nc\nb\na\n"
+	result, err := ApplyBatch("f.txt", source, []BatchEdit{{OldText: string(source), NewText: replacement}})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	want := "-1 b\n 2 a\n+2 a\n+3 a\n+4 a\n+5 b\n 3 c\n 4 b\n+8 a"
+	if result.Diff != want {
+		t.Fatalf("display diff = %q, want %q", result.Diff, want)
 	}
 }
 

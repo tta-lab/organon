@@ -3,7 +3,6 @@
 // - all sixteen manifests share one version matching the release tag
 // - every main package pins its native optional dependencies to that exact version
 // - no manifest references latest or an unmatched version
-// - native packages are published before their dependent main packages
 // - when a goreleaser dist dir is given, its metadata version matches the tag
 //   and its artifacts cover the four tools on the three supported platforms
 //
@@ -53,19 +52,6 @@ for (const dir of mainPackages) {
   }
 }
 
-// Native packages must be ordered before the main packages that depend on them.
-const publishOrder = [...nativePackages, ...mainPackages];
-for (const dir of mainPackages) {
-  const manifest = read(join(workspace, "packages", dir, "package.json"));
-  const mainIndex = publishOrder.indexOf(dir);
-  for (const dep of Object.keys(manifest.optionalDependencies ?? {})) {
-    const nativeName = dep.replace("@tta-lab/pi-", "pi-");
-    if (publishOrder.indexOf(nativeName) > mainIndex) {
-      errors.push(`${manifest.name}: native ${dep} would publish after its main package`);
-    }
-  }
-}
-
 // Tag -> GoReleaser artifact mapping: the dist metadata version (tag without
 // the leading v) must equal the manifest version, and the binaries for the
 // four tools on the three supported platforms must all be present.
@@ -110,6 +96,6 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `dry-run ok: ${mainPackages.length + nativePackages.length} manifests at ${version}, natives before mains` +
+  `dry-run ok: ${mainPackages.length + nativePackages.length} manifests at ${version}` +
     (dist ? `, goreleaser artifacts match ${version}` : ""),
 );

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -89,9 +88,9 @@ func runGitPull(cmd *cobra.Command, args []string) error {
 }
 
 func runGitTag(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, _, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	bump, _ := cmd.Flags().GetString("bump")
 	if bump != "" && len(args) > 0 {

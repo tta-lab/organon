@@ -299,11 +299,14 @@ func TestReadJSONWindowMetadataForExplicitLimit(t *testing.T) {
 
 	cmd := newReadCmd()
 	require.NoError(t, cmd.Flags().Set("limit", "2"))
-	out := decodeRead(t, captureStdout(t, func() {
+	raw := captureStdout(t, func() {
 		require.NoError(t, runReadJSON(cmd, []string{f}))
-	}))
+	})
+	out := decodeRead(t, raw)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &fields))
+	assert.NotContains(t, fields, "selected_lines")
 
-	assert.Equal(t, 2, out.SelectedLines)
 	assert.Equal(t, 2, out.OutputLines)
 	assert.Equal(t, 5, out.TotalLines) // includes the terminal addressable empty line
 	assert.Equal(t, len(content), out.TotalBytes)
@@ -324,7 +327,6 @@ func TestReadJSONWindowKeepsBlankLimitBoundaryAddressable(t *testing.T) {
 	}))
 
 	assert.Equal(t, "module example.com/organon\n", out.Content)
-	assert.Equal(t, 2, out.SelectedLines)
 	assert.Equal(t, 1, out.OutputLines) // Pi excludes the selected terminal empty segment from its count
 	assert.Equal(t, 2, out.OutputEndLine)
 	assert.Equal(t, 3, out.NextOffset)

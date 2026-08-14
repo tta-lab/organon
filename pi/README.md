@@ -104,9 +104,9 @@ node scripts/test-release-invariants.mjs
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to all sixteen
 manifests, `scripts/stage-natives.mjs` copies the cross-compiled Go binaries
 into the native packages (failing on a missing or wrong-platform artifact),
-and native packages publish before their main packages. The release workflow
-runs `scripts/release-dry-run.mjs` to verify the ordering and exact versions
-before publishing.
+and the release workflow publishes native packages before their main packages
+in two explicit steps. `scripts/release-dry-run.mjs` verifies exact version and
+GoReleaser artifact invariants before publishing.
 
 ### Local debugging
 

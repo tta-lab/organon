@@ -9,6 +9,20 @@ import { ogSchema, ogTool } from "../src/tool.js";
 
 const def = ogTool();
 const ctx = { cwd: "/tmp" } as any;
+const emptyProjectInputs = [
+  { action: "auth_status", project: "" },
+  { action: "pull", project: "" },
+  { action: "push", project: "" },
+  { action: "clone", project: "" },
+  { action: "pr_create", project: "", title: "title" },
+  { action: "pr_find", project: "" },
+  { action: "pr_get", project: "" },
+  { action: "pr_checks", project: "" },
+  { action: "pr_modify", project: "", title: "title" },
+  { action: "pr_comment", project: "", body: "body" },
+  { action: "pr_log", project: "" },
+  { action: "pr_failures", project: "" },
+];
 
 function call(params: unknown) {
   return def.execute("call-1", params as any, undefined, undefined, ctx);
@@ -51,7 +65,16 @@ describe("pi-og extension", () => {
     expect(Value.Check(ogSchema, { action: "pr_log", project: "ko", tail: 2000 })).toBe(false);
     expect(Value.Check(ogSchema, { action: "pr_find", project: "ko", state: "bogus" })).toBe(false);
     expect(Value.Check(ogSchema, { action: "auth_status" })).toBe(false);
+    for (const input of emptyProjectInputs) {
+      expect(Value.Check(ogSchema, input)).toBe(false);
+    }
     expect(Value.Check(ogSchema, { action: "auth_status", project: "ko", bogus: 1 })).toBe(false);
+  });
+
+  it("rejects empty project aliases for every registered-project action before starting the CLI", async () => {
+    for (const input of emptyProjectInputs) {
+      await expect(call(input)).rejects.toThrow(/project alias must not be empty/);
+    }
   });
 
   it("auth_status passes the alias and returns the auth record", async () => {

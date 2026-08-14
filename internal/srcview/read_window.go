@@ -19,13 +19,12 @@ func (err *OffsetOutOfRangeError) Error() string {
 }
 
 // ReadWindow is the complete Pi-equivalent read window for selected source
-// content. TotalLines and SelectedLines use addressable strings.Split lines;
+// content. TotalLines uses addressable strings.Split lines;
 // TruncationTotalLines and OutputLines use Pi truncateHead's counted-line
 // model, which omits a terminal empty segment after a newline.
 type ReadWindow struct {
 	Content               string
 	StartLine             int
-	SelectedLines         int
 	TotalLines            int
 	TruncationTotalLines  int
 	TotalBytes            int
@@ -63,7 +62,6 @@ func NewReadWindow(content string, offset, limit int) (ReadWindow, error) {
 	window := ReadWindow{
 		Content:               truncated.Content,
 		StartLine:             startIndex + 1,
-		SelectedLines:         len(selected),
 		TotalLines:            len(lines),
 		TruncationTotalLines:  truncated.TotalLines,
 		TotalBytes:            len(content),
