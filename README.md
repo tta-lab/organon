@@ -292,7 +292,7 @@ installation, supported platforms, the `src` takeover behavior, and the opaque
 symbol-ID rules. The `web`, `project`, `og`, and `skill` MCP servers remain for
 non-Pi clients; the project-scoped `src` MCP server is removed.
 
-## Why## Why
+## Why
 
 AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.
 

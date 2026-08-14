@@ -175,15 +175,45 @@ func TestApplyBatchRejectsOverlappingOccurrences(t *testing.T) {
 }
 
 func TestApplyBatchCRLFNewTextIsNormalized(t *testing.T) {
-	// A CRLF newText must not become double-CRLF after the line-ending restore.
-	source := []byte("a\\r\\nb\\r\\nc\\r\\n")
+	// Real CRLF source: a CRLF newText must not become double-CRLF after the
+	// line-ending restore.
+	source := []byte("a\r\nb\r\nc\r\n")
 	result, err := ApplyBatch("f.txt", source, []BatchEdit{
-		{OldText: "a", NewText: "A\\r\\nB"},
+		{OldText: "a", NewText: "A\r\nB"},
 	})
 	if err != nil {
 		t.Fatalf("ApplyBatch: %v", err)
 	}
-	if string(result.Content) != "A\\r\\nB\\r\\nb\\r\\nc\\r\\n" {
-		t.Fatalf("content = %q, want normalized CRLF (no \r\r\n)", result.Content)
+	if string(result.Content) != "A\r\nB\r\nb\r\nc\r\n" {
+		t.Fatalf("content = %q, want single CRLF separators", result.Content)
+	}
+}
+
+func TestApplyBatchMixedLineEndingsFollowFirstStyle(t *testing.T) {
+	// First line ending is LF but the file later contains CRLF: the Pi built-in
+	// edit restores the whole file to the first style (LF).
+	source := []byte("a\nb\r\nc\n")
+	result, err := ApplyBatch("f.txt", source, []BatchEdit{
+		{OldText: "a", NewText: "A"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	want := "A\nb\nc\n"
+	if string(result.Content) != want {
+		t.Fatalf("content = %q, want %q (LF first style wins)", result.Content, want)
+	}
+
+	// First line ending is CRLF with a later lone LF: CRLF wins.
+	source2 := []byte("a\r\nb\nc\r\n")
+	result2, err := ApplyBatch("f.txt", source2, []BatchEdit{
+		{OldText: "a", NewText: "A"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	want2 := "A\r\nb\r\nc\r\n"
+	if string(result2.Content) != want2 {
+		t.Fatalf("content = %q, want %q (CRLF first style wins)", result2.Content, want2)
 	}
 }

@@ -35,9 +35,14 @@ export const srcSchema = Type.Union([
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.Optional(Type.String({ description: symbolIdDescription })),
       offset: Type.Optional(
-        Type.Number({ description: "1-indexed line offset within the selected content" }),
+        Type.Integer({
+          description: "1-indexed line offset within the selected content",
+          minimum: 1,
+        }),
       ),
-      limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+      limit: Type.Optional(
+        Type.Integer({ description: "Maximum number of lines to read", minimum: 1 }),
+      ),
     },
     { additionalProperties: false },
   ),

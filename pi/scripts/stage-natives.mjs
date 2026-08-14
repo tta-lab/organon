@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Stages GoReleaser-built binaries into the native npm package bin directories.
+// Stages GoReleaser-built binaries into the native npm package bin directories
+// and verifies each staged binary matches its package's platform.
 //
 // Usage: node scripts/stage-natives.mjs <goreleaserDistDir>
-// The dist dir is expected to contain per-build outputs named like
-//   src_darwin_arm64/src, web_linux_amd64/web, og_linux_arm64/og, ...
-import { copyFileSync, chmodSync, mkdirSync, existsSync, readdirSync } from "node:fs";
+// Every tool/os/arch combination must resolve to an exact per-build artifact
+// like <dist>/src_darwin_arm64/src; a missing or cross-platform fallback is an
+// error so a Darwin binary can never be shipped inside a Linux package.
+import { copyFileSync, chmodSync, mkdirSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,47 +21,50 @@ if (!dist || !existsSync(dist)) {
 
 const TOOLS = ["src", "web", "project", "og"];
 const TARGETS = [
-  ["darwin", "arm64", "darwin-arm64"],
-  ["linux", "amd64", "linux-x64"],
-  ["linux", "arm64", "linux-arm64"],
+  ["darwin", "arm64", "darwin-arm64", /Mach-O.*arm64/],
+  ["linux", "amd64", "linux-x64", /ELF.*x86-64/],
+  ["linux", "arm64", "linux-arm64", /ELF.*aarch64/],
 ];
+
+// goreleaser per-build directory layouts seen across versions.
+function exactArtifact(tool, os, arch) {
+  const candidates = [
+    join(dist, `${tool}_${os}_${arch}`, tool),
+    join(dist, `${os}_${arch}_${tool}`, tool),
+  ];
+  return candidates.find((c) => existsSync(c));
+}
+
+function fileSignature(binary) {
+  try {
+    return execFileSync("file", [binary], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
 
 let staged = 0;
 for (const tool of TOOLS) {
-  for (const [os, arch, suffix] of TARGETS) {
-    const candidates = [
-      join(dist, `${tool}_${os}_${arch}`, tool),
-      join(dist, `${os}_${arch}_${tool}`, tool),
-    ];
-    const source = candidates.find((c) => existsSync(c));
+  for (const [os, arch, suffix, marker] of TARGETS) {
+    const source = exactArtifact(tool, os, arch);
     if (!source) {
-      // Search recursively as a fallback for goreleaser naming differences.
-      const found = findBinary(dist, tool);
-      if (!found) {
-        console.error(`missing binary for ${tool}_${os}_${arch}`);
-        process.exit(1);
-      }
+      console.error(`missing exact artifact for ${tool}_${os}_${arch}; refusing to fall back`);
+      process.exit(1);
     }
     const destDir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`, "bin");
     mkdirSync(destDir, { recursive: true });
     const dest = join(destDir, tool);
-    copyFileSync(source ?? findBinary(dist, tool), dest);
+    copyFileSync(source, dest);
     chmodSync(dest, 0o755);
-    console.log(`staged ${tool} -> ${dest}`);
+    const signature = fileSignature(dest);
+    if (!marker.test(signature)) {
+      console.error(
+        `staged ${tool} for ${os}/${arch} but file reports: ${signature || "unreadable"}`,
+      );
+      process.exit(1);
+    }
+    console.log(`staged ${tool} -> ${dest} (${signature.split(",")[0]})`);
     staged++;
   }
 }
-console.log(`staged ${staged} native binaries`);
-
-function findBinary(root, tool) {
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    const full = join(root, entry.name);
-    if (entry.isDirectory()) {
-      const nested = findBinary(full, tool);
-      if (nested) return nested;
-    } else if (entry.name === tool) {
-      return full;
-    }
-  }
-  return undefined;
-}
+console.log(`staged and verified ${staged} native binaries`);

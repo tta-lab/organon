@@ -70,7 +70,7 @@ describe("all sixteen package manifests", () => {
     }
   });
 
-  it("installs every packed main package offline and executes its tool through the Pi entry", async () => {
+  it("installs packed main and native tarballs offline and discovers the extension through Pi's loader", async () => {
     const { platform, arch } = process;
     const osName = platform === "darwin" ? "darwin" : "linux";
     const archName = arch === "arm64" ? "arm64" : "x64";
@@ -109,44 +109,47 @@ describe("all sixteen package manifests", () => {
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
     for (const { tool, action, fixture, assert } of smoke) {
-      const installRoot = join(workspace, ".tmp", `pack-install-${tool}`);
+      // Stage the fake binary into the native package dir so the packed native
+      // tarball itself carries a runnable binary (gitignored bin/).
+      const hostSuffix = `${osName}-${archName}`;
+      const nativePkgDir = join(workspace, "packages", "native", `pi-${tool}-${hostSuffix}`);
+      mkdirSync(join(nativePkgDir, "bin"), { recursive: true });
+      copyFileSync(join(workspace, fixture), join(nativePkgDir, "bin", tool));
+      chmodSync(join(nativePkgDir, "bin", tool), 0o755);
+
+      const nativeTgz = pack(nativePkgDir, `@tta-lab/pi-${tool}-${hostSuffix}`);
+      const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
+
+      const installRoot = join(tmp, `install-${tool}`);
       rmSync(installRoot, { recursive: true, force: true });
       mkdirSync(installRoot, { recursive: true });
-      const tgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
-      execFileSync("tar", ["-xzf", tgz, "-C", installRoot], { stdio: "pipe" });
+      execFileSync("tar", ["-xzf", mainTgz, "-C", installRoot], { stdio: "pipe" });
       const pkg = join(installRoot, "package");
       expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
 
-      const nativePkgDir = join(
-        pkg,
-        "node_modules",
-        "@tta-lab",
-        `pi-${tool}-${osName}-${archName}`,
-      );
-      const nativeDir = join(nativePkgDir, "bin");
-      mkdirSync(nativeDir, { recursive: true });
-      writeFileSync(
-        join(nativePkgDir, "package.json"),
-        JSON.stringify({ name: `@tta-lab/pi-${tool}-${osName}-${archName}`, version: "0.1.0" }),
-      );
-      copyFileSync(join(workspace, fixture), join(nativeDir, tool));
-      chmodSync(join(nativeDir, tool), 0o755);
-
-      const registered: any[] = [];
-      const fakePi = {
-        registerTool: (d: any) => registered.push(d),
-        on: () => undefined,
-      };
-      const mod = (await import("file://" + join(pkg, "dist", "index.js"))) as {
-        default: (pi: unknown) => void;
-      };
-      mod.default(fakePi as any);
-      expect(registered).toHaveLength(1);
-      expect(registered[0]!.name).toBe(tool);
-
-      const result = await registered[0]!.execute("id", action, undefined, undefined, {
-        cwd: tmp,
+      // Install the packed native tarball exactly where npm would place the
+      // matching optional dependency.
+      const installedNative = join(pkg, "node_modules", "@tta-lab", `pi-${tool}-${hostSuffix}`);
+      mkdirSync(installedNative, { recursive: true });
+      execFileSync("tar", ["-xzf", nativeTgz, "-C", installedNative, "--strip-components=1"], {
+        stdio: "pipe",
       });
+      expect(existsSync(join(installedNative, "bin", tool))).toBe(true);
+
+      // Real Pi discovery: the package manager resolve path feeds the loader.
+      const { discoverAndLoadExtensions } = await import("@earendil-works/pi-coding-agent");
+      const agentDir = join(tmp, `agent-${tool}`);
+      mkdirSync(agentDir, { recursive: true });
+      const loaded = await discoverAndLoadExtensions([pkg], tmp, agentDir);
+      expect(loaded.errors).toEqual([]);
+      const extension = loaded.extensions.find((e) => e.tools.has(tool));
+      expect(extension).toBeDefined();
+      const registered = extension!.tools.get(tool)!;
+      expect(registered.definition.name).toBe(tool);
+
+      const result = await registered.definition.execute("id", action, undefined, undefined, {
+        cwd: tmp,
+      } as any);
       assert(result.details);
     }
   });

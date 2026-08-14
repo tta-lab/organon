@@ -334,6 +334,19 @@ func TestReadJSONRejectsAnimatedPNGVisibly(t *testing.T) {
 	assert.Contains(t, err.Error(), "not supported")
 }
 
+func TestReadJSONRejectsInvalidUTF8WithoutNUL(t *testing.T) {
+	// 0xFF is invalid UTF-8 but contains no NUL byte; the read must fail visibly
+	// instead of emitting JSON replacement characters.
+	dir := t.TempDir()
+	f := filepath.Join(dir, "broken.txt")
+	require.NoError(t, os.WriteFile(f, []byte{'a', 0xFF, 'b', '\n'}, 0o644))
+	out := captureStdout(t, func() {
+		err := runReadJSON(newReadCmd(), []string{f})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "binary file")
+	})
+	assert.Equal(t, "", out, "no stdout may carry replacement characters")
+}
 func TestReadJSONRejectsUnsupportedBinaryVisibly(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "blob.dat")

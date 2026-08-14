@@ -41,6 +41,9 @@ describe("pi-src schema", () => {
         limit: 10,
       }),
     ).toBe(true);
+    expect(Value.Check(srcSchema, { action: "read", path: "a.go", offset: 0 })).toBe(false);
+    expect(Value.Check(srcSchema, { action: "read", path: "a.go", offset: 1.5 })).toBe(false);
+    expect(Value.Check(srcSchema, { action: "read", path: "a.go", limit: -1 })).toBe(false);
     expect(
       Value.Check(srcSchema, { action: "replace", path: "a.go", symbol_id: "bK", content: "x" }),
     ).toBe(true);

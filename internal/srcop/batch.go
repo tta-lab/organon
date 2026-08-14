@@ -47,17 +47,17 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 		return nil, fmt.Errorf("binary file detected; src edit only works on text files")
 	}
 
-	// Preserve BOM and normalize CRLF for matching, mirroring the Pi built-in edit.
+	// Preserve BOM and normalize line endings for matching, mirroring the Pi
+	// built-in edit: matching always runs on LF, and the final file is restored
+	// to the line-ending style of the FIRST line ending in the original file.
 	var bom []byte
 	content := source
 	if bytes.HasPrefix(content, []byte{0xEF, 0xBB, 0xBF}) {
 		bom, content = content[:3], content[3:]
 	}
-	hasCRLF := bytes.Contains(content, []byte("\r\n"))
-	normalized := content
-	if hasCRLF {
-		normalized = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
-	}
+	crlfEnding := firstLineEndingIsCRLF(content)
+	normalized := bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+	normalized = bytes.ReplaceAll(normalized, []byte("\r"), []byte("\n"))
 
 	matches := make([]batchMatch, 0, len(edits))
 	for i, edit := range edits {
@@ -69,13 +69,11 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 		}
 		old := edit.OldText
 		newText := edit.NewText
-		if hasCRLF {
-			// Both sides are normalized to LF for matching and application;
-			// the final \n -> \r\n restore must never see a literal \r\n from
-			// newText, or it would become \r\r\n.
-			old = strings.ReplaceAll(old, "\r\n", "\n")
-			newText = strings.ReplaceAll(newText, "\r\n", "\n")
-		}
+		// Both sides are normalized to LF for matching and application; the
+		// final restore must never see a literal \r\n from newText, or it
+		// would become \r\r\n.
+		old = strings.ReplaceAll(old, "\r\n", "\n")
+		newText = strings.ReplaceAll(newText, "\r\n", "\n")
 		if old == "" {
 			return nil, fmt.Errorf("edit %d: oldText is empty after line-ending normalization", i+1)
 		}
@@ -108,7 +106,7 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 	firstChangedLine := bytes.Count(normalized[:matches[0].start], []byte("\n")) + 1
 
 	final := newContent
-	if hasCRLF {
+	if crlfEnding {
 		final = bytes.ReplaceAll(final, []byte("\n"), []byte("\r\n"))
 	}
 	final = append(bom, final...)
@@ -120,6 +118,19 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 		Diff:             diffText,
 		Patch:            diffText,
 	}, nil
+}
+
+// firstLineEndingIsCRLF reports whether the first line ending in content is
+// CRLF, mirroring the Pi built-in edit's detectLineEnding: the earlier of the
+// first CRLF and the first LF decides the restored style, and a file with no
+// line ending at all is treated as LF.
+func firstLineEndingIsCRLF(content []byte) bool {
+	crlf := bytes.Index(content, []byte("\r\n"))
+	lf := bytes.IndexByte(content, '\n')
+	if crlf < 0 || lf >= 0 && lf < crlf {
+		return false
+	}
+	return true
 }
 
 // allIndexes finds every occurrence of needle in haystack, including
