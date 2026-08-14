@@ -74,7 +74,7 @@ describe("pi-src schema", () => {
     ).toBe(true);
     expect(
       Value.Check(srcSchema, { action: "comment", path: "a.go", symbol_id: "bK", read: false }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       Value.Check(srcSchema, {
         action: "comment",
@@ -101,6 +101,16 @@ describe("pi-src schema", () => {
     expect(Value.Check(srcSchema, { action: "symbols" })).toBe(false);
     expect(Value.Check(srcSchema, { action: "replace", path: "a.go" })).toBe(false);
     expect(Value.Check(srcSchema, { action: "read", path: "a.go", bogus: 1 })).toBe(false);
+    for (const input of [
+      { action: "read", path: "a.go", symbol_id: "" },
+      { action: "replace", path: "a.go", symbol_id: "", content: "x" },
+      { action: "insert", path: "a.go", symbol_id: "", position: "before", content: "x" },
+      { action: "delete", path: "a.go", symbol_id: "" },
+      { action: "comment", path: "a.go", symbol_id: "", read: true },
+      { action: "comment", path: "a.go", symbol_id: "", content: "// new" },
+    ]) {
+      expect(Value.Check(srcSchema, input)).toBe(false);
+    }
     expect(Value.Check(srcSchema, { action: "nope", path: "a.go" })).toBe(false);
   });
 });
@@ -162,6 +172,13 @@ describe("pi-src read and symbols", () => {
     const { path, cwd } = makeFile(SAMPLE);
     await expect(call({ action: "read", path, symbol_id: "Foo" }, { cwd })).rejects.toThrow(
       /not found/,
+    );
+  });
+
+  it("rejects an explicitly empty symbol ID instead of reading the whole file", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    await expect(call({ action: "read", path, symbol_id: "" }, { cwd })).rejects.toThrow(
+      "symbol_id must not be empty",
     );
   });
 

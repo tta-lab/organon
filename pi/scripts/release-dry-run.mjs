@@ -7,9 +7,11 @@
 //   and its artifacts cover the four tools on the three supported platforms
 //
 // Usage: node scripts/release-dry-run.mjs <x.y.z> [goreleaserDistDir]
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { assertNativePackagesFirst, packagePublishPlan } from "./publish-packages.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
@@ -22,15 +24,19 @@ if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version ?? "")) {
 }
 
 const read = (p) => JSON.parse(readFileSync(p, "utf8"));
-const mainPackages = readdirSync(join(workspace, "packages")).filter((d) => d.startsWith("pi-"));
-const nativePackages = readdirSync(join(workspace, "packages", "native"));
+const publishPlan = packagePublishPlan(workspace);
+const mainPackages = publishPlan.filter((entry) => entry.kind === "main");
+const nativePackages = publishPlan.filter((entry) => entry.kind === "native");
+const nativePackageDirs = new Set(nativePackages.map((entry) => entry.dir));
 const errors = [];
+try {
+  assertNativePackagesFirst(publishPlan);
+} catch (error) {
+  errors.push(error.message);
+}
 
-for (const dir of [...mainPackages, ...nativePackages]) {
-  const pkgDir = nativePackages.includes(dir)
-    ? join("packages", "native", dir)
-    : join("packages", dir);
-  const manifest = read(join(workspace, pkgDir, "package.json"));
+for (const entry of publishPlan) {
+  const manifest = read(join(entry.path, "package.json"));
   if (manifest.version !== version) {
     errors.push(`${manifest.name}: version ${manifest.version} != ${version}`);
   }
@@ -39,14 +45,14 @@ for (const dir of [...mainPackages, ...nativePackages]) {
   }
 }
 
-for (const dir of mainPackages) {
-  const manifest = read(join(workspace, "packages", dir, "package.json"));
+for (const entry of mainPackages) {
+  const manifest = read(join(entry.path, "package.json"));
   for (const [dep, spec] of Object.entries(manifest.optionalDependencies ?? {})) {
     if (spec !== version) {
       errors.push(`${manifest.name}: optional dep ${dep}@${spec} != ${version}`);
     }
     const nativeName = dep.replace("@tta-lab/pi-", "pi-");
-    if (!nativePackages.includes(nativeName)) {
+    if (!nativePackageDirs.has(nativeName)) {
       errors.push(`${manifest.name}: optional dep ${dep} is not a workspace native package`);
     }
   }
@@ -96,6 +102,6 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `dry-run ok: ${mainPackages.length + nativePackages.length} manifests at ${version}` +
+  `dry-run ok: ${publishPlan.length} manifests at ${version}` +
     (dist ? `, goreleaser artifacts match ${version}` : ""),
 );

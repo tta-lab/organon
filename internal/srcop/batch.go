@@ -115,324 +115,137 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 	return &BatchEditResult{
 		Content:          final,
 		FirstChangedLine: firstChangedLine,
-		Diff:             formatDisplayDiff(oldText, newText),
+		Diff:             formatDisplayDiff(oldText, editsForDiff),
 		Patch:            unified.String(),
 	}, nil
 }
 
-// formatDisplayDiff mirrors Pi's renderer-oriented edit diff: changed and
-// context lines carry their old/new line number, while file and hunk headers
-// remain exclusive to the machine-consumable unified patch.
-func formatDisplayDiff(oldText, newText string) string {
-	const contextLines = 4
-	parts := displayDiffParts(oldText, newText)
-	lineNumberWidth := len(fmt.Sprint(max(strings.Count(oldText, "\n")+1, strings.Count(newText, "\n")+1)))
-	lines := make([]string, 0)
+// formatDisplayDiff renders the same line edits used by the unified patch in
+// Pi's compact numbered form. It intentionally leaves file and hunk headers
+// to the machine-consumable unified patch.
+func formatDisplayDiff(oldText string, edits []udiff.Edit) string {
+	operations := displayDiffOperations(oldText, edits)
+	if len(operations) == 0 {
+		return ""
+	}
+
+	lineNumberWidth := 1
+	for _, operation := range operations {
+		lineNumberWidth = max(lineNumberWidth, len(fmt.Sprint(max(operation.oldLine, operation.newLine))))
+	}
+	return strings.Join(renderDisplayHunks(operations, lineNumberWidth), "\n")
+}
+
+type displayDiffOperation struct {
+	content          string
+	oldLine, newLine int
+	added, removed   bool
+}
+
+func displayDiffOperations(oldText string, edits []udiff.Edit) []displayDiffOperation {
+	operations := make([]displayDiffOperation, 0)
+	oldOffset := 0
 	oldLine, newLine := 1, 1
-	lastWasChange := false
-
-	for i, part := range parts {
-		raw := displayDiffLines(part.Content)
-		if part.Added || part.Removed {
-			lines, oldLine, newLine = appendDisplayChange(lines, part, raw, lineNumberWidth, oldLine, newLine)
-			lastWasChange = true
-			continue
-		}
-		nextPartIsChange := i < len(parts)-1 && (parts[i+1].Added || parts[i+1].Removed)
-		lines, oldLine, newLine = appendDisplayContext(
-			lines, raw, lineNumberWidth, oldLine, newLine, lastWasChange, nextPartIsChange, contextLines,
+	for _, edit := range edits {
+		operations, oldLine, newLine = appendDisplayOperations(
+			operations, oldText[oldOffset:edit.Start], oldLine, newLine, false, false,
 		)
-		lastWasChange = false
+		operations, oldLine, newLine = appendDisplayOperations(
+			operations, oldText[edit.Start:edit.End], oldLine, newLine, false, true,
+		)
+		operations, oldLine, newLine = appendDisplayOperations(
+			operations, edit.New, oldLine, newLine, true, false,
+		)
+		oldOffset = edit.End
 	}
-	return strings.Join(lines, "\n")
+	operations, _, _ = appendDisplayOperations(operations, oldText[oldOffset:], oldLine, newLine, false, false)
+	return operations
 }
 
-func appendDisplayChange(
-	lines []string,
-	part displayDiffPart,
-	raw []string,
-	lineNumberWidth, oldLine, newLine int,
-) ([]string, int, int) {
-	for _, line := range raw {
-		if part.Added {
-			lines = append(lines, fmt.Sprintf("+%*d %s", lineNumberWidth, newLine, line))
-			newLine++
-		} else {
-			lines = append(lines, fmt.Sprintf("-%*d %s", lineNumberWidth, oldLine, line))
-			oldLine++
-		}
-	}
-	return lines, oldLine, newLine
-}
-
-func appendDisplayContext(
-	lines, raw []string,
-	lineNumberWidth, oldLine, newLine int,
-	afterChange, beforeChange bool,
-	contextLines int,
-) ([]string, int, int) {
-	if afterChange && beforeChange {
-		return appendDisplayMiddleContext(lines, raw, lineNumberWidth, oldLine, newLine, contextLines)
-	}
-	if afterChange {
-		return appendDisplayTrailingContext(lines, raw, lineNumberWidth, oldLine, newLine, contextLines)
-	}
-	if beforeChange {
-		return appendDisplayLeadingContext(lines, raw, lineNumberWidth, oldLine, newLine, contextLines)
-	}
-	return lines, oldLine + len(raw), newLine + len(raw)
-}
-
-func appendDisplayMiddleContext(
-	lines, raw []string,
-	lineNumberWidth, oldLine, newLine, contextLines int,
-) ([]string, int, int) {
-	if len(raw) <= contextLines*2 {
-		return appendDisplayEqualLines(lines, raw, lineNumberWidth, oldLine, newLine)
-	}
-	lines, oldLine, newLine = appendDisplayEqualLines(
-		lines, raw[:contextLines], lineNumberWidth, oldLine, newLine,
-	)
-	skippedLines := len(raw) - contextLines*2
-	lines = append(lines, fmt.Sprintf(" %*s ...", lineNumberWidth, ""))
-	oldLine += skippedLines
-	newLine += skippedLines
-	return appendDisplayEqualLines(lines, raw[len(raw)-contextLines:], lineNumberWidth, oldLine, newLine)
-}
-
-func appendDisplayTrailingContext(
-	lines, raw []string,
-	lineNumberWidth, oldLine, newLine, contextLines int,
-) ([]string, int, int) {
-	shownLines := min(len(raw), contextLines)
-	lines, oldLine, newLine = appendDisplayEqualLines(
-		lines, raw[:shownLines], lineNumberWidth, oldLine, newLine,
-	)
-	if skippedLines := len(raw) - shownLines; skippedLines > 0 {
-		lines = append(lines, fmt.Sprintf(" %*s ...", lineNumberWidth, ""))
-		oldLine += skippedLines
-		newLine += skippedLines
-	}
-	return lines, oldLine, newLine
-}
-
-func appendDisplayLeadingContext(
-	lines, raw []string,
-	lineNumberWidth, oldLine, newLine, contextLines int,
-) ([]string, int, int) {
-	skippedLines := max(0, len(raw)-contextLines)
-	if skippedLines > 0 {
-		lines = append(lines, fmt.Sprintf(" %*s ...", lineNumberWidth, ""))
-		oldLine += skippedLines
-		newLine += skippedLines
-	}
-	return appendDisplayEqualLines(lines, raw[skippedLines:], lineNumberWidth, oldLine, newLine)
-}
-
-func appendDisplayEqualLines(
-	lines, raw []string,
-	lineNumberWidth, oldLine, newLine int,
-) ([]string, int, int) {
-	for _, line := range raw {
-		lines = append(lines, fmt.Sprintf(" %*d %s", lineNumberWidth, oldLine, line))
-		oldLine++
-		newLine++
-	}
-	return lines, oldLine, newLine
-}
-
-type displayDiffPart struct {
-	Content string
-	Added   bool
-	Removed bool
-}
-
-// displayDiffParts ports jsdiff's Myers traversal, which Pi uses through
-// Diff.diffLines. A generic LCS can select different equal-line alignments,
-// changing the numbered display diff for repeated lines.
-func displayDiffParts(oldText, newText string) []displayDiffPart {
-	oldTokens, newTokens := displayDiffTokens(oldText), displayDiffTokens(newText)
-	lastComponent := displayDiffComponents(oldTokens, newTokens)
-	return displayDiffValues(lastComponent, newTokens, oldTokens)
-}
-
-func displayDiffComponents(oldTokens, newTokens []string) *displayDiffComponent {
-	oldLen, newLen := len(oldTokens), len(newTokens)
-	bestPath := map[int]*displayDiffPath{0: {oldPos: -1}}
-	newPos := displayDiffExtractCommon(bestPath[0], newTokens, oldTokens, 0)
-	if bestPath[0].oldPos+1 >= oldLen && newPos+1 >= newLen {
-		return bestPath[0].lastComponent
-	}
-
-	minDiagonal, maxDiagonal := -oldLen-newLen, oldLen+newLen
-	for editLength := 1; editLength <= oldLen+newLen; editLength++ {
-		for diagonal := max(minDiagonal, -editLength); diagonal <= min(maxDiagonal, editLength); diagonal += 2 {
-			path, nextNewPos, done := displayDiffAdvance(
-				bestPath, diagonal, oldTokens, newTokens,
-			)
-			if path == nil {
-				continue
-			}
-			if done {
-				return path.lastComponent
-			}
-			bestPath[diagonal] = path
-			minDiagonal, maxDiagonal = displayDiffBounds(
-				minDiagonal, maxDiagonal, diagonal, path, nextNewPos, oldLen, newLen,
-			)
-		}
-	}
-	return nil
-}
-
-func displayDiffAdvance(
-	bestPath map[int]*displayDiffPath,
-	diagonal int,
-	oldTokens, newTokens []string,
-) (*displayDiffPath, int, bool) {
-	removePath, addPath := bestPath[diagonal-1], bestPath[diagonal+1]
-	delete(bestPath, diagonal-1)
-	canAdd := displayDiffCanAdd(addPath, diagonal, len(newTokens))
-	canRemove := removePath != nil && removePath.oldPos+1 < len(oldTokens)
-	if !canAdd && !canRemove {
-		delete(bestPath, diagonal)
-		return nil, 0, false
-	}
-	path := displayDiffSelectPath(removePath, addPath, canRemove, canAdd)
-	newPos := displayDiffExtractCommon(path, newTokens, oldTokens, diagonal)
-	done := path.oldPos+1 >= len(oldTokens) && newPos+1 >= len(newTokens)
-	return path, newPos, done
-}
-
-func displayDiffCanAdd(path *displayDiffPath, diagonal, newLen int) bool {
-	if path == nil {
-		return false
-	}
-	newPos := path.oldPos - diagonal
-	return newPos >= 0 && newPos < newLen
-}
-
-func displayDiffSelectPath(
-	removePath, addPath *displayDiffPath,
-	canRemove, canAdd bool,
-) *displayDiffPath {
-	if !canRemove || (canAdd && removePath.oldPos < addPath.oldPos) {
-		return displayDiffAddToPath(addPath, true, false, 0)
-	}
-	return displayDiffAddToPath(removePath, false, true, 1)
-}
-
-func displayDiffBounds(
-	minDiagonal, maxDiagonal, diagonal int,
-	path *displayDiffPath,
-	newPos, oldLen, newLen int,
-) (int, int) {
-	if path.oldPos+1 >= oldLen {
-		maxDiagonal = min(maxDiagonal, diagonal-1)
-	}
-	if newPos+1 >= newLen {
-		minDiagonal = max(minDiagonal, diagonal+1)
-	}
-	return minDiagonal, maxDiagonal
-}
-
-type displayDiffPath struct {
-	oldPos        int
-	lastComponent *displayDiffComponent
-}
-
-type displayDiffComponent struct {
-	count             int
-	added, removed    bool
-	previousComponent *displayDiffComponent
-}
-
-func displayDiffTokens(content string) []string {
-	tokens := strings.SplitAfter(content, "\n")
-	if tokens[len(tokens)-1] == "" {
-		return tokens[:len(tokens)-1]
-	}
-	return tokens
-}
-
-func displayDiffAddToPath(
-	path *displayDiffPath,
+func appendDisplayOperations(
+	operations []displayDiffOperation,
+	content string,
+	oldLine, newLine int,
 	added, removed bool,
-	oldPosIncrement int,
-) *displayDiffPath {
-	last := path.lastComponent
-	if last != nil && last.added == added && last.removed == removed {
-		return &displayDiffPath{
-			oldPos: path.oldPos + oldPosIncrement,
-			lastComponent: &displayDiffComponent{
-				count: last.count + 1, added: added, removed: removed, previousComponent: last.previousComponent,
-			},
+) ([]displayDiffOperation, int, int) {
+	for _, line := range displayDiffLines(content) {
+		operations = append(operations, displayDiffOperation{
+			content: line, oldLine: oldLine, newLine: newLine, added: added, removed: removed,
+		})
+		switch {
+		case added:
+			newLine++
+		case removed:
+			oldLine++
+		default:
+			oldLine++
+			newLine++
 		}
 	}
-	return &displayDiffPath{
-		oldPos: path.oldPos + oldPosIncrement,
-		lastComponent: &displayDiffComponent{
-			count: 1, added: added, removed: removed, previousComponent: last,
-		},
-	}
+	return operations, oldLine, newLine
 }
 
-func displayDiffExtractCommon(
-	path *displayDiffPath,
-	newTokens, oldTokens []string,
-	diagonal int,
-) int {
-	oldPos := path.oldPos
-	newPos := oldPos - diagonal
-	commonCount := 0
-	for newPos+1 < len(newTokens) && oldPos+1 < len(oldTokens) && oldTokens[oldPos+1] == newTokens[newPos+1] {
-		newPos++
-		oldPos++
-		commonCount++
-	}
-	if commonCount > 0 {
-		path.lastComponent = &displayDiffComponent{
-			count: commonCount, previousComponent: path.lastComponent,
+func renderDisplayHunks(operations []displayDiffOperation, lineNumberWidth int) []string {
+	const contextLines = 4
+	groups := displayChangeGroups(operations, contextLines)
+	lines := make([]string, 0)
+	previousEnd := 0
+	for _, group := range groups {
+		start := max(0, group.start-contextLines)
+		end := min(len(operations), group.end+contextLines+1)
+		if start > previousEnd {
+			lines = append(lines, displayEllipsis(lineNumberWidth))
 		}
+		for _, operation := range operations[start:end] {
+			lines = append(lines, formatDisplayOperation(operation, lineNumberWidth))
+		}
+		previousEnd = end
 	}
-	path.oldPos = oldPos
-	return newPos
+	if previousEnd < len(operations) {
+		lines = append(lines, displayEllipsis(lineNumberWidth))
+	}
+	return lines
 }
 
-func displayDiffValues(
-	lastComponent *displayDiffComponent,
-	newTokens, oldTokens []string,
-) []displayDiffPart {
-	components := make([]*displayDiffComponent, 0)
-	for component := lastComponent; component != nil; component = component.previousComponent {
-		components = append(components, component)
-	}
-	parts := make([]displayDiffPart, 0, len(components))
-	newPos, oldPos := 0, 0
-	for i := len(components) - 1; i >= 0; i-- {
-		component := components[i]
-		if component.removed {
-			parts = append(parts, displayDiffPart{
-				Content: strings.Join(oldTokens[oldPos:oldPos+component.count], ""), Removed: true,
-			})
-			oldPos += component.count
+type displayChangeGroup struct{ start, end int }
+
+func displayChangeGroups(operations []displayDiffOperation, contextLines int) []displayChangeGroup {
+	groups := make([]displayChangeGroup, 0)
+	for index, operation := range operations {
+		if !operation.added && !operation.removed {
 			continue
 		}
-		parts = append(parts, displayDiffPart{
-			Content: strings.Join(newTokens[newPos:newPos+component.count], ""), Added: component.added,
-		})
-		newPos += component.count
-		if !component.added {
-			oldPos += component.count
+		if len(groups) == 0 || index-groups[len(groups)-1].end-1 > contextLines*2 {
+			groups = append(groups, displayChangeGroup{start: index, end: index})
+			continue
 		}
+		groups[len(groups)-1].end = index
 	}
-	return parts
+	return groups
+}
+
+func displayEllipsis(lineNumberWidth int) string {
+	return fmt.Sprintf(" %*s ...", lineNumberWidth, "")
+}
+
+func formatDisplayOperation(operation displayDiffOperation, lineNumberWidth int) string {
+	switch {
+	case operation.added:
+		return fmt.Sprintf("+%*d %s", lineNumberWidth, operation.newLine, operation.content)
+	case operation.removed:
+		return fmt.Sprintf("-%*d %s", lineNumberWidth, operation.oldLine, operation.content)
+	default:
+		return fmt.Sprintf(" %*d %s", lineNumberWidth, operation.oldLine, operation.content)
+	}
 }
 
 func displayDiffLines(content string) []string {
-	lines := strings.Split(content, "\n")
+	lines := strings.SplitAfter(content, "\n")
 	if lines[len(lines)-1] == "" {
-		return lines[:len(lines)-1]
+		lines = lines[:len(lines)-1]
+	}
+	for index, line := range lines {
+		lines[index] = strings.TrimSuffix(line, "\n")
 	}
 	return lines
 }

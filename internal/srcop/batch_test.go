@@ -2,6 +2,7 @@ package srcop
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -53,16 +54,50 @@ func TestApplyBatchUsesPiDisplayDiffContext(t *testing.T) {
 	}
 }
 
-func TestApplyBatchUsesPiRepeatedLineAlignment(t *testing.T) {
+func TestApplyBatchRendersMultipleHunksWithNumberedContext(t *testing.T) {
+	lines := make([]string, 24)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i+1)
+	}
+	source := []byte(strings.Join(lines, "\n") + "\n")
+	result, err := ApplyBatch("f.txt", source, []BatchEdit{
+		{OldText: "line-02", NewText: "SECOND"},
+		{OldText: "line-22", NewText: "TWENTY-SECOND"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	for _, line := range []string{"- 2 line-02", "+ 2 SECOND", "-22 line-22", "+22 TWENTY-SECOND"} {
+		if !strings.Contains(result.Diff, line) {
+			t.Fatalf("numbered diff missing %q: %q", line, result.Diff)
+		}
+	}
+	if !strings.Contains(result.Diff, "...") {
+		t.Fatalf("numbered diff must omit the gap between hunks: %q", result.Diff)
+	}
+	if strings.Count(result.Patch, "\n@@") != 2 ||
+		!strings.Contains(result.Patch, "-line-02") ||
+		!strings.Contains(result.Patch, "+TWENTY-SECOND") {
+		t.Fatalf("unified patch must retain two hunks and both changes: %q", result.Patch)
+	}
+}
+
+func TestApplyBatchRepeatedLinesProduceNumberedDiffAndUnifiedPatch(t *testing.T) {
 	source := []byte("b\na\nc\nb\n")
 	replacement := "a\na\na\na\nb\nc\nb\na\n"
 	result, err := ApplyBatch("f.txt", source, []BatchEdit{{OldText: string(source), NewText: replacement}})
 	if err != nil {
 		t.Fatalf("ApplyBatch: %v", err)
 	}
-	want := "-1 b\n 2 a\n+2 a\n+3 a\n+4 a\n+5 b\n 3 c\n 4 b\n+8 a"
-	if result.Diff != want {
-		t.Fatalf("display diff = %q, want %q", result.Diff, want)
+	if string(result.Content) != replacement {
+		t.Fatalf("content = %q, want %q", result.Content, replacement)
+	}
+	if !strings.Contains(result.Diff, "-") || !strings.Contains(result.Diff, "+") {
+		t.Fatalf("numbered diff must describe removed and added repeated lines: %q", result.Diff)
+	}
+	if strings.Contains(result.Diff, "--- ") || !strings.Contains(result.Patch, "--- a/f.txt") ||
+		!strings.Contains(result.Patch, "+++ b/f.txt") || !strings.Contains(result.Patch, "@@") {
+		t.Fatalf("display and unified patch must remain distinct: diff=%q patch=%q", result.Diff, result.Patch)
 	}
 }
 

@@ -25,6 +25,7 @@ const require = createRequire(import.meta.url);
 
 const symbolIdDescription =
   "Exact opaque symbol or Markdown section ID returned by src action symbols; never a display name.";
+const symbolId = Type.String({ description: symbolIdDescription, minLength: 1 });
 
 const pathDescription = "Path to the file (absolute, or relative to the current working directory)";
 
@@ -48,7 +49,7 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["read"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.Optional(Type.String({ description: symbolIdDescription })),
+      symbol_id: Type.Optional(symbolId),
       offset: Type.Optional(
         Type.Integer({
           description: "1-indexed line offset within the selected content",
@@ -65,7 +66,7 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["replace"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.String({ description: symbolIdDescription }),
+      symbol_id: symbolId,
       content: Type.String({
         description: "New content of the symbol or Markdown section (may be multiline)",
       }),
@@ -76,7 +77,7 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["insert"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.String({ description: symbolIdDescription }),
+      symbol_id: symbolId,
       position: StringEnum(["before", "after"] as const, {
         description: "Insert before or after the symbol",
       }),
@@ -88,7 +89,7 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["delete"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.String({ description: symbolIdDescription }),
+      symbol_id: symbolId,
     },
     { additionalProperties: false },
   ),
@@ -96,8 +97,11 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["comment"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.String({ description: symbolIdDescription }),
-      read: Type.Boolean({ description: "Set true to read the existing doc comment" }),
+      symbol_id: symbolId,
+      read: Type.Boolean({
+        description: "Must be true to read the existing doc comment",
+        enum: [true],
+      }),
     },
     { additionalProperties: false },
   ),
@@ -105,7 +109,7 @@ export const srcSchema = Type.Union([
     {
       action: StringEnum(["comment"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
-      symbol_id: Type.String({ description: symbolIdDescription }),
+      symbol_id: symbolId,
       content: Type.String({ description: "New doc comment (may be multiline)" }),
     },
     { additionalProperties: false },
@@ -354,12 +358,15 @@ async function runAndRender(
 }
 
 function buildArgs(input: SrcInput, absolutePath: string): { args: string[]; stdin?: string } {
+  if ("symbol_id" in input && input.symbol_id !== undefined && input.symbol_id.length === 0) {
+    throw new Error("symbol_id must not be empty");
+  }
   if (isAction(input, "symbols")) {
     return { args: ["symbols", absolutePath, "--json"] };
   }
   if (isAction(input, "read")) {
     const args = ["read", absolutePath, "--json"];
-    if (input.symbol_id) {
+    if (input.symbol_id !== undefined) {
       args.push("--symbol-id", input.symbol_id);
     }
     if (input.offset !== undefined && input.offset > 0) {

@@ -75,20 +75,8 @@ jobs:
         working-directory: pi
         run: node scripts/release-dry-run.mjs "${GITHUB_REF_NAME#v}" ../dist
 
-      - name: Publish native packages
+      - name: Publish extension packages
         working-directory: pi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          for pkg in packages/native/pi-*; do
-            (cd "$pkg" && pnpm publish --no-git-checks --access public)
-          done
-
-      - name: Publish main packages
-        working-directory: pi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          for pkg in packages/pi-src packages/pi-web packages/pi-project packages/pi-og; do
-            (cd "$pkg" && pnpm publish --no-git-checks --access public)
-          done
+        run: node scripts/publish-packages.mjs
