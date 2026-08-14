@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+// Test-only fake og CLI: mirrors the documented JSON contract of the real Go
+// binary for auth/status, push, pull, clone, and pr operations with --json.
+
+const args = process.argv.slice(2);
+const flags = new Map();
+const consumed = new Set();
+for (let i = 0; i < args.length; i++) {
+  if (args[i].startsWith("--")) {
+    const key = args[i].slice(2);
+    const next = args[i + 1];
+    consumed.add(i);
+    if (next !== undefined && !next.startsWith("--")) {
+      flags.set(key, next);
+      consumed.add(i + 1);
+      i++;
+    } else {
+      flags.set(key, "true");
+    }
+  }
+}
+const positional = args.filter((_, i) => !consumed.has(i));
+const project = flags.get("project") ?? "";
+const prId = flags.get("pr-id");
+const fail = flags.get("fail") === "true";
+
+const PR = {
+  index: prId ? parseInt(prId, 10) : 7,
+  title: "feat: guarded change",
+  state: "open",
+  merged: false,
+  url: "https://github.com/tta-lab/repo/pull/7",
+  head: "feature/x",
+  base: "main",
+  body: "body",
+};
+
+if (fail) {
+  process.stderr.write("Error: daemon policy rejected the operation\n");
+  process.exit(1);
+}
+
+const cmd = positional.join(" ");
+if (cmd.startsWith("auth status")) {
+  process.stdout.write(
+    JSON.stringify({
+      project,
+      auth: {
+        project,
+        provider: "github",
+        host: "github.com",
+        owner: "tta-lab",
+        repo: "repo",
+        auth_mode: "app",
+        ready: true,
+      },
+    }) + "\n",
+  );
+} else if (cmd.startsWith("push") || cmd.startsWith("pull")) {
+  process.stdout.write(
+    JSON.stringify({ project, message: cmd.split(" ")[0] + " completed" }) + "\n",
+  );
+} else if (cmd.startsWith("clone")) {
+  const target = positional[1];
+  process.stdout.write(
+    JSON.stringify({
+      clone: {
+        alias: flags.get("alias") ?? "",
+        path: "/work/" + (target ?? "repo"),
+        host: "github.com",
+        owner: "tta-lab",
+        repo: "repo",
+        provider: "github",
+        remote: "https://github.com/tta-lab/repo.git",
+        registered: !flags.get("reference"),
+      },
+    }) + "\n",
+  );
+} else if (cmd.startsWith("pr create")) {
+  const title = positional.slice(2).join(" ") || flags.get("title") || "title";
+  process.stdout.write(JSON.stringify({ project, pr: { ...PR, title } }) + "\n");
+} else if (cmd.startsWith("pr find") || cmd.startsWith("pr get") || cmd.startsWith("pr view")) {
+  const explicitIndex =
+    positional[0] === "pr" && positional[1] === "get" ? parseInt(positional[2], 10) : NaN;
+  const pr = Number.isNaN(explicitIndex) ? PR : { ...PR, index: explicitIndex };
+  process.stdout.write(JSON.stringify({ project, pr }) + "\n");
+} else if (cmd.startsWith("pr modify")) {
+  const title = flags.get("title");
+  process.stdout.write(
+    JSON.stringify({
+      project,
+      pr: { ...PR, title: title ?? PR.title, body: flags.get("body") ?? PR.body },
+    }) + "\n",
+  );
+} else if (cmd.startsWith("pr comment")) {
+  process.stdout.write(
+    JSON.stringify({
+      project,
+      comment: {
+        id: 9,
+        pr_id: prId ? parseInt(prId, 10) : 7,
+        body: "note",
+        url: "https://github.com/tta-lab/repo/pull/7#issuecomment-9",
+      },
+    }) + "\n",
+  );
+} else if (
+  cmd.startsWith("pr checks") ||
+  cmd.startsWith("pr log") ||
+  cmd.startsWith("pr failures")
+) {
+  process.stdout.write(
+    JSON.stringify({ project, pr: PR, lines: ["check: pass", "check: lint"] }) + "\n",
+  );
+} else {
+  process.stderr.write("Error: unknown command " + cmd + "\n");
+  process.exit(2);
+}

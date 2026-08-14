@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 
@@ -15,9 +14,9 @@ import (
 const stateAll = "all"
 
 func runPRCreate(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	body, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
@@ -32,6 +31,12 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if resp.PR == nil {
+		return fmt.Errorf("og daemon returned no pull request")
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 	}
 	printDaemonResponse(cmd, resp)
 	return nil
@@ -55,9 +60,9 @@ func runPRGet(cmd *cobra.Command, args []string) error {
 }
 
 func runPRModify(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	title, _ := cmd.Flags().GetString("title")
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
@@ -85,14 +90,20 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if resp.PR == nil {
+		return fmt.Errorf("og daemon returned no pull request")
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
+	}
 	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRComment(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
@@ -109,6 +120,12 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	resp, err := daemonCall("/pr/comment", og.Request{WorkDir: workDir, Index: index, Body: &body})
 	if err != nil {
 		return err
+	}
+	if resp.Comment == nil {
+		return fmt.Errorf("og daemon returned no comment")
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogCommentJSON{Project: alias, Comment: *resp.Comment})
 	}
 	printDaemonResponse(cmd, resp)
 	return nil

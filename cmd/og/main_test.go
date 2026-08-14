@@ -262,12 +262,12 @@ func TestCloneRoutesURLFlagsAndPrintsTypedJSON(t *testing.T) {
 		got.Reference || got.WorkDir != "" {
 		t.Fatalf("clone request = %+v", got)
 	}
-	var result og.CloneResult
+	var result ogCloneJSON
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, stdout)
 	}
-	if result.Alias != "sample" || result.Path != "/home/neil/code/projects/tta-lab/example" ||
-		result.Provider != "generic" {
+	if result.Clone.Alias != "sample" || result.Clone.Path != "/home/neil/code/projects/tta-lab/example" ||
+		result.Clone.Provider != "generic" {
 		t.Fatalf("clone output = %+v", result)
 	}
 }
@@ -363,7 +363,9 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "PR #12 created"})
+		_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
+			Index: 12, Title: "feat: daemon first", State: "open",
+		}})
 	}))
 	defer server.Close()
 	t.Setenv("OG_DAEMON_URL", server.URL)
@@ -381,7 +383,7 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 	if _, ok := got["token_env"]; ok {
 		t.Fatalf("CLI leaked token fields to daemon: %+v", got)
 	}
-	if !strings.Contains(stdout, "PR #12 created") {
+	if !strings.Contains(stdout, "PR #12") {
 		t.Fatalf("stdout = %q", stdout)
 	}
 }
@@ -419,15 +421,15 @@ func TestPRViewJSONPrintsCISummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOG: %v", err)
 	}
-	var got og.PullRequest
+	var got ogPRJSON
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("decode stdout: %v\n%s", err, stdout)
 	}
-	if got.CI == nil || got.CI.State != "success" {
-		t.Fatalf("CI = %+v, want success summary", got.CI)
+	if got.PR.CI == nil || got.PR.CI.State != "success" {
+		t.Fatalf("CI = %+v, want success summary", got.PR.CI)
 	}
-	if len(got.CI.Statuses) != 1 || got.CI.Statuses[0].Context != "check" {
-		t.Fatalf("statuses = %+v, want check", got.CI.Statuses)
+	if len(got.PR.CI.Statuses) != 1 || got.PR.CI.Statuses[0].Context != "check" {
+		t.Fatalf("statuses = %+v, want check", got.PR.CI.Statuses)
 	}
 }
 
@@ -484,7 +486,11 @@ func TestPRCommandsSendExplicitPRIDToDaemon(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 					t.Fatalf("decode request: %v", err)
 				}
-				_ = json.NewEncoder(w).Encode(og.Response{OK: true, Message: "ok", Lines: []string{"ok"}})
+				resp := og.Response{OK: true, Message: "ok", Lines: []string{"ok"}}
+				if tt.path == "/pr/comment" {
+					resp.Comment = &og.Comment{ID: 1, PRID: 41, Body: "review note", URL: "https://example.com/c/1"}
+				}
+				_ = json.NewEncoder(w).Encode(resp)
 			}))
 			defer server.Close()
 			t.Setenv("OG_DAEMON_URL", server.URL)
