@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -83,6 +84,7 @@ func newFetchCmdWithFactory(factory serviceFactory) *cobra.Command {
 	cmd.Flags().Bool("tree", false, "Force heading tree view")
 	cmd.Flags().Bool("full", false, "Full content, skip auto-tree")
 	cmd.Flags().Int("tree-threshold", 5000, "Auto-tree threshold in characters")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
@@ -91,7 +93,7 @@ func newSearchCmd() *cobra.Command {
 }
 
 func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the web",
 		Long:  helpSearch,
@@ -105,10 +107,16 @@ func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			jsonOut, _ := cmd.Flags().GetBool("json")
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+			}
 			_, err = fmt.Fprint(cmd.OutOrStdout(), search.FormatResults(result.Results))
 			return err
 		},
 	}
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
+	return cmd
 }
 
 func runFetch(cmd *cobra.Command, args []string, service webService) error {
@@ -129,6 +137,10 @@ func runFetch(cmd *cobra.Command, args []string, service webService) error {
 		return err
 	}
 
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
 	return err
 }
@@ -138,7 +150,7 @@ func newDocsResolveCmd() *cobra.Command {
 }
 
 func newDocsResolveCmdWithFactory(factory serviceFactory) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "resolve <query>",
 		Short: "Resolve a library name to Context7 IDs",
 		Long:  helpDocsResolve,
@@ -151,12 +163,18 @@ func newDocsResolveCmdWithFactory(factory serviceFactory) *cobra.Command {
 			return runDocsResolve(cmd, args, service)
 		},
 	}
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
+	return cmd
 }
 
 func runDocsResolve(cmd *cobra.Command, args []string, service webService) error {
 	result, err := service.DocsResolve(cmd.Context(), args[0])
 	if err != nil {
 		return err
+	}
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), formatLibraries(result.Libraries))
 	return err
@@ -196,6 +214,7 @@ func newDocsFetchCmdWithFactory(factory serviceFactory) *cobra.Command {
 		},
 	}
 	cmd.Flags().Int("tokens", 0, "Token budget (0 = backend default)")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
@@ -216,6 +235,10 @@ func runDocsFetch(cmd *cobra.Command, args []string, service webService) error {
 	})
 	if err != nil {
 		return err
+	}
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
 	return err
@@ -246,6 +269,7 @@ func newSgraphCmdWithFactory(factory serviceFactory) *cobra.Command {
 	cmd.Flags().IntP("count", "c", 10, "Max results to return (10-20, default 10)")
 	cmd.Flags().IntP("context", "C", 10, "Lines of context around each match")
 	cmd.Flags().IntP("timeout", "t", 0, "Request timeout in seconds (max 120, 0 = no timeout)")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
@@ -270,6 +294,10 @@ func runSgraph(cmd *cobra.Command, args []string, service webService) error {
 	})
 	if err != nil {
 		return err
+	}
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), result.Content)
 	return err

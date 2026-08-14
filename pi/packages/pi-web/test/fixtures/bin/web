@@ -1,0 +1,148 @@
+#!/usr/bin/env node
+// Test-only fake web CLI: mirrors the documented JSON contract of the real
+// Go binary for search/fetch/docs_resolve/docs_fetch/sgraph with --json.
+
+const args = process.argv.slice(2);
+if (!args.includes("--json")) {
+  process.stderr.write("Error: --json is required by the extension contract\n");
+  process.exit(2);
+}
+const flags = new Map();
+for (let i = 0; i < args.length; i++) {
+  if (args[i].startsWith("--")) {
+    const key = args[i].slice(2);
+    const next = args[i + 1];
+    if (next !== undefined && !next.startsWith("--")) {
+      flags.set(key, next);
+      i++;
+    } else {
+      flags.set(key, "true");
+    }
+  }
+}
+const positional = args.filter((a) => !a.startsWith("--"));
+const cmd = positional[0];
+const target = positional[1] ?? positional[0];
+switch (cmd) {
+  case "search": {
+    const query = positional.slice(1).join(" ");
+    if (query === "boom") {
+      process.stderr.write("Error: search backend failed: rate limited\n");
+      process.exit(1);
+    }
+    process.stdout.write(
+      JSON.stringify({
+        provider: "DuckDuckGo",
+        results: [
+          {
+            title: "Result for " + query,
+            link: "https://example.com/" + encodeURIComponent(query),
+            snippet: "snippet",
+            position: 1,
+          },
+        ],
+      }) + "\n",
+    );
+    break;
+  }
+  case "fetch": {
+    if (target === "https://boom.example") {
+      process.stderr.write("Error: fetch https://boom.example: connection refused\n");
+      process.exit(1);
+    }
+    const mode =
+      flags.get("tree") === "true" || flags.get("section-id")
+        ? "tree"
+        : flags.get("full") === "true"
+          ? "full"
+          : "auto";
+    process.stdout.write(
+      JSON.stringify({
+        url: target,
+        mode,
+        content:
+          "rendered content of " +
+          target +
+          " (threshold " +
+          (flags.get("tree-threshold") ?? "5000") +
+          ")",
+      }) + "\n",
+    );
+    break;
+  }
+  case "resolve": {
+    const query = positional.slice(1).join(" ");
+    if (query === "missing") {
+      process.stderr.write('Error: no libraries found for \"missing\"\n');
+      process.exit(1);
+    }
+    process.stdout.write(
+      JSON.stringify({
+        query,
+        libraries: [
+          {
+            id: "/" + query,
+            title: "Library " + query,
+            trust_score: 0.9,
+            total_snippets: 12,
+            versions: ["v1"],
+            description: "desc",
+          },
+        ],
+      }) + "\n",
+    );
+    break;
+  }
+  case "sgraph": {
+    const query = positional.slice(1).join(" ");
+    process.stdout.write(JSON.stringify({ content: "matches for " + query }) + "\n");
+    break;
+  }
+  case "docs": {
+    const sub = positional[1];
+    if (sub === "resolve") {
+      const query = positional.slice(2).join(" ");
+      if (query === "missing") {
+        process.stderr.write('Error: no libraries found for \"missing\"\n');
+        process.exit(1);
+      }
+      process.stdout.write(
+        JSON.stringify({
+          query,
+          libraries: [
+            {
+              id: "/" + query,
+              title: "Library " + query,
+              trust_score: 0.9,
+              total_snippets: 12,
+              versions: ["v1"],
+              description: "desc",
+            },
+          ],
+        }) + "\n",
+      );
+      break;
+    }
+    if (sub === "fetch") {
+      const lib = positional[2];
+      const topic = positional[3];
+      if (lib === "/missing") {
+        process.stderr.write("Error: documentation not found\n");
+        process.exit(1);
+      }
+      process.stdout.write(
+        JSON.stringify({
+          library_id: lib,
+          topic: topic ?? "",
+          content: "docs content for " + lib + (topic ? " topic " + topic : ""),
+        }) + "\n",
+      );
+      break;
+    }
+    process.stderr.write("Error: unknown docs subcommand " + (sub ?? "") + "\n");
+    process.exit(2);
+  }
+  default:
+    process.stderr.write("Error: unknown command " + args.join(" ") + "\n");
+    process.exit(2);
+}

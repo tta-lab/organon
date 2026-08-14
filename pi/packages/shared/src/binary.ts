@@ -12,16 +12,23 @@ export function nativePackageName(tool: string): string {
   return `@tta-lab/pi-${tool}-${os}-${arch}`;
 }
 
+export interface BinaryResolutionOptions {
+  /** Module-bound require used to resolve the native package; defaults to the shared module's own require. Pass createRequire(import.meta.url) from the extension entry so resolution stays correct when the shared code is bundled into the extension. */
+  require?: NodeRequire;
+  /** Injectable specifier resolver for tests. */
+  resolve?: BinaryResolver;
+}
+
 /**
  * Resolves the package-local Go binary for `tool`. Never consults PATH,
  * GitHub releases, or the network: the binary must be installed as the
  * matching optional native package. Unsupported platforms throw an
  * actionable error from detectPlatform.
  */
-export function resolveBinaryPath(tool: string, resolve?: BinaryResolver): string {
+export function resolveBinaryPath(tool: string, options?: BinaryResolutionOptions): string {
   const pkg = nativePackageName(tool);
-  const require = createRequire(import.meta.url);
-  const resolver = resolve ?? ((specifier: string) => require.resolve(specifier));
+  const require = options?.require ?? createRequire(import.meta.url);
+  const resolver = options?.resolve ?? ((specifier: string) => require.resolve(specifier));
   let packageRoot: string;
   try {
     packageRoot = dirname(resolver(`${pkg}/package.json`));

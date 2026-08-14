@@ -31,17 +31,21 @@ describe("platform detection", () => {
 describe("binary resolution", () => {
   it("resolves the host native package's bin/<tool> via the resolver", () => {
     const { os, arch } = detectPlatform();
-    const resolved = resolveBinaryPath("project", (specifier) => {
-      expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
-      return join(here, "fake-node-modules", specifier);
+    const resolved = resolveBinaryPath("project", {
+      resolve: (specifier) => {
+        expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
+        return join(here, "fake-node-modules", specifier);
+      },
     });
     expect(resolved.endsWith(`/bin/project`) || resolved.endsWith(`\\bin\\project`)).toBe(true);
   });
 
   it("throws an actionable error when the native package is missing", () => {
     expect(() =>
-      resolveBinaryPath("project", () => {
-        throw new Error("Cannot find module");
+      resolveBinaryPath("project", {
+        resolve: () => {
+          throw new Error("Cannot find module");
+        },
       }),
     ).toThrow(/native package @tta-lab\/pi-project-/);
   });

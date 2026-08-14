@@ -1,8 +1,10 @@
+import { createRequire } from "node:module";
+
 import { Type, type Static } from "typebox";
 
-import { resolveBinaryPath } from "@tta-lab/pi-shared";
-import { runCli } from "@tta-lab/pi-shared";
-import { parseSingleJsonDoc, cliError } from "@tta-lab/pi-shared";
+import { resolveBinaryPath, runCli, parseSingleJsonDoc, cliError } from "@tta-lab/pi-shared";
+
+const require = createRequire(import.meta.url);
 
 export const projectSchema = Type.Union([
   Type.Object(
@@ -67,7 +69,7 @@ export function projectTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      const binary = resolveBinaryPath("project");
+      const binary = resolveBinaryPath("project", { require });
       const args = isList(params)
         ? ["list", "--json", ...(params.include_archived ? ["--include-archived"] : [])]
         : ["get", params.alias, "--json"];
