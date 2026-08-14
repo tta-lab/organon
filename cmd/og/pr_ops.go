@@ -11,19 +11,20 @@ import (
 	"github.com/tta-lab/organon/internal/og"
 )
 
-const stateAll = "all"
-
 func runPRCreate(cmd *cobra.Command, args []string) error {
-	workDir, alias, err := resolveDaemonWorkDir(cmd)
-	if err != nil {
-		return err
-	}
 	body, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("read PR body: %w", err)
 	}
 	title := strings.Join(args, " ")
-	bodyText := strings.TrimRight(string(body), "\n")
+	if err := og.ValidatePRTitle(title); err != nil {
+		return err
+	}
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
+	if err != nil {
+		return err
+	}
+	bodyText := string(body)
 	resp, err := daemonCall("/pr/create", og.Request{
 		WorkDir: workDir,
 		Title:   &title,
@@ -43,11 +44,15 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 }
 
 func runPRView(cmd *cobra.Command, args []string) error {
-	return runPRDaemonWithOutput(cmd, "/pr/view", og.Request{State: stateAll})
+	return runPRDaemonWithOutput(cmd, "/pr/view", og.Request{State: og.PRStateAll})
 }
 
 func runPRFind(cmd *cobra.Command, args []string) error {
 	state, _ := cmd.Flags().GetString("state")
+	state, err := og.NormalizePRState(state)
+	if err != nil {
+		return err
+	}
 	return runPRDaemonWithOutput(cmd, "/pr/find", og.Request{State: state})
 }
 
@@ -56,23 +61,18 @@ func runPRGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid PR index %q: %w", args[0], err)
 	}
+	if err := og.ValidatePositivePRID(index); err != nil {
+		return err
+	}
 	return runPRDaemonWithOutput(cmd, "/pr/get", og.Request{Index: index})
 }
 
 func runPRModify(cmd *cobra.Command, args []string) error {
-	workDir, alias, err := resolveDaemonWorkDir(cmd)
-	if err != nil {
-		return err
-	}
 	title, _ := cmd.Flags().GetString("title")
 	clearBody, _ := cmd.Flags().GetBool("clear-body")
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("read PR body: %w", err)
-	}
-	body := strings.TrimRight(string(bodyBytes), "\n")
-	if title == "" && !clearBody && body == "" {
-		return fmt.Errorf("nothing to update: provide --title and/or pipe body via stdin")
 	}
 	index, err := optionalPRID(cmd)
 	if err != nil {
@@ -85,8 +85,16 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if clearBody {
 		empty := ""
 		bodyInput = &empty
-	} else if body != "" {
+	} else if len(bodyBytes) > 0 {
+		body := string(bodyBytes)
 		bodyInput = &body
+	}
+	if err := og.ValidatePRModifyInput(titleInput, bodyInput); err != nil {
+		return err
+	}
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
+	if err != nil {
+		return err
 	}
 	resp, err := daemonCall("/pr/modify", og.Request{
 		WorkDir: workDir, Index: index, Title: titleInput, Body: bodyInput,
@@ -105,19 +113,19 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 }
 
 func runPRComment(cmd *cobra.Command, args []string) error {
-	workDir, alias, err := resolveDaemonWorkDir(cmd)
-	if err != nil {
-		return err
-	}
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("read PR comment: %w", err)
 	}
-	body := strings.TrimSpace(string(bodyBytes))
-	if body == "" {
-		return fmt.Errorf("comment body is required on stdin")
-	}
 	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	body := string(bodyBytes)
+	if err := og.ValidatePRCommentBody(&body); err != nil {
+		return err
+	}
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
 		return err
 	}
@@ -140,7 +148,7 @@ func runPRChecks(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runLinesDaemon(cmd, "/pr/checks", og.Request{Index: index, State: stateAll})
+	return runLinesDaemon(cmd, "/pr/checks", og.Request{Index: index, State: og.PRStateAll})
 }
 
 func runPRLog(cmd *cobra.Command, args []string) error {
@@ -149,7 +157,10 @@ func runPRLog(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runLinesDaemon(cmd, "/pr/log", og.Request{Index: index, State: stateAll, Tail: tail})
+	if err := og.ValidatePRLogTail(tail); err != nil {
+		return err
+	}
+	return runLinesDaemon(cmd, "/pr/log", og.Request{Index: index, State: og.PRStateAll, Tail: tail})
 }
 
 func runPRFailures(cmd *cobra.Command, args []string) error {
@@ -158,7 +169,10 @@ func runPRFailures(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runLinesDaemon(cmd, "/pr/failures", og.Request{Index: index, State: stateAll, Tail: tail})
+	if err := og.ValidatePRLogTail(tail); err != nil {
+		return err
+	}
+	return runLinesDaemon(cmd, "/pr/failures", og.Request{Index: index, State: og.PRStateAll, Tail: tail})
 }
 
 func optionalPRID(cmd *cobra.Command) (int64, error) {
@@ -170,8 +184,8 @@ func optionalPRID(cmd *cobra.Command) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid --pr-id %q: %w", raw, err)
 	}
-	if index <= 0 {
-		return 0, fmt.Errorf("--pr-id must be positive")
+	if err := og.ValidatePositivePRID(index); err != nil {
+		return 0, err
 	}
 	return index, nil
 }

@@ -209,7 +209,7 @@ func TestPRCreateProjectJSONWithStdinBody(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pr create: %v", err)
 	}
-	if gotBody != "## Summary\n\nBody text." {
+	if gotBody != "## Summary\n\nBody text.\n" {
 		t.Fatalf("body = %q", gotBody)
 	}
 	var out ogPRJSON

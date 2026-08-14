@@ -24,6 +24,10 @@ const project = flags.get("project") ?? "";
 const prId = flags.get("pr-id");
 const fail = flags.get("fail") === "true";
 
+const bigOutput = project === "large";
+const BIG_LINES = bigOutput
+  ? Array.from({ length: 3000 }, (_, index) => `line ${index}`)
+  : ["check: pass", "check: lint"];
 const PR = {
   index: prId ? parseInt(prId, 10) : 7,
   title: "feat: guarded change",
@@ -32,7 +36,7 @@ const PR = {
   url: "https://github.com/tta-lab/repo/pull/7",
   head: "feature/x",
   base: "main",
-  body: "body",
+  body: bigOutput ? BIG_LINES.join("\n") : "body",
 };
 
 if (fail) {
@@ -52,12 +56,21 @@ const stdinBody = await new Promise((resolve) => {
   process.stdin.on("end", () => resolve(s));
   process.stdin.resume();
 });
-if (cmd.startsWith("pr modify") && !flags.get("title") && stdinBody.trim() === "") {
-  process.stderr.write("Error: nothing to update: provide --title and/or pipe body via stdin\n");
+if (
+  cmd.startsWith("pr modify") &&
+  !flags.has("title") &&
+  !flags.has("clear-body") &&
+  stdinBody.length === 0
+) {
+  process.stderr.write("Error: nothing to update: provide title and/or body\n");
+  process.exit(1);
+}
+if (cmd.startsWith("pr modify") && flags.has("title") && flags.get("title").trim() === "") {
+  process.stderr.write("Error: PR title must not be blank\n");
   process.exit(1);
 }
 if (cmd.startsWith("pr comment") && stdinBody.trim() === "") {
-  process.stderr.write("Error: comment body is required on stdin\n");
+  process.stderr.write("Error: comment body must not be blank\n");
   process.exit(1);
 }
 if (
@@ -93,7 +106,10 @@ if (cmd.startsWith("auth status")) {
   );
 } else if (cmd.startsWith("push") || cmd.startsWith("pull")) {
   process.stdout.write(
-    JSON.stringify({ project, message: cmd.split(" ")[0] + " completed" }) + "\n",
+    JSON.stringify({
+      project,
+      message: bigOutput ? BIG_LINES.join("\n") : cmd.split(" ")[0] + " completed",
+    }) + "\n",
   );
 } else if (cmd.startsWith("clone")) {
   const target = positional[1];
@@ -113,7 +129,7 @@ if (cmd.startsWith("auth status")) {
   );
 } else if (cmd.startsWith("pr create")) {
   const title = positional.slice(2).join(" ") || flags.get("title") || "title";
-  process.stdout.write(JSON.stringify({ project, pr: { ...PR, title } }) + "\n");
+  process.stdout.write(JSON.stringify({ project, pr: { ...PR, title, body: stdinBody } }) + "\n");
 } else if (cmd.startsWith("pr find") || cmd.startsWith("pr get") || cmd.startsWith("pr view")) {
   const explicitIndex =
     positional[0] === "pr" && positional[1] === "get" ? parseInt(positional[2], 10) : NaN;
@@ -124,7 +140,11 @@ if (cmd.startsWith("auth status")) {
   process.stdout.write(
     JSON.stringify({
       project,
-      pr: { ...PR, title: title ?? PR.title, body: flags.get("body") ?? PR.body },
+      pr: {
+        ...PR,
+        title: title ?? PR.title,
+        body: flags.has("clear-body") ? "" : stdinBody.length > 0 ? stdinBody : PR.body,
+      },
     }) + "\n",
   );
 } else if (cmd.startsWith("pr comment")) {
@@ -134,7 +154,7 @@ if (cmd.startsWith("auth status")) {
       comment: {
         id: 9,
         pr_id: prId ? parseInt(prId, 10) : 7,
-        body: "note",
+        body: stdinBody,
         url: "https://github.com/tta-lab/repo/pull/7#issuecomment-9",
       },
     }) + "\n",
@@ -144,9 +164,7 @@ if (cmd.startsWith("auth status")) {
   cmd.startsWith("pr log") ||
   cmd.startsWith("pr failures")
 ) {
-  process.stdout.write(
-    JSON.stringify({ project, pr: PR, lines: ["check: pass", "check: lint"] }) + "\n",
-  );
+  process.stdout.write(JSON.stringify({ project, pr: PR, lines: BIG_LINES }) + "\n");
 } else {
   process.stderr.write("Error: unknown command " + cmd + "\n");
   process.exit(2);

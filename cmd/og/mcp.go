@@ -16,12 +16,6 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
-const (
-	defaultLogTail = 50
-	maximumLogTail = 1000
-	stateOpen      = "open"
-)
-
 type ogDaemonCaller interface {
 	CallContext(context.Context, string, og.Request) (og.Response, error)
 }
@@ -135,8 +129,8 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	if tail {
 		tailSchema := schema.Properties["tail"]
 		tailSchema.Minimum = jsonschema.Ptr(0.0)
-		tailSchema.Maximum = jsonschema.Ptr(float64(maximumLogTail))
-		tailSchema.Default = json.RawMessage(fmt.Sprint(defaultLogTail))
+		tailSchema.Maximum = jsonschema.Ptr(float64(og.MaxPRLogTail))
+		tailSchema.Default = json.RawMessage(fmt.Sprint(og.DefaultPRLogTail))
 	}
 	if force := schema.Properties["force"]; force != nil {
 		force.Default = json.RawMessage("false")
@@ -151,8 +145,8 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 		}
 	}
 	if state := schema.Properties["state"]; state != nil {
-		state.Default = json.RawMessage(`"` + stateOpen + `"`)
-		state.Enum = []any{stateOpen, "closed", stateAll}
+		state.Default = json.RawMessage(`"` + og.PRStateOpen + `"`)
+		state.Enum = []any{og.PRStateOpen, og.PRStateClosed, og.PRStateAll}
 	}
 	return schema
 }
@@ -179,13 +173,6 @@ func callOGDaemon(
 		return og.Response{}, fmt.Errorf("call og daemon: %w", err)
 	}
 	return resp, nil
-}
-
-func validatePositivePRID(id int64) error {
-	if id <= 0 {
-		return fmt.Errorf("PR ID must be positive")
-	}
-	return nil
 }
 
 func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) error {
@@ -274,7 +261,7 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 	) (*mcp.CallToolResult, ogPROutput, error) {
 		if input.PRID == nil {
 			return callWorktreePRTool(
-				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: stateAll},
+				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: og.PRStateAll},
 			)
 		}
 		return callPRTool(ctx, projects, caller, input.Project, "/pr/get", *input.PRID)
@@ -320,8 +307,8 @@ func prCreateHandler(
 		_ *mcp.CallToolRequest,
 		input ogPRCreateInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
-		if strings.TrimSpace(input.Title) == "" {
-			return nil, ogPROutput{}, fmt.Errorf("PR title must not be blank")
+		if err := og.ValidatePRTitle(input.Title); err != nil {
+			return nil, ogPROutput{}, err
 		}
 		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/create", og.Request{
 			Title: &input.Title,
@@ -339,12 +326,9 @@ func prFindHandler(
 		_ *mcp.CallToolRequest,
 		input ogPRFindInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
-		state := input.State
-		if state == "" {
-			state = stateOpen
-		}
-		if state != stateOpen && state != "closed" && state != stateAll {
-			return nil, ogPROutput{}, fmt.Errorf("PR state must be open, closed, or all")
+		state, err := og.NormalizePRState(input.State)
+		if err != nil {
+			return nil, ogPROutput{}, err
 		}
 		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/find", og.Request{State: state})
 	}
@@ -417,11 +401,8 @@ func prModifyHandler(
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
-		if input.Title == nil && input.Body == nil {
-			return nil, ogPROutput{}, fmt.Errorf("nothing to update: provide title and/or body")
-		}
-		if input.Title != nil && strings.TrimSpace(*input.Title) == "" {
-			return nil, ogPROutput{}, fmt.Errorf("PR title must not be blank")
+		if err := og.ValidatePRModifyInput(input.Title, input.Body); err != nil {
+			return nil, ogPROutput{}, err
 		}
 		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/modify", og.Request{
 			Index: prID, Title: input.Title, Body: input.Body,
@@ -449,8 +430,8 @@ func prCommentHandler(
 		if err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		if strings.TrimSpace(input.Body) == "" {
-			return nil, ogCommentOutput{}, fmt.Errorf("comment body must not be blank")
+		if err := og.ValidatePRCommentBody(&input.Body); err != nil {
+			return nil, ogCommentOutput{}, err
 		}
 		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/comment", og.Request{
 			Index: prID, Body: &input.Body,
@@ -472,7 +453,7 @@ func callPRTool(
 	alias, path string,
 	id int64,
 ) (*mcp.CallToolResult, ogPROutput, error) {
-	if err := validatePositivePRID(id); err != nil {
+	if err := og.ValidatePositivePRID(id); err != nil {
 		return nil, ogPROutput{}, err
 	}
 	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id})
@@ -532,8 +513,8 @@ func callPRLinesTool(
 	if err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	if tail < 0 || tail > maximumLogTail {
-		return nil, ogPRLinesOutput{}, fmt.Errorf("tail must be between 0 and %d", maximumLogTail)
+	if err := og.ValidatePRLogTail(tail); err != nil {
+		return nil, ogPRLinesOutput{}, err
 	}
 	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id, Tail: tail})
 	if err != nil {
@@ -549,7 +530,7 @@ func optionalMCPPRID(id *int64) (int64, error) {
 	if id == nil {
 		return 0, nil
 	}
-	if err := validatePositivePRID(*id); err != nil {
+	if err := og.ValidatePositivePRID(*id); err != nil {
 		return 0, err
 	}
 	return *id, nil

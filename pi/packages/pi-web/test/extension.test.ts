@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -47,6 +49,8 @@ describe("pi-web extension", () => {
     // Negative integers match the MCP contract: the shared Go service
     // normalizes non-positive count/context and treats non-positive timeout
     // as disabled.
+    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", count: -1 })).toBe(true);
+    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", context: -1 })).toBe(true);
     expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", timeout: -1 })).toBe(true);
     expect(Value.Check(webSchema, { action: "search" })).toBe(false);
     expect(Value.Check(webSchema, { action: "fetch", url: "https://example.com", bogus: 1 })).toBe(
@@ -126,18 +130,27 @@ describe("pi-web extension", () => {
     expect((result.content[0] as { text: string }).text).toContain("matches");
   });
 
-  it("large text results are truncated with an actionable continuation notice", () => {
+  it("large text results are truncated with an actionable continuation notice", async () => {
     const big = Array.from({ length: 3000 }, (_, i) => "line " + i).join("\n");
-    const { text, truncation } = truncateForModel(big);
-    expect(truncation!.truncated).toBe(true);
-    expect(truncation!.truncatedBy).toBe("lines");
-    expect(text).toContain("[Truncated: showing 2000 of 3000 lines");
-
-    // The fetch action passes an actionable hint; the generic helper appends it.
-    const { text: hinted } = truncateForModel(big, {
+    const truncated = await truncateForModel(big);
+    const hinted = await truncateForModel(big, {
       hint: "Use fetch with tree or section_id to navigate the document.",
     });
-    expect(hinted).toContain("section_id");
+    try {
+      expect(truncated.truncation!.truncated).toBe(true);
+      expect(truncated.truncation!.truncatedBy).toBe("lines");
+      expect(truncated.text).toContain("[Truncated: showing 2000 of 3000 lines");
+
+      // The fetch action passes an actionable hint; the generic helper appends it.
+      expect(hinted.text).toContain("section_id");
+      expect(hinted.text).toContain(`Full output saved to: ${hinted.fullOutputPath}`);
+    } finally {
+      for (const path of [truncated.fullOutputPath, hinted.fullOutputPath]) {
+        if (path) {
+          rmSync(dirname(path), { recursive: true, force: true });
+        }
+      }
+    }
   });
 
   it("abort cancels the CLI child process", async () => {

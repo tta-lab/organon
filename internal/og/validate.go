@@ -9,6 +9,79 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
+const (
+	// PRStateOpen is the default state for current-branch PR searches.
+	PRStateOpen = "open"
+	// PRStateClosed selects closed pull requests.
+	PRStateClosed = "closed"
+	// PRStateAll selects pull requests in every state.
+	PRStateAll = "all"
+
+	// DefaultPRLogTail is the default number of CI log lines to request.
+	DefaultPRLogTail = 50
+	// MaxPRLogTail is the largest accepted CI log tail window.
+	MaxPRLogTail = 1000
+)
+
+// ValidatePositivePRID requires an explicit pull request ID to be positive.
+func ValidatePositivePRID(id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("PR ID must be positive")
+	}
+	return nil
+}
+
+// ValidatePRTitle requires title content without changing caller-supplied text.
+func ValidatePRTitle(title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("PR title must not be blank")
+	}
+	return nil
+}
+
+// NormalizePRState applies the default state and rejects unsupported values.
+func NormalizePRState(state string) (string, error) {
+	if state == "" {
+		return PRStateOpen, nil
+	}
+	switch state {
+	case PRStateOpen, PRStateClosed, PRStateAll:
+		return state, nil
+	default:
+		return "", fmt.Errorf("PR state must be open, closed, or all")
+	}
+}
+
+// ValidatePRModifyInput requires at least one replacement and a non-blank
+// replacement title. Bodies deliberately retain their original bytes, including
+// leading and trailing whitespace, because an empty body explicitly clears it.
+func ValidatePRModifyInput(title, body *string) error {
+	if title == nil && body == nil {
+		return fmt.Errorf("nothing to update: provide title and/or body")
+	}
+	if title != nil {
+		return ValidatePRTitle(*title)
+	}
+	return nil
+}
+
+// ValidatePRCommentBody requires non-blank content without trimming the body
+// that callers forward to the provider.
+func ValidatePRCommentBody(body *string) error {
+	if body == nil || strings.TrimSpace(*body) == "" {
+		return fmt.Errorf("comment body must not be blank")
+	}
+	return nil
+}
+
+// ValidatePRLogTail requires the shared bounded log window.
+func ValidatePRLogTail(tail int) error {
+	if tail < 0 || tail > MaxPRLogTail {
+		return fmt.Errorf("tail must be between 0 and %d", MaxPRLogTail)
+	}
+	return nil
+}
+
 // Response validators shared by the CLI, MCP, and Pi extension adapters so
 // daemon result contracts are enforced in one place. Message texts are part of
 // the adapter contract and are asserted by both the CLI and MCP tests.

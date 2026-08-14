@@ -65,7 +65,8 @@ export function projectTool() {
     label: "Project",
     description:
       "List registered Organon projects or get one registered project by exact alias. " +
-      "The alias is the single-layer registered alias from the projects catalog, never an org/repo string.",
+      "The alias is the single-layer registered alias from the projects catalog, never an org/repo string. " +
+      "Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
     promptSnippet: "List registered projects or get one by exact alias",
     promptGuidelines: LIST_PROMPT_GUIDELINES,
     parameters: projectSchema,
@@ -92,13 +93,29 @@ export function projectTool() {
         });
         const raw =
           lines.length === 0 ? "No projects found." : "Available projects:\n" + lines.join("\n");
-        return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
+        const model = await truncateForModel(raw, {
+          hint: "Use project get with an exact alias to inspect one project.",
+        });
+        return {
+          content: [{ type: "text", text: model.text }],
+          details: model.truncation
+            ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
+            : data,
+        };
       }
       const data = parseSingleJsonDoc<ProjectGetResult>(result.stdout);
       const p = data.project;
       const text =
         p.name && p.name !== "" ? `${p.alias}: ${p.name} (${p.path})` : `${p.alias}: ${p.path}`;
-      return { content: [{ type: "text", text }], details: data };
+      const model = await truncateForModel(text, {
+        hint: "Use project list or get with an exact alias to narrow the result.",
+      });
+      return {
+        content: [{ type: "text", text: model.text }],
+        details: model.truncation
+          ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
+          : data,
+      };
     },
   };
 }

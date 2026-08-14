@@ -155,6 +155,34 @@ func TestReadJSONPlainTextWithoutStructure(t *testing.T) {
 	assert.Equal(t, 2, out.TotalLines)
 }
 
+func TestReadJSONEmptyFileIsAZeroLineRead(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "empty.txt")
+	require.NoError(t, os.WriteFile(f, nil, 0o644))
+
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.Equal(t, "", out.Content)
+	assert.Zero(t, out.StartLine)
+	assert.Zero(t, out.TotalLines)
+	assert.Zero(t, out.TotalBytes)
+	assert.False(t, out.Truncated)
+
+	lineOne := newReadCmd()
+	require.NoError(t, lineOne.Flags().Set("offset", "1"))
+	lineOneOut := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(lineOne, []string{f}))
+	}))
+	assert.Zero(t, lineOneOut.TotalLines)
+
+	beyond := newReadCmd()
+	require.NoError(t, beyond.Flags().Set("offset", "2"))
+	err := runReadJSON(beyond, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "beyond end")
+}
+
 func TestReadJSONSymbolID(t *testing.T) {
 	f := writeGoFile(t, "package sample\n\n// Foo docs.\nfunc Foo() {\n\t// body\n}\n\nfunc Bar() {}\n")
 	outline := decodeOutline(t, captureStdout(t, func() {

@@ -5,7 +5,13 @@ import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { formatSize, resizeImage, type TruncationResult } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
-import { cliError, parseSingleJsonDoc, resolveBinaryPath, runCli } from "@tta-lab/pi-shared";
+import {
+  cliError,
+  parseSingleJsonDoc,
+  resolveBinaryPath,
+  runCli,
+  truncateForModel,
+} from "@tta-lab/pi-shared";
 
 import { resolveSourcePath } from "./paths.js";
 
@@ -226,19 +232,19 @@ export function renderReadText(result: ReadResult): string {
   const { content, start_line, total_lines, truncated, truncated_by, output_lines, next_offset } =
     result;
   if (result.first_line_exceeds_limit) {
-    return `[Line ${start_line} is larger than ${formatSize(MAX_READ_BYTES)}. Use bash to read it in chunks.]`;
+    return `[Line ${start_line} is larger than ${formatSize(MAX_READ_BYTES)}. Use bash to read it in chunks. Full content is available at: ${result.path}]`;
   }
   if (truncated && truncated_by === "lines" && next_offset) {
     const end = start_line + (output_lines ?? 0) - 1;
-    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines}. Use offset=${next_offset} to continue.]`;
+    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines}. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
   if (truncated && next_offset) {
     const end = start_line + (output_lines ?? 0) - 1;
-    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines} (${formatSize(MAX_READ_BYTES)} limit). Use offset=${next_offset} to continue.]`;
+    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines} (${formatSize(MAX_READ_BYTES)} limit). Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
   if (!truncated && output_lines !== undefined && output_lines < total_lines && next_offset) {
     const remaining = total_lines - (start_line + output_lines - 1);
-    return `${content}\n\n[${remaining} more lines in file. Use offset=${next_offset} to continue.]`;
+    return `${content}\n\n[${remaining} more lines in file. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
   return content;
 }
@@ -270,7 +276,8 @@ export function srcTool() {
     description:
       "Structure-aware source file reading and editing: inspect symbol outlines, read files or exact symbols, " +
       "replace/insert/delete/comment symbols by opaque ID, and apply exact multi-edit batches to one file. " +
-      "Paths are absolute or relative to the current working directory.",
+      "Paths are absolute or relative to the current working directory. Text output is limited to 2,000 lines " +
+      "or 50KB; truncated output includes a continuation or full-output location.",
     promptSnippet: "Inspect and edit source files with symbol-aware operations",
     promptGuidelines: SRC_PROMPT_GUIDELINES,
     parameters: srcSchema,
@@ -396,7 +403,7 @@ async function render(
       lines.length === 0
         ? "No symbols found."
         : `${data.path} (${data.language}):\n` + lines.join("\n");
-    return { content: [{ type: "text", text }], details: data };
+    return renderText(data, text, "Use src action symbols again after narrowing the source file.");
   }
   if (isAction(input, "read")) {
     const data = parseSingleJsonDoc<ReadResult>(stdout);
@@ -404,9 +411,10 @@ async function render(
       return renderMedia(data, model);
     }
     const text = renderReadText(data);
+    const truncation = toTruncation(data);
     return {
       content: [{ type: "text", text }],
-      details: { truncation: toTruncation(data) },
+      details: truncation ? { ...data, truncation, fullOutputPath: data.path } : data,
     };
   }
   if (isAction(input, "edit")) {
@@ -423,7 +431,11 @@ async function render(
   }
   if (isAction(input, "comment") && isReadComment(input)) {
     const data = parseSingleJsonDoc<CommentReadResult>(stdout);
-    return { content: [{ type: "text", text: data.comment }], details: data };
+    return renderText(
+      data,
+      data.comment,
+      "Use src action comment with the same symbol ID to read the comment again.",
+    );
   }
   const data = parseSingleJsonDoc<MutationResult>(stdout);
   const label = data.symbol_id ? `${data.action} ${data.symbol_id}` : data.action;
@@ -431,6 +443,21 @@ async function render(
     content: [{ type: "text", text: `Applied ${label} to ${data.path}.` }],
     details: data,
   };
+}
+
+async function renderText(
+  data: object,
+  raw: string,
+  hint: string,
+): Promise<{
+  content: Array<{ type: "text"; text: string }>;
+  details: unknown;
+}> {
+  const model = await truncateForModel(raw, { hint });
+  const details = model.truncation
+    ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
+    : data;
+  return { content: [{ type: "text", text: model.text }], details };
 }
 
 const NON_VISION_NOTE =

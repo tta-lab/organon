@@ -25,7 +25,7 @@ const (
 	branchMaster = "master"
 	headRefName  = "HEAD"
 	remoteOrigin = "origin"
-	stateAll     = "all"
+	stateAll     = PRStateAll
 )
 
 var (

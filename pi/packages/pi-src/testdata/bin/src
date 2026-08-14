@@ -91,11 +91,13 @@ function detectMedia(buf) {
 
 const source = raw.toString("utf8");
 
+async function writeJSON(value) {
+  await new Promise((resolve) => process.stdout.write(JSON.stringify(value) + "\n", resolve));
+}
+
 if (cmd === "symbols") {
   const syms = outline(source).map(({ _docStart, _end, ...s }) => s);
-  process.stdout.write(
-    JSON.stringify({ path, language: "go", total_bytes: source.length, symbols: syms }) + "\n",
-  );
+  await writeJSON({ path, language: "go", total_bytes: source.length, symbols: syms });
   process.exit(0);
 }
 
@@ -216,9 +218,7 @@ if (cmd === "comment") {
   }
   if (hasFlag("read")) {
     const lines = source.split("\n");
-    process.stdout.write(
-      JSON.stringify({ path, symbol_id: id, comment: lines[s._docStart] ?? "" }) + "\n",
-    );
+    await writeJSON({ path, symbol_id: id, comment: lines[s._docStart] ?? "" });
     process.exit(0);
   }
   const content = readFileSync(0, "utf8").replace(/\n$/, "");

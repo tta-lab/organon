@@ -72,14 +72,12 @@ export const webSchema = Type.Union([
         Type.Integer({
           description: "Optional result count; defaults to 10",
           default: 10,
-          minimum: 0,
         }),
       ),
       context: Type.Optional(
         Type.Integer({
           description: "Optional context lines; defaults to 10",
           default: 10,
-          minimum: 0,
         }),
       ),
       timeout: Type.Optional(
@@ -169,7 +167,8 @@ export function webTool() {
     label: "Web",
     description:
       "Search the web, fetch and read web pages as Markdown, resolve and fetch library documentation, " +
-      "and search public source code through Sourcegraph.",
+      "and search public source code through Sourcegraph. Text output is limited to 2,000 lines or 50KB; " +
+      "truncated output is saved to a temporary file.",
     promptSnippet: "Search the web, fetch pages, read docs, and search source code",
     promptGuidelines: WEB_PROMPT_GUIDELINES,
     parameters: webSchema,
@@ -186,7 +185,7 @@ export function webTool() {
       if (result.exitCode !== 0) {
         throw cliError(result.stderr, result.exitCode);
       }
-      return render(params, result.stdout);
+      return await render(params, result.stdout);
     },
   };
 }
@@ -238,10 +237,10 @@ function buildArgs(input: WebInput): string[] {
   return args;
 }
 
-function render(
+async function render(
   input: WebInput,
   stdout: string,
-): { content: { type: "text"; text: string }[]; details: unknown } {
+): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
   if (isAction(input, "search")) {
     const data = parseSingleJsonDoc<SearchResult>(stdout);
     const lines = data.results.map(
@@ -252,14 +251,15 @@ function render(
         ? "No search results."
         : `Found ${lines.length} search results (provider: ${data.provider}):\n\n` +
           lines.join("\n\n");
-    return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
+    return renderText(data, raw, "Use a narrower search query to reduce results.");
   }
   if (isAction(input, "fetch")) {
     const data = parseSingleJsonDoc<FetchResult>(stdout);
-    const { text, truncation } = truncateForModel(data.content, {
-      hint: "Use fetch with tree or section_id to navigate the document.",
-    });
-    return { content: [{ type: "text", text }], details: { ...data, truncation } };
+    return renderText(
+      data,
+      data.content,
+      "Use fetch with tree or section_id to navigate the document.",
+    );
   }
   if (isAction(input, "docs_resolve")) {
     const data = parseSingleJsonDoc<DocsResolveResult>(stdout);
@@ -268,18 +268,34 @@ function render(
       lines.length === 0
         ? `No libraries found for ${JSON.stringify(input.query)}`
         : `Found ${lines.length} libraries:\n` + lines.join("\n");
-    return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
+    return renderText(data, raw, "Use a more specific library query to narrow results.");
   }
   if (isAction(input, "docs_fetch")) {
     const data = parseSingleJsonDoc<DocsFetchResult>(stdout);
-    const { text, truncation } = truncateForModel(data.content, {
-      hint: "Refetch with a narrower topic or tokens budget for the remainder.",
-    });
-    return { content: [{ type: "text", text }], details: { ...data, truncation } };
+    return renderText(
+      data,
+      data.content,
+      "Refetch with a narrower topic or tokens budget for the remainder.",
+    );
   }
   const data = parseSingleJsonDoc<SGraphResult>(stdout);
-  const { text, truncation } = truncateForModel(data.content);
-  return { content: [{ type: "text", text }], details: { ...data, truncation } };
+  return renderText(
+    data,
+    data.content,
+    "Use a narrower Sourcegraph query or lower count and context.",
+  );
+}
+
+async function renderText(
+  data: object,
+  raw: string,
+  hint: string,
+): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
+  const model = await truncateForModel(raw, { hint });
+  const details = model.truncation
+    ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
+    : data;
+  return { content: [{ type: "text", text: model.text }], details };
 }
 
 export function registerWebTool(pi: {

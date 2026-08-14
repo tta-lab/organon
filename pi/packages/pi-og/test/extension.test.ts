@@ -1,3 +1,5 @@
+import { readFileSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -105,7 +107,7 @@ describe("pi-og extension", () => {
 
   it("pr_comment requires a non-blank body", async () => {
     await expect(call({ action: "pr_comment", project: "ko", body: "  " })).rejects.toThrow(
-      /comment body is required/,
+      /comment body must not be blank/,
     );
     const result = await call({ action: "pr_comment", project: "ko", pr_id: 41, body: "reviewed" });
     expect((result.details as { comment: { pr_id: number } }).comment.pr_id).toBe(41);
@@ -117,6 +119,41 @@ describe("pi-og extension", () => {
     expect(details.lines.length).toBe(2);
     const failures = await call({ action: "pr_failures", project: "ko" });
     expect((failures.content[0] as { text: string }).text).toContain("check: pass");
+  });
+
+  it("preserves raw multiline PR bodies and comments through the CLI seam", async () => {
+    const body = "\nbody with surrounding whitespace\n";
+    const modified = await call({ action: "pr_modify", project: "ko", body });
+    expect((modified.details as { pr: { body: string } }).pr.body).toBe(body);
+
+    const comment = await call({ action: "pr_comment", project: "ko", body });
+    expect((comment.details as { comment: { body: string } }).comment.body).toBe(body);
+  });
+
+  it("truncates and saves large messages, PR bodies, and CI output", async () => {
+    const results = await Promise.all([
+      call({ action: "push", project: "large" }),
+      call({ action: "pr_get", project: "large" }),
+      call({ action: "pr_log", project: "large" }),
+    ]);
+    const paths = results.map(
+      (result) => (result.details as { fullOutputPath?: string }).fullOutputPath,
+    );
+    try {
+      for (const result of results) {
+        const text = (result.content[0] as { text: string }).text;
+        const details = result.details as { fullOutputPath?: string };
+        expect(text).toContain("[Truncated:");
+        expect(text).toContain(`Full output saved to: ${details.fullOutputPath}`);
+        expect(readFileSync(details.fullOutputPath!, "utf8")).toContain("line 2999");
+      }
+    } finally {
+      for (const path of paths) {
+        if (path) {
+          rmSync(dirname(path), { recursive: true, force: true });
+        }
+      }
+    }
   });
 
   it("daemon policy failures surface as concise errors", async () => {

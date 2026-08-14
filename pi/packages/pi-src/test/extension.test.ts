@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -142,7 +142,50 @@ describe("pi-src read and symbols", () => {
       output_lines: 3,
       next_offset: 4,
     });
-    expect(text).toContain("[Showing lines 1-3 of 10. Use offset=4 to continue.]");
+    expect(text).toContain(
+      "[Showing lines 1-3 of 10. Use offset=4 to continue. Full content is available at: f]",
+    );
+  });
+
+  it("truncates and saves large symbol outlines and comments", async () => {
+    const symbolsSource =
+      "package sample\n\n" +
+      Array.from({ length: 2200 }, (_, index) => `func F${index}() {\n}`).join("\n") +
+      "\n}";
+    const symbolsFile = makeFile(symbolsSource);
+    const symbols = await call(
+      { action: "symbols", path: symbolsFile.path },
+      { cwd: symbolsFile.cwd },
+    );
+
+    const commentFile = makeFile("// " + "x".repeat(60 * 1024) + "\nfunc Foo() {\n}\n");
+    const outline = await call(
+      { action: "symbols", path: commentFile.path },
+      { cwd: commentFile.cwd },
+    );
+    const symbolID = (outline.details as { symbols: Array<{ id: string }> }).symbols[0]!.id;
+    const comment = await call(
+      { action: "comment", path: commentFile.path, symbol_id: symbolID, read: true },
+      { cwd: commentFile.cwd },
+    );
+
+    const paths = [symbols, comment].map(
+      (result) => (result.details as { fullOutputPath?: string }).fullOutputPath,
+    );
+    try {
+      for (const result of [symbols, comment]) {
+        const text = (result.content[0] as { text: string }).text;
+        const details = result.details as { fullOutputPath?: string };
+        expect(text).toContain("Full output saved to:");
+        expect(readFileSync(details.fullOutputPath!, "utf8").length).toBeGreaterThan(50 * 1024);
+      }
+    } finally {
+      for (const path of paths) {
+        if (path) {
+          rmSync(dirname(path), { recursive: true, force: true });
+        }
+      }
+    }
   });
 });
 

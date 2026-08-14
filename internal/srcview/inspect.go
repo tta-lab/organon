@@ -1,7 +1,6 @@
 package srcview
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -144,52 +143,17 @@ func (i *Inspector) Read(symbolID string, limit int) (ReadResult, error) {
 	return ReadResult{}, fmt.Errorf("symbol %q not found", symbolID)
 }
 
-// SymbolRead is a line-oriented read of one symbol or Markdown section.
-type SymbolRead struct {
-	Content    string
-	StartLine  int // 1-indexed line of the symbol/section start
-	TotalLines int
-}
-
-// ReadSymbolLines returns the content of a targetable symbol or Markdown
-// section together with its 1-indexed start line and total line count, using
-// the same content boundaries as ReadContent.
-func (i *Inspector) ReadSymbolLines(symbolID string) (SymbolRead, error) {
-	if IsMarkdown(i.filename) {
-		start, end, err := markdown.SectionBounds(i.source, symbolID)
-		if err != nil {
-			return SymbolRead{}, err
-		}
-		content := string(i.source[start:end])
-		return SymbolRead{
-			Content:    content,
-			StartLine:  lineNumberAt(i.source, start),
-			TotalLines: realLineCount(content),
-		}, nil
+// LineCount returns the number of real lines in content, excluding the phantom
+// empty element a trailing newline produces. Empty content has zero lines.
+func LineCount(content string) int {
+	if content == "" {
+		return 0
 	}
-	result, err := i.Read(symbolID, 0)
-	if err != nil {
-		return SymbolRead{}, err
+	count := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		count++
 	}
-	return SymbolRead{
-		Content:    result.Content,
-		StartLine:  lineNumberAt(i.source, result.Start),
-		TotalLines: realLineCount(result.Content),
-	}, nil
-}
-
-func lineNumberAt(source []byte, offset int) int {
-	return bytes.Count(source[:offset], []byte("\n")) + 1
-}
-
-// realLineCount returns the number of lines in content, excluding the phantom
-// empty element a trailing newline produces when splitting on "\n".
-func realLineCount(content string) int {
-	lines := strings.Split(content, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		return len(lines) - 1
-	}
-	return len(lines)
+	return count
 }
 
 // ReadContent preserves the established CLI representation of a full symbol or section.

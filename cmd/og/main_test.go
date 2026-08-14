@@ -374,7 +374,7 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOG: %v", err)
 	}
-	if got["title"] != "feat: daemon first" || got["body"] != "body from stdin" {
+	if got["title"] != "feat: daemon first" || got["body"] != "body from stdin\n" {
 		t.Fatalf("request = %+v, want title/body", got)
 	}
 	if _, ok := got["token"]; ok {
@@ -385,6 +385,63 @@ func TestPRCreateRoutesThroughDaemonWithBodyAndTitle(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "PR #12") {
 		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestPRCLIUsesMCPValidationAndPreservesRawBodies(t *testing.T) {
+	t.Setenv("OG_DAEMON_URL", "http://127.0.0.1:1")
+	invalid := []struct {
+		input string
+		args  []string
+		want  string
+	}{
+		{args: []string{"pr", "create", " \t"}, want: "PR title must not be blank"},
+		{args: []string{"pr", "find", "--state", "merged"}, want: "PR state must be open, closed, or all"},
+		{args: []string{"pr", "modify", "--title", "  "}, want: "PR title must not be blank"},
+		{input: " \n", args: []string{"pr", "comment"}, want: "comment body must not be blank"},
+		{args: []string{"pr", "log", "--tail", "-1"}, want: "tail must be between 0 and 1000"},
+		{args: []string{"pr", "failures", "--tail", "1001"}, want: "tail must be between 0 and 1000"},
+	}
+	for _, tc := range invalid {
+		_, err := runOGWithInput(t, tc.input, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("runOG(%v) error = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+
+	body := "\nbody with surrounding whitespace\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req og.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch r.URL.Path {
+		case "/pr/modify":
+			if req.Body == nil || *req.Body != body {
+				t.Fatalf("modify body = %#v, want %#v", req.Body, body)
+			}
+			_ = json.NewEncoder(w).Encode(og.Response{OK: true, PR: &og.PullRequest{
+				Index: 7, Title: "existing title", Body: *req.Body,
+			}})
+		case "/pr/comment":
+			if req.Body == nil || *req.Body != body {
+				t.Fatalf("comment body = %#v, want %#v", req.Body, body)
+			}
+			_ = json.NewEncoder(w).Encode(og.Response{OK: true, Comment: &og.Comment{
+				ID: 1, PRID: 7, Body: *req.Body, URL: "https://example.test/comments/1",
+			}})
+		default:
+			t.Fatalf("unexpected daemon path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("OG_DAEMON_URL", server.URL)
+
+	if _, err := runOGWithInput(t, body, "pr", "modify"); err != nil {
+		t.Fatalf("modify: %v", err)
+	}
+	if _, err := runOGWithInput(t, body, "pr", "comment"); err != nil {
+		t.Fatalf("comment: %v", err)
 	}
 }
 

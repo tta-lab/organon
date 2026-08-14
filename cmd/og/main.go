@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tta-lab/organon/internal/og"
 )
 
 func main() {
@@ -138,7 +140,7 @@ func newPRChecksCmd(use, short string) *cobra.Command {
 
 func newPRLogCmd() *cobra.Command {
 	cmd := newRunnableCmd("log", "Show CI status and failure logs for the current PR", runPRLog)
-	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
@@ -146,7 +148,7 @@ func newPRLogCmd() *cobra.Command {
 
 func newPRFailuresCmd(use string) *cobra.Command {
 	cmd := newRunnableCmd(use, "Show CI failure logs for the current PR", runPRFailures)
-	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd

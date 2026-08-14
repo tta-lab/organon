@@ -81,16 +81,6 @@ type editBatchJSON struct {
 	EditsApplied     int    `json:"edits_applied"`
 }
 
-// realLineCount returns the number of lines in content, excluding the phantom
-// empty element a trailing newline produces when splitting on "\n".
-func realLineCount(content string) int {
-	lines := strings.Split(content, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		return len(lines) - 1
-	}
-	return len(lines)
-}
-
 // isBinaryBytes reports binary content via null bytes in the first 8 KiB.
 func isBinaryBytes(data []byte) bool {
 	check := data
@@ -98,6 +88,30 @@ func isBinaryBytes(data []byte) bool {
 		check = check[:8192]
 	}
 	return strings.IndexByte(string(check), 0) >= 0
+}
+
+// wholeFileMediaResult validates non-symbol reads and returns a completed
+// media result when the source is a supported image.
+func wholeFileMediaResult(filename string, source []byte, symbolID string, result readJSON) (*readJSON, error) {
+	if symbolID != "" {
+		return nil, nil
+	}
+	if media, ok := detectMedia(source); ok {
+		result.Media = &media
+		result.Content = ""
+		return &result, nil
+	}
+	if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
+		return nil, mediaErrorFor(source, filename)
+	}
+	return nil, nil
+}
+
+func emptyReadResult(result readJSON, filename string, offset int) (readJSON, error) {
+	if offset > 1 {
+		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (0 lines)", offset, filename)
+	}
+	return result, nil
 }
 
 func targetID(afterID, beforeID string) string {
@@ -246,29 +260,34 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 
 func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
 	content := string(source)
-	totalLines := realLineCount(content)
+	totalLines := srcview.LineCount(content)
 
 	if symbolID != "" {
-		read, err := srcview.NewInspector(filename, source, 2).ReadSymbolLines(symbolID)
+		symbolContent, err := srcview.NewInspector(filename, source, 2).ReadContent(symbolID)
 		if err != nil {
 			return readJSON{}, err
 		}
-		content, totalLines = read.Content, realLineCount(read.Content)
+		content = symbolContent
+		totalLines = srcview.LineCount(content)
 	}
 
 	result := readJSON{
 		Path: filename, SymbolID: symbolID, TotalLines: totalLines, TotalBytes: len(source),
 	}
 
-	if symbolID == "" {
-		if media, ok := detectMedia(source); ok {
-			result.Media = &media
-			result.Content = ""
-			return result, nil
-		}
-		if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
-			return readJSON{}, mediaErrorFor(source, filename)
-		}
+	mediaResult, err := wholeFileMediaResult(filename, source, symbolID, result)
+	if err != nil {
+		return readJSON{}, err
+	}
+	if mediaResult != nil {
+		return *mediaResult, nil
+	}
+
+	// An empty ordinary text file is a successful zero-line read. Treat the
+	// default offset and explicit line-one offset alike; only later pages are
+	// beyond its end.
+	if totalLines == 0 {
+		return emptyReadResult(result, filename, offset)
 	}
 
 	lines := strings.Split(content, "\n")
