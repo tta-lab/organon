@@ -86,6 +86,42 @@ func TestApplyBatchMissingDuplicateOverlapNestedNoopRejected(t *testing.T) {
 	}
 }
 
+func TestApplyBatchRejectsLineEndingNormalizedNoops(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		edit   BatchEdit
+	}{
+		{
+			name:   "CRLF",
+			source: "a\r\nb\r\n",
+			edit:   BatchEdit{OldText: "a\r\n", NewText: "a\n"},
+		},
+		{
+			name:   "lone CR",
+			source: "a\rb\r",
+			edit:   BatchEdit{OldText: "a\rb", NewText: "a\nb"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := []byte(tc.source)
+			before := append([]byte(nil), source...)
+			result, err := ApplyBatch("f.txt", source, []BatchEdit{tc.edit})
+			if err == nil || !strings.Contains(err.Error(), "no-op") {
+				t.Fatalf("error = %v, want normalized no-op rejection", err)
+			}
+			if result != nil {
+				t.Fatalf("result = %#v, want nil", result)
+			}
+			if !bytes.Equal(source, before) {
+				t.Fatal("source mutated by rejected normalized no-op")
+			}
+		})
+	}
+}
+
 func TestApplyBatchValidationFailureLeavesSourceUntouched(t *testing.T) {
 	source := []byte("a\nbbb\nc\n")
 	if _, err := ApplyBatch("f.txt", source, []BatchEdit{

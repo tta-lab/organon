@@ -61,21 +61,16 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 
 	matches := make([]batchMatch, 0, len(edits))
 	for i, edit := range edits {
-		if edit.OldText == "" {
-			return nil, fmt.Errorf("edit %d: oldText is empty", i+1)
-		}
-		if edit.OldText == edit.NewText {
-			return nil, fmt.Errorf("edit %d: oldText and newText are identical (no-op)", i+1)
-		}
-		old := edit.OldText
-		newText := edit.NewText
 		// Both sides are normalized to LF for matching and application; the
 		// final restore must never see a literal \r\n from newText, or it
 		// would become \r\r\n.
-		old = strings.ReplaceAll(old, "\r\n", "\n")
-		newText = strings.ReplaceAll(newText, "\r\n", "\n")
+		old := normalizeLineEndings(edit.OldText)
+		newText := normalizeLineEndings(edit.NewText)
 		if old == "" {
-			return nil, fmt.Errorf("edit %d: oldText is empty after line-ending normalization", i+1)
+			return nil, fmt.Errorf("edit %d: oldText is empty", i+1)
+		}
+		if old == newText {
+			return nil, fmt.Errorf("edit %d: oldText and newText are identical (no-op)", i+1)
 		}
 		occurrences := allIndexes(normalized, []byte(old))
 		switch len(occurrences) {
@@ -118,6 +113,13 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 		Diff:             diffText,
 		Patch:            diffText,
 	}, nil
+}
+
+// normalizeLineEndings converts CRLF and lone CR line endings to LF so edit
+// matching and replacement have one canonical representation.
+func normalizeLineEndings(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
 }
 
 // firstLineEndingIsCRLF reports whether the first line ending in content is

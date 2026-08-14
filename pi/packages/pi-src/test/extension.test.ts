@@ -88,6 +88,13 @@ describe("pi-src schema", () => {
       }),
     ).toBe(true);
     expect(Value.Check(srcSchema, { action: "edit", path: "a.go", edits: [] })).toBe(false);
+    expect(
+      Value.Check(srcSchema, {
+        action: "edit",
+        path: "a.go",
+        edits: [{ oldText: "a", newText: "b", unexpected: true }],
+      }),
+    ).toBe(false);
     expect(Value.Check(srcSchema, { action: "symbols" })).toBe(false);
     expect(Value.Check(srcSchema, { action: "replace", path: "a.go" })).toBe(false);
     expect(Value.Check(srcSchema, { action: "read", path: "a.go", bogus: 1 })).toBe(false);
@@ -102,6 +109,17 @@ describe("pi-src read and symbols", () => {
     expect(resolveSourcePath("@" + relative, cwd)).toBe(path);
     expect(resolveSourcePath(relative, cwd)).toBe(path);
     expect(resolveSourcePath(path, cwd)).toBe(path);
+  });
+
+  it("preserves whitespace in source paths", async () => {
+    const { cwd } = makeFile(SAMPLE);
+    for (const relative of [" leading.go", "trailing.go "]) {
+      const path = join(cwd, relative);
+      writeFileSync(path, SAMPLE);
+      expect(resolveSourcePath(relative, cwd)).toBe(path);
+      const result = await call({ action: "read", path: relative }, { cwd });
+      expect((result.content[0] as { text: string }).text).toContain("func Foo");
+    }
   });
 
   it("symbols action returns the typed outline with opaque IDs", async () => {

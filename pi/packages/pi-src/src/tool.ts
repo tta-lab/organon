@@ -28,10 +28,13 @@ const symbolIdDescription =
 
 const pathDescription = "Path to the file (absolute, or relative to the current working directory)";
 
-const editEntry = Type.Object({
-  oldText: Type.String({ description: "Exact original text to replace (may be multiline)" }),
-  newText: Type.String({ description: "Replacement text (may be multiline)" }),
-});
+const editEntry = Type.Object(
+  {
+    oldText: Type.String({ description: "Exact original text to replace (may be multiline)" }),
+    newText: Type.String({ description: "Replacement text (may be multiline)" }),
+  },
+  { additionalProperties: false },
+);
 
 export const srcSchema = Type.Union([
   Type.Object(

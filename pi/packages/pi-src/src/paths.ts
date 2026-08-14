@@ -6,7 +6,7 @@ import { isAbsolute, resolve as nodeResolve } from "node:path";
  * the session working directory. src has no project-registry dependency.
  */
 export function resolveSourcePath(rawPath: string, cwd: string): string {
-  let normalized = rawPath.trim();
+  let normalized = rawPath;
   if (normalized.startsWith("@")) {
     normalized = normalized.slice(1);
   }
