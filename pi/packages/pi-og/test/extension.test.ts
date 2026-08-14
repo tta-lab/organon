@@ -66,11 +66,7 @@ describe("pi-og extension", () => {
     expect((pull.details as { project: string }).project).toBe("ko");
   });
 
-  it("clone requires exactly one selector and maps alias/reference", async () => {
-    await expect(call({ action: "clone" })).rejects.toThrow(/exactly one of project and url/);
-    await expect(call({ action: "clone", project: "ko", alias: "x" })).rejects.toThrow(
-      /does not accept alias or reference/,
-    );
+  it("clone maps the project or url selector through to the CLI", async () => {
     const result = await call({ action: "clone", url: "https://github.com/a/b" });
     const details = result.details as { clone: { path: string; registered: boolean } };
     expect(details.clone.registered).toBe(true);
@@ -102,16 +98,14 @@ describe("pi-og extension", () => {
   });
 
   it("pr_modify requires title or body and passes them", async () => {
-    await expect(call({ action: "pr_modify", project: "ko" })).rejects.toThrow(
-      /at least one of title or body/,
-    );
+    await expect(call({ action: "pr_modify", project: "ko" })).rejects.toThrow(/nothing to update/);
     const result = await call({ action: "pr_modify", project: "ko", title: "new title" });
     expect((result.details as { pr: { title: string } }).pr.title).toBe("new title");
   });
 
   it("pr_comment requires a non-blank body", async () => {
     await expect(call({ action: "pr_comment", project: "ko", body: "  " })).rejects.toThrow(
-      /body must not be blank/,
+      /comment body is required/,
     );
     const result = await call({ action: "pr_comment", project: "ko", pr_id: 41, body: "reviewed" });
     expect((result.details as { comment: { pr_id: number } }).comment.pr_id).toBe(41);

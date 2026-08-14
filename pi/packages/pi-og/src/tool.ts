@@ -40,10 +40,14 @@ export const ogSchema = Type.Union([
   Type.Object(
     {
       action: Type.Literal("clone"),
-      project: Type.Optional(Type.String({ description: projectDesc })),
-      url: Type.Optional(
-        Type.String({ description: "HTTP(S) repository URL with exactly owner/repo" }),
-      ),
+      project: Type.String({ description: projectDesc }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      action: Type.Literal("clone"),
+      url: Type.String({ description: "HTTP(S) repository URL with exactly owner/repo" }),
       alias: Type.Optional(
         Type.String({ description: "Optional exact single-layer project alias" }),
       ),
@@ -235,7 +239,6 @@ export function ogTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      validateAction(params);
       const binary = resolveBinaryPath("og", { require });
       const { args, stdin } = buildArgs(params);
       const result = await runCli(binary, { args, stdin, signal });
@@ -245,38 +248,6 @@ export function ogTool() {
       return render(params, result.stdout);
     },
   };
-}
-
-function validateAction(input: OgInput): void {
-  if (isAction(input, "clone")) {
-    const hasProject = !!input.project?.trim();
-    const hasUrl = !!input.url?.trim();
-    if (hasProject === hasUrl) {
-      throw new Error("exactly one of project and url is required for clone");
-    }
-    if (hasProject && (input.alias || input.reference)) {
-      throw new Error("project clone does not accept alias or reference");
-    }
-    if (input.reference && input.alias) {
-      throw new Error("reference clone does not accept alias");
-    }
-    return;
-  }
-  if (isAction(input, "pr_modify")) {
-    if (input.title === undefined && input.body === undefined) {
-      throw new Error("pr_modify requires at least one of title or body");
-    }
-    if (input.title !== undefined && input.title.trim() === "") {
-      throw new Error("PR title must not be blank");
-    }
-    return;
-  }
-  if (isAction(input, "pr_create") && input.title.trim() === "") {
-    throw new Error("PR title must not be blank");
-  }
-  if (isAction(input, "pr_comment") && input.body.trim() === "") {
-    throw new Error("comment body must not be blank");
-  }
 }
 
 function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
@@ -293,16 +264,14 @@ function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
     return { args: ["push", ...project, ...(input.force ? ["--force"] : []), "--json"] };
   }
   if (isAction(input, "clone")) {
-    const args = ["clone"];
-    if (input.project) {
-      args.push(input.project);
-    } else {
-      args.push(input.url!);
-    }
-    if (input.alias) {
+    // The schema enforces exactly one selector mode; the CLI enforces the
+    // remaining domain rules (project clones never accept alias/reference).
+    const projectClone = "project" in input;
+    const args = ["clone", projectClone ? input.project : input.url];
+    if (!projectClone && input.alias) {
       args.push("--alias", input.alias);
     }
-    if (input.reference) {
+    if (!projectClone && input.reference) {
       args.push("--reference");
     }
     args.push("--json");

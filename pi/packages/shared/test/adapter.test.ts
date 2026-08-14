@@ -13,7 +13,7 @@ import {
 import { detectPlatform } from "../src/platform.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixtures = join(here, "fixtures");
+const fixtures = join(here, "..", "testdata");
 
 describe("platform detection", () => {
   it("detects the current host as one of the supported triples", () => {

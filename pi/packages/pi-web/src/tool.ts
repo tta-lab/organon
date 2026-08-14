@@ -29,9 +29,10 @@ export const webSchema = Type.Union([
         Type.Boolean({ description: "Return full content without automatic tree mode" }),
       ),
       tree_threshold: Type.Optional(
-        Type.Number({
+        Type.Integer({
           description: "Automatic tree threshold; defaults to " + DEFAULT_TREE_THRESHOLD,
           default: DEFAULT_TREE_THRESHOLD,
+          minimum: 0,
         }),
       ),
     },
@@ -50,9 +51,10 @@ export const webSchema = Type.Union([
       library_id: Type.String({ description: "Context7 library ID returned by docs_resolve" }),
       topic: Type.Optional(Type.String({ description: "Optional documentation topic" })),
       tokens: Type.Optional(
-        Type.Number({
+        Type.Integer({
           description: "Optional token budget; zero uses the backend default",
           default: 0,
+          minimum: 0,
         }),
       ),
     },
@@ -63,15 +65,24 @@ export const webSchema = Type.Union([
       action: Type.Literal("sgraph"),
       query: Type.String({ description: "Sourcegraph search query" }),
       count: Type.Optional(
-        Type.Number({ description: "Optional result count; defaults to 10", default: 10 }),
+        Type.Integer({
+          description: "Optional result count; defaults to 10",
+          default: 10,
+          minimum: 0,
+        }),
       ),
       context: Type.Optional(
-        Type.Number({ description: "Optional context lines; defaults to 10", default: 10 }),
+        Type.Integer({
+          description: "Optional context lines; defaults to 10",
+          default: 10,
+          minimum: 0,
+        }),
       ),
       timeout: Type.Optional(
-        Type.Number({
+        Type.Integer({
           description: "Optional timeout in seconds; zero disables the timeout",
           default: 0,
+          minimum: 0,
         }),
       ),
     },

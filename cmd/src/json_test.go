@@ -188,6 +188,26 @@ func TestReadJSONSymbolIDRejectsDisplayName(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+func TestReadJSONExplicitLimitSetsContinuation(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "window.txt")
+	lines := make([]string, 0, 10)
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, "line "+strings.Repeat("x", i))
+	}
+	require.NoError(t, os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("limit", "3"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+	assert.False(t, out.Truncated)
+	assert.Equal(t, 3, out.OutputLines)
+	assert.Equal(t, 11, out.TotalLines)
+	// The caller-limited window must still advertise the next offset.
+	assert.Equal(t, 4, out.NextOffset)
+}
 func TestReadJSONOffsetLimitPagination(t *testing.T) {
 	lines := make([]string, 0, 12)
 	for i := 1; i <= 12; i++ {

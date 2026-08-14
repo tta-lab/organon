@@ -73,7 +73,7 @@ jobs:
 
       - name: Verify release invariants
         working-directory: pi
-        run: node scripts/release-dry-run.mjs
+        run: node scripts/release-dry-run.mjs "${GITHUB_REF_NAME#v}" ../dist
 
       - name: Publish native packages
         working-directory: pi

@@ -19,7 +19,7 @@ function fixturePath(tool: string): string {
 
 export default function setup(): () => void {
   for (const tool of TOOLS) {
-    const source = join(workspace, "packages", `pi-${tool}`, "test", "fixtures", "bin", tool);
+    const source = join(workspace, "packages", `pi-${tool}`, "testdata", "bin", tool);
     const destDir = join(
       workspace,
       "packages",

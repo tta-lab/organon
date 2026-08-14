@@ -41,6 +41,41 @@ if (fail) {
 }
 
 const cmd = positional.join(" ");
+
+// Mirror the Go CLI's domain validation for body-bearing commands. Read stdin
+// asynchronously so the parent process's write is always observed before the
+// validation runs.
+const stdinBody = await new Promise((resolve) => {
+  let s = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (c) => (s += c));
+  process.stdin.on("end", () => resolve(s));
+  process.stdin.resume();
+});
+if (cmd.startsWith("pr modify") && !flags.get("title") && stdinBody.trim() === "") {
+  process.stderr.write("Error: nothing to update: provide --title and/or pipe body via stdin\n");
+  process.exit(1);
+}
+if (cmd.startsWith("pr comment") && stdinBody.trim() === "") {
+  process.stderr.write("Error: comment body is required on stdin\n");
+  process.exit(1);
+}
+if (
+  cmd.startsWith("pr create") &&
+  (!positional[2] || positional.slice(2).join(" ").trim() === "")
+) {
+  process.stderr.write("Error: PR title must not be blank\n");
+  process.exit(1);
+}
+if (
+  cmd.startsWith("clone") &&
+  flags.get("alias") &&
+  positional[1] &&
+  positional[1] !== "undefined"
+) {
+  process.stderr.write("Error: project clone does not accept --alias or --reference\n");
+  process.exit(1);
+}
 if (cmd.startsWith("auth status")) {
   process.stdout.write(
     JSON.stringify({

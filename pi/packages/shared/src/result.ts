@@ -27,8 +27,3 @@ export function cliError(stderr: string, exitCode: number): Error {
   }
   return new Error(`command exited with code ${exitCode}`);
 }
-
-/** Standard cancellation error matching pi's built-in tool behavior. */
-export function abortError(): Error {
-  return new Error("Operation aborted");
-}

@@ -284,8 +284,12 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 	result.OutputLines = tr.OutputLines
 	result.OutputBytes = tr.OutputBytes
 	result.FirstLineExceedsLimit = tr.FirstLineExceedsLimit
-	if tr.Truncated && !tr.FirstLineExceedsLimit {
-		result.NextOffset = result.StartLine + tr.OutputLines
+	// Continuation applies whenever more lines follow the output: either the
+	// Pi truncation contract cut it short, or a caller-specified limit stopped
+	// early. Without it an agent reading a limited window would not know the
+	// next offset to continue from.
+	if !tr.FirstLineExceedsLimit && result.StartLine+result.OutputLines-1 < result.TotalLines {
+		result.NextOffset = result.StartLine + result.OutputLines
 	}
 	return result, nil
 }

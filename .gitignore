@@ -35,6 +35,9 @@ go.work.sum
 /url
 /web
 
+# GoReleaser release output
+/dist/
+
 # Local Navidrome playlists and maintenance scripts are machine-owned.
 /playlists/navidrome/
 

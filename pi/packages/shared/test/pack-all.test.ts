@@ -84,25 +84,25 @@ describe("all sixteen package manifests", () => {
       {
         tool: "src",
         action: { action: "symbols", path: join(tmp, "smoke.go") },
-        fixture: "packages/pi-src/test/fixtures/bin/src",
+        fixture: "packages/pi-src/testdata/bin/src",
         assert: (details: any) => expect(details.symbols[0]!.name).toBe("Foo"),
       },
       {
         tool: "web",
         action: { action: "search", query: "tree-sitter" },
-        fixture: "packages/pi-web/test/fixtures/bin/web",
+        fixture: "packages/pi-web/testdata/bin/web",
         assert: (details: any) => expect(details.provider).toBe("DuckDuckGo"),
       },
       {
         tool: "project",
         action: { action: "list" },
-        fixture: "packages/pi-project/test/fixtures/bin/project",
+        fixture: "packages/pi-project/testdata/bin/project",
         assert: (details: any) => expect(details.projects.length).toBeGreaterThan(0),
       },
       {
         tool: "og",
         action: { action: "auth_status", project: "ko" },
-        fixture: "packages/pi-og/test/fixtures/bin/og",
+        fixture: "packages/pi-og/testdata/bin/og",
         assert: (details: any) => expect(details.auth.ready).toBe(true),
       },
     ];

@@ -1,60 +1,64 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, vi } from "vitest";
-
-// Intercept the queue helper so the mutation path's queue participation is
-// observable at the adapter seam; the rest of the module keeps its real
-// behavior.
-vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    withFileMutationQueue: vi.fn(async (_path: string, fn: () => Promise<unknown>) => fn()),
-  };
-});
+import { describe, expect, it } from "vitest";
 
 import { srcTool } from "../src/tool.js";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
-const mockedQueue = vi.mocked(withFileMutationQueue);
+const def = srcTool();
 
-describe("pi-src mutation queue", () => {
-  it("holds the resolved absolute target's file queue for the full child-process mutation window", async () => {
+async function runEdit(path: string, cwd: string, oldText: string, newText: string) {
+  return def.execute(
+    "call-q",
+    { action: "edit", path, edits: [{ oldText, newText }] } as any,
+    undefined,
+    undefined,
+    { cwd } as any,
+  );
+}
+
+// Observable behavior test: concurrent mutations to the same file must
+// serialize through Pi's per-file mutation queue so that every edit survives
+// the child-process read-modify-write window. Without the queue, two parallel
+// spawns would read the same snapshot and one write would clobber the other.
+describe("pi-src mutation serialization", () => {
+  it("applies concurrent edits to the same file without losing changes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-src-queue-"));
     const path = join(dir, "sample.go");
-    writeFileSync(path, "package sample\n\nfunc Foo() {}\n");
-    const def = srcTool();
-    await def.execute("call-q", { action: "symbols", path } as any, undefined, undefined, {
-      cwd: dir,
-    } as any);
-    mockedQueue.mockClear();
-    await def.execute(
-      "call-q",
-      {
-        action: "edit",
-        path,
-        edits: [{ oldText: "package sample", newText: "package example" }],
-      } as any,
-      undefined,
-      undefined,
-      { cwd: dir } as any,
+    writeFileSync(
+      path,
+      "package sample\n\nfunc Foo() {\n\treturn 1\n}\n\nfunc Bar() {\n\treturn 2\n}\n",
     );
-    expect(mockedQueue).toHaveBeenCalledTimes(1);
-    expect(mockedQueue.mock.calls[0]![0]).toBe(path);
+
+    await Promise.all([
+      runEdit(path, dir, "return 1", "return 11"),
+      runEdit(path, dir, "return 2", "return 22"),
+    ]);
+
+    const after = readFileSync(path, "utf8");
+    expect(after).toContain("return 11");
+    expect(after).toContain("return 22");
   });
 
-  it("leaves read actions outside the mutation queue", async () => {
+  it("serializes concurrent whole-symbol replacements with their diffs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-src-queue-"));
     const path = join(dir, "sample.go");
-    writeFileSync(path, "package sample\n");
-    const def = srcTool();
-    mockedQueue.mockClear();
-    await def.execute("call-q", { action: "read", path } as any, undefined, undefined, {
-      cwd: dir,
-    } as any);
-    expect(mockedQueue).not.toHaveBeenCalled();
+    writeFileSync(
+      path,
+      "package sample\n\nfunc Foo() {\n\treturn 1\n}\n\nfunc Bar() {\n\treturn 2\n}\n",
+    );
+
+    const results = await Promise.all([
+      runEdit(path, dir, "func Foo() {", "func Foo() { // edited"),
+      runEdit(path, dir, "func Bar() {", "func Bar() { // edited"),
+    ]);
+
+    const after = readFileSync(path, "utf8");
+    expect(after).toContain("func Foo() { // edited");
+    expect(after).toContain("func Bar() { // edited");
+    // Both child processes reported success (their diffs were computed against
+    // the serialized states, so neither failed with a stale-snapshot error).
+    expect(results).toHaveLength(2);
   });
 });

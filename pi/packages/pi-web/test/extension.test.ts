@@ -36,6 +36,14 @@ describe("pi-web extension", () => {
     expect(Value.Check(webSchema, { action: "docs_resolve", query: "x" })).toBe(true);
     expect(Value.Check(webSchema, { action: "docs_fetch", library_id: "/x" })).toBe(true);
     expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x" })).toBe(true);
+    expect(
+      Value.Check(webSchema, { action: "fetch", url: "https://example.com", tree_threshold: 1.5 }),
+    ).toBe(false);
+    expect(Value.Check(webSchema, { action: "docs_fetch", library_id: "/x", tokens: 1.5 })).toBe(
+      false,
+    );
+    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", count: 2.5 })).toBe(false);
+    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", timeout: -1 })).toBe(false);
     expect(Value.Check(webSchema, { action: "search" })).toBe(false);
     expect(Value.Check(webSchema, { action: "fetch", url: "https://example.com", bogus: 1 })).toBe(
       false,

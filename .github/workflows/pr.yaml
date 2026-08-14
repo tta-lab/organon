@@ -131,4 +131,7 @@ jobs:
             test -x "$f" || { echo "$f is not executable"; exit 1; }
           done
           echo "all native binaries present and executable"
-          file packages/native/pi-*/bin/* | head -20
+
+      - name: Verify tag-to-artifact release invariants
+        working-directory: pi
+        run: node scripts/test-release-invariants.mjs ../dist
