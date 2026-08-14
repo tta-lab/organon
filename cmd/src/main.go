@@ -106,7 +106,30 @@ func newRootCmd() *cobra.Command {
 	editCmd.Flags().String("after-file", "",
 		"Read AFTER content from a file instead of stdin (use with --before-file)")
 
-	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, newMCPCmd())
+	symbolsCmd := &cobra.Command{
+		Use:   "symbols <file>",
+		Short: "Show the typed symbol outline (JSON with --json)",
+		Long:  helpSymbols,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSymbolsJSON,
+	}
+	symbolsCmd.SilenceUsage = true
+	symbolsCmd.Flags().Bool("json", false, "Output the typed outline as JSON")
+
+	readCmd := &cobra.Command{
+		Use:   "read <file>",
+		Short: "Read a file, symbol, or line range (JSON with --json)",
+		Long:  helpRead,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runReadJSON,
+	}
+	readCmd.SilenceUsage = true
+	readCmd.Flags().StringP("symbol-id", "s", "", "Symbol or Markdown section ID to read")
+	readCmd.Flags().Int("offset", 0, "1-indexed line offset within the selected content")
+	readCmd.Flags().Int("limit", 0, "Maximum number of lines to read (0 = all)")
+	readCmd.Flags().Bool("json", false, "Output the machine-readable read result as JSON")
+
+	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, symbolsCmd, readCmd, newMCPCmd())
 	return root
 }
 

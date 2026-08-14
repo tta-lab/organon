@@ -92,22 +92,25 @@ remote = "https://github.com/tta-lab/lenos.git"
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var projects []map[string]any
-	if err := json.Unmarshal([]byte(stdout), &projects); err != nil {
+	var output struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\noutput: %q", err, stdout)
 	}
-	if len(projects) != 1 {
-		t.Fatalf("len(projects) = %d, want 1", len(projects))
+	if len(output.Projects) != 1 {
+		t.Fatalf("len(projects) = %d, want 1", len(output.Projects))
 	}
-	if projects[0]["alias"] != "len" || projects[0]["path"] != "/home/neil/code/projects/tta-lab/lenos" {
-		t.Fatalf("unexpected JSON project: %v", projects[0])
+	projects := output.Projects[0]
+	if projects["alias"] != "len" || projects["path"] != "/home/neil/code/projects/tta-lab/lenos" {
+		t.Fatalf("unexpected JSON project: %v", projects)
 	}
-	if archived, ok := projects[0]["archived"]; !ok || archived != false {
-		t.Fatalf("project archived field = %#v, want required false", projects[0]["archived"])
+	if archived, ok := projects["archived"]; !ok || archived != false {
+		t.Fatalf("project archived field = %#v, want required false", projects["archived"])
 	}
-	if len(projects[0]) != 5 || projects[0]["name"] != "Lenos CLI runtime" ||
-		projects[0]["remote"] != "https://github.com/tta-lab/lenos.git" {
-		t.Fatalf("project JSON is not the exact five-field DTO: %#v", projects[0])
+	if len(projects) != 5 || projects["name"] != "Lenos CLI runtime" ||
+		projects["remote"] != "https://github.com/tta-lab/lenos.git" {
+		t.Fatalf("project JSON is not the exact five-field DTO: %#v", projects)
 	}
 }
 
@@ -127,12 +130,14 @@ remote = "https://example.com/owner/ttal.git"
 	if err != nil {
 		t.Fatalf("project list: %v", err)
 	}
-	var projects []map[string]any
-	if err := json.Unmarshal([]byte(stdout), &projects); err != nil {
+	var output struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
 		t.Fatalf("decode project list: %v", err)
 	}
-	if len(projects) != 2 || projects[1]["alias"] != "ttal" || projects[1]["archived"] != true {
-		t.Fatalf("projects = %#v, want archived ttal", projects)
+	if len(output.Projects) != 2 || output.Projects[1]["alias"] != "ttal" || output.Projects[1]["archived"] != true {
+		t.Fatalf("projects = %#v, want archived ttal", output.Projects)
 	}
 
 	if _, err := runProject(t, []string{"list", "tta-lab"}); err == nil {
@@ -152,12 +157,14 @@ remote = "https://example.com/owner/ttal.git"
 	if err != nil {
 		t.Fatalf("project get: %v", err)
 	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+	var output struct {
+		Project map[string]any `json:"project"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
 		t.Fatalf("decode project get: %v", err)
 	}
-	if got["alias"] != "ttal" || got["archived"] != true {
-		t.Fatalf("project get = %#v", got)
+	if output.Project["alias"] != "ttal" || output.Project["archived"] != true {
+		t.Fatalf("project get = %#v", output.Project)
 	}
 }
 
@@ -214,10 +221,13 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 			args: []string{"get", "tta-lab/demo", "--json"},
 			want: func(t *testing.T, stdout string) {
 				t.Helper()
-				var got map[string]any
-				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+				var output struct {
+					Project map[string]any `json:"project"`
+				}
+				if err := json.Unmarshal([]byte(stdout), &output); err != nil {
 					t.Fatalf("decode get output: %v", err)
 				}
+				got := output.Project
 				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
 					t.Fatalf("get output = %#v", got)
 				}

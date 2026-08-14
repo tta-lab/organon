@@ -53,7 +53,7 @@ func newListCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(entries)
+				return json.NewEncoder(os.Stdout).Encode(projectListOutput{Projects: entries})
 			}
 
 			if len(entries) == 0 {
@@ -101,7 +101,7 @@ func newGetCmd() *cobra.Command {
 				e, err := store.Get(alias)
 				if err == nil {
 					if jsonOut {
-						return json.NewEncoder(os.Stdout).Encode(e)
+						return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: e})
 					}
 					fmt.Printf("%s\n", e.Path)
 					return nil
@@ -117,7 +117,7 @@ func newGetCmd() *cobra.Command {
 				return repoErr
 			}
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(project.Entry{Alias: alias, Path: repoPath})
+				return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: project.Entry{Alias: alias, Path: repoPath}})
 			}
 			fmt.Println(repoPath)
 			return nil

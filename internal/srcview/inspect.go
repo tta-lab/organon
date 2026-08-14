@@ -1,6 +1,7 @@
 package srcview
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -141,6 +142,44 @@ func (i *Inspector) Read(symbolID string, limit int) (ReadResult, error) {
 		}, nil
 	}
 	return ReadResult{}, fmt.Errorf("symbol %q not found", symbolID)
+}
+
+// SymbolRead is a line-oriented read of one symbol or Markdown section.
+type SymbolRead struct {
+	Content    string
+	StartLine  int // 1-indexed line of the symbol/section start
+	TotalLines int
+}
+
+// ReadSymbolLines returns the content of a targetable symbol or Markdown
+// section together with its 1-indexed start line and total line count, using
+// the same content boundaries as ReadContent.
+func (i *Inspector) ReadSymbolLines(symbolID string) (SymbolRead, error) {
+	if IsMarkdown(i.filename) {
+		start, end, err := markdown.SectionBounds(i.source, symbolID)
+		if err != nil {
+			return SymbolRead{}, err
+		}
+		content := string(i.source[start:end])
+		return SymbolRead{
+			Content:    content,
+			StartLine:  lineNumberAt(i.source, start),
+			TotalLines: bytes.Count([]byte(content), []byte("\n")) + 1,
+		}, nil
+	}
+	result, err := i.Read(symbolID, 0)
+	if err != nil {
+		return SymbolRead{}, err
+	}
+	return SymbolRead{
+		Content:    result.Content,
+		StartLine:  lineNumberAt(i.source, result.Start),
+		TotalLines: bytes.Count([]byte(result.Content), []byte("\n")) + 1,
+	}, nil
+}
+
+func lineNumberAt(source []byte, offset int) int {
+	return bytes.Count(source[:offset], []byte("\n")) + 1
 }
 
 // ReadContent preserves the established CLI representation of a full symbol or section.

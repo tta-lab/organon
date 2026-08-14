@@ -1,0 +1,271 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tta-lab/organon/internal/srcview"
+)
+
+func newSymbolsCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "symbols", Args: cobra.ExactArgs(1), RunE: runSymbolsJSON}
+	cmd.Flags().Bool("json", false, "")
+	return cmd
+}
+
+func newReadCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "read", Args: cobra.ExactArgs(1), RunE: runReadJSON}
+	cmd.Flags().String("symbol-id", "", "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().Int("limit", 0, "")
+	cmd.Flags().Bool("json", false, "")
+	return cmd
+}
+
+func writeGoFile(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	f := filepath.Join(dir, "sample.go")
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o644))
+	return f
+}
+
+func decodeOutline(t *testing.T, stdout string) symbolOutlineJSON {
+	t.Helper()
+	var out symbolOutlineJSON
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	return out
+}
+
+func decodeRead(t *testing.T, stdout string) readJSON {
+	t.Helper()
+	var out readJSON
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	return out
+}
+
+func TestSymbolsJSONGoOutline(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\n// Foo does work.\nfunc Foo() {}\n\ntype Bar struct {\n\tBaz int\n}\n")
+	out := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	assert.Equal(t, "go", out.Language)
+	assert.Equal(t, len([]byte("package sample\n\n// Foo does work.\nfunc Foo() {}\n\ntype Bar struct {\n\tBaz int\n}\n")), out.TotalBytes)
+	require.NotEmpty(t, out.Symbols)
+	ids := map[string]bool{}
+	for _, s := range out.Symbols {
+		require.NotEmpty(t, s.ID, "symbol %q has empty ID", s.Name)
+		require.False(t, ids[s.ID], "duplicate symbol ID %q", s.ID)
+		ids[s.ID] = true
+		assert.True(t, s.Targetable)
+		assert.GreaterOrEqual(t, s.EndByte, s.StartByte)
+		assert.GreaterOrEqual(t, s.EndLine, s.StartLine)
+	}
+	var foo *srcview.Symbol
+	for i := range out.Symbols {
+		if out.Symbols[i].Name == "Foo" && out.Symbols[i].Kind == "function" {
+			foo = &out.Symbols[i]
+		}
+	}
+	require.NotNil(t, foo, "Foo function symbol missing")
+	assert.True(t, foo.HasDoc)
+}
+
+func TestSymbolsJSONMarkdownSections(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "doc.md")
+	content := []byte("# Title\n\n## Section One\n\nBody.\n\n### Nested\n\nMore.\n")
+	require.NoError(t, os.WriteFile(f, content, 0o644))
+	out := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	assert.Equal(t, "markdown", out.Language)
+	assert.Equal(t, "Title", out.Title)
+	require.NotEmpty(t, out.Symbols)
+	nonTargetable := 0
+	for _, s := range out.Symbols {
+		assert.Equal(t, "section", s.Kind)
+		if !s.Targetable {
+			nonTargetable++
+		}
+	}
+	// The H1 title heading is not targetable; every other section is.
+	assert.Equal(t, 1, nonTargetable)
+	for _, s := range out.Symbols {
+		if s.Level > 1 {
+			assert.True(t, s.Targetable, "section %q must be targetable", s.Name)
+		}
+	}
+}
+
+func TestSymbolsJSONRejectsNoStructureFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "notes.txt")
+	require.NoError(t, os.WriteFile(f, []byte("plain text\n"), 0o644))
+	err := runSymbolsJSON(newSymbolsCmd(), []string{f})
+	require.Error(t, err)
+}
+
+func TestReadJSONWholeFile(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.Equal(t, f, out.Path)
+	assert.Equal(t, "package sample\n\nfunc Foo() {}\n", out.Content)
+	assert.Equal(t, 1, out.StartLine)
+	assert.Equal(t, 4, out.TotalLines)
+	assert.False(t, out.Truncated)
+}
+
+func TestReadJSONPlainTextWithoutStructure(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "plain.txt")
+	require.NoError(t, os.WriteFile(f, []byte("line one\nline two\n"), 0o644))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.Equal(t, "line one\nline two\n", out.Content)
+	assert.Equal(t, 3, out.TotalLines)
+}
+
+func TestReadJSONSymbolID(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\n// Foo docs.\nfunc Foo() {\n\t// body\n}\n\nfunc Bar() {}\n")
+	outline := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	var fooID string
+	for _, s := range outline.Symbols {
+		if s.Name == "Foo" {
+			fooID = s.ID
+		}
+	}
+	require.NotEmpty(t, fooID)
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", fooID))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+	assert.Equal(t, fooID, out.SymbolID)
+	assert.Contains(t, out.Content, "Foo docs")
+	assert.Equal(t, 3, out.StartLine) // doc comment starts on line 3
+	assert.False(t, out.Truncated)
+}
+
+func TestReadJSONSymbolIDRejectsDisplayName(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", "Foo"))
+	err := runReadJSON(cmd, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestReadJSONOffsetLimitPagination(t *testing.T) {
+	lines := make([]string, 0, 12)
+	for i := 1; i <= 12; i++ {
+		lines = append(lines, "line "+strings.Repeat("x", i))
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "paged.txt")
+	require.NoError(t, os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("offset", "3"))
+	require.NoError(t, cmd.Flags().Set("limit", "2"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+	assert.Equal(t, "line xxx\nline xxxx", out.Content)
+	assert.Equal(t, 3, out.StartLine)
+	assert.Equal(t, 13, out.TotalLines)
+	assert.False(t, out.Truncated)
+}
+
+func TestReadJSONOffsetBeyondEnd(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "short.txt")
+	require.NoError(t, os.WriteFile(f, []byte("one\n"), 0o644))
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("offset", "99"))
+	err := runReadJSON(cmd, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "beyond end")
+}
+
+func TestReadJSONSymbolRelativeOffsetLimit(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {\n\t// a\n\t// b\n\t// c\n\t// d\n}\n")
+	outline := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	var fooID string
+	for _, s := range outline.Symbols {
+		if s.Name == "Foo" {
+			fooID = s.ID
+		}
+	}
+	require.NotEmpty(t, fooID)
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", fooID))
+	require.NoError(t, cmd.Flags().Set("offset", "2"))
+	require.NoError(t, cmd.Flags().Set("limit", "2"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+	assert.Equal(t, "\t// a\n\t// b", out.Content)
+	assert.Equal(t, 4, out.StartLine) // file line of symbol line 2
+}
+
+func TestReadJSONLineTruncationContinuation(t *testing.T) {
+	lines := make([]string, 0, 2100)
+	for i := 0; i < 2100; i++ {
+		lines = append(lines, "line")
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "big.txt")
+	require.NoError(t, os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.True(t, out.Truncated)
+	assert.Equal(t, "lines", out.TruncatedBy)
+	assert.Equal(t, 2000, out.OutputLines)
+	assert.Equal(t, 2001, out.NextOffset)
+	assert.Equal(t, 2101, out.TotalLines)
+}
+
+func TestReadJSONFirstLineExceedsLimit(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "huge-line.txt")
+	require.NoError(t, os.WriteFile(f, []byte(strings.Repeat("x", 60*1024)+"\n"), 0o644))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.True(t, out.FirstLineExceedsLimit)
+	assert.True(t, out.Truncated)
+	assert.Equal(t, "", out.Content)
+}
+
+func TestReadJSONMissingFile(t *testing.T) {
+	err := runReadJSON(newReadCmd(), []string{"/nonexistent/file.go"})
+	require.Error(t, err)
+}
+
+func TestReadJSONCRLFAndBOM(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "crlf.go")
+	require.NoError(t, os.WriteFile(f, append([]byte("\xef\xbb\xbf"), []byte("package p\r\n\r\nfunc F() {}\r\n")...), 0o644))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+	assert.Equal(t, "\xef\xbb\xbfpackage p\r\n\r\nfunc F() {}\r\n", out.Content)
+	assert.Equal(t, 4, out.TotalLines)
+}
+

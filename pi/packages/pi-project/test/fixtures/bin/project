@@ -1,0 +1,56 @@
+#!/usr/bin/env node
+// Test-only fake project CLI: mirrors the documented JSON contract of the
+// real Go binary (list/get with --json, diagnostics on stderr).
+import { readFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+if (!args.includes("--json")) {
+  process.stderr.write("Error: --json is required by the extension contract\n");
+  process.exit(2);
+}
+const cmd = args[0];
+const rest = args.slice(1).filter((a) => a !== "--json");
+const projects = [
+  {
+    alias: "len",
+    name: "Lenos CLI runtime",
+    path: "/home/neil/code/projects/tta-lab/lenos",
+    remote: "https://github.com/tta-lab/lenos.git",
+    archived: false,
+  },
+  {
+    alias: "orientation",
+    name: "Orientation",
+    path: "/home/neil/code/projects/tta-lab/orientation",
+    remote: "https://github.com/tta-lab/orientation.git",
+    archived: false,
+  },
+  {
+    alias: "ttal",
+    name: "Archived TTA",
+    path: "/home/neil/code/projects/tta-lab/ttal",
+    remote: "https://github.com/tta-lab/ttal.git",
+    archived: true,
+  },
+];
+switch (cmd) {
+  case "list": {
+    const includeArchived = args.includes("--include-archived");
+    const visible = includeArchived ? projects : projects.filter((p) => !p.archived);
+    process.stdout.write(JSON.stringify({ projects: visible }) + "\n");
+    break;
+  }
+  case "get": {
+    const alias = rest[0];
+    const found = projects.find((p) => p.alias === alias);
+    if (!found) {
+      process.stderr.write(`Error: project \"${alias}\" not found\n`);
+      process.exit(1);
+    }
+    process.stdout.write(JSON.stringify({ project: found }) + "\n");
+    break;
+  }
+  default:
+    process.stderr.write(`Error: unknown command ${cmd}\n`);
+    process.exit(2);
+}
