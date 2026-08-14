@@ -63,6 +63,14 @@ jobs:
         working-directory: pi
         run: node scripts/stage-natives.mjs ../dist
 
+      - name: Verify staged natives
+        working-directory: pi
+        run: |
+          for f in packages/native/pi-*/bin/*; do
+            test -x "$f" || { echo "$f is not executable"; exit 1; }
+          done
+          echo "all native binaries present and executable"
+
       - name: Verify release invariants
         working-directory: pi
         run: node scripts/release-dry-run.mjs

@@ -17,6 +17,13 @@ lets you navigate and modify them precisely without guessing line numbers.
   2. src path/to/file.go -s Ab              # read one symbol by ID (--symbol-id also works)
   3. src replace path/to/file.go -s Ab < new.go  # replace it
 
+The `symbols` and `read` subcommands expose the machine-readable outline and
+reads (`--json`), used by the Pi src extension:
+
+  src symbols path/to/file.go --json        # typed outline with opaque IDs
+  src read path/to/file.go --symbol-id Ab --json
+  src read path/to/file.go --offset 100 --limit 50 --json
+
 
 ## Supported languages
 Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and

@@ -25,6 +25,20 @@ One edit per invocation. Use multiple calls for multiple replacements.
 Limits the search to one symbol/section, eliminating ambiguity when the
 same text appears in multiple places within a file.
 
+## Batch editing (Pi contract)
+
+`src edit <file> --edits-json --json` reads one JSON envelope from stdin and
+applies every replacement atomically against the original file:
+
+  cat <<'EOF' | src edit path/to/file.go --edits-json --json
+  {"edits":[{"oldText":"one","newText":"1"},{"oldText":"two","newText":"2"}]}
+  EOF
+
+Every oldText must match exactly one unique region of the original file;
+overlapping, nested, empty, duplicate, missing, and no-op edits are rejected
+before any write. BOM and line endings are preserved, and the batch path does
+not impose the single-edit size cap.
+
 ## Matching strategy (4 tolerant passes)
   1. Exact byte match
   2. Trailing whitespace trimmed per line
