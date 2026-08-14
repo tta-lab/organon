@@ -3,10 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { stageNativeBinary } from "../../shared/test/stage-native.js";
 import { projectSchema, projectTool } from "../src/tool.js";
-
-stageNativeBinary("project", fileURLToPath(new URL("./fixtures/bin/project", import.meta.url)));
 
 type ToolDef = ReturnType<typeof projectTool>;
 

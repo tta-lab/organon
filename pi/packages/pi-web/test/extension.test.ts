@@ -3,10 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { stageNativeBinary } from "../../shared/test/stage-native.js";
 import { truncateForModel, webSchema, webTool } from "../src/tool.js";
-
-stageNativeBinary("web", fileURLToPath(new URL("./fixtures/bin/web", import.meta.url)));
 
 const def = webTool();
 const ctx = { cwd: "/tmp", model: undefined } as any;

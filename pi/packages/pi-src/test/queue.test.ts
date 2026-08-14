@@ -5,10 +5,6 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { stageNativeBinary } from "../../shared/test/stage-native.js";
-
-stageNativeBinary("src", fileURLToPath(new URL("./fixtures/bin/src", import.meta.url)));
-
 // Intercept the queue helper so the mutation path's queue participation is
 // observable at the adapter seam; the rest of the module keeps its real
 // behavior.

@@ -6,12 +6,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { stageNativeBinary } from "../../shared/test/stage-native.js";
 import { renderReadText, srcSchema, srcTool } from "../src/tool.js";
 import { createTakeoverHandlers, applyReadTakeover, restoreReadTakeover } from "../src/takeover.js";
 import { resolveSourcePath } from "../src/paths.js";
-
-stageNativeBinary("src", fileURLToPath(new URL("./fixtures/bin/src", import.meta.url)));
 
 const def = srcTool();
 

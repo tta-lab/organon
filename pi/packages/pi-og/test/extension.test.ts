@@ -3,10 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { stageNativeBinary } from "../../shared/test/stage-native.js";
 import { ogSchema, ogTool } from "../src/tool.js";
-
-stageNativeBinary("og", fileURLToPath(new URL("./fixtures/bin/og", import.meta.url)));
 
 const def = ogTool();
 const ctx = { cwd: "/tmp" } as any;

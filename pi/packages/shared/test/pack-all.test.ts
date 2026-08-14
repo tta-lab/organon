@@ -109,15 +109,21 @@ describe("all sixteen package manifests", () => {
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
     for (const { tool, action, fixture, assert } of smoke) {
-      // Stage the fake binary into the native package dir so the packed native
-      // tarball itself carries a runnable binary (gitignored bin/).
+      // Pack the native package from a throwaway copy so tests never write
+      // fixtures into the workspace native packages (a leftover fixture would
+      // be picked up by local debugging as the tool binary).
       const hostSuffix = `${osName}-${archName}`;
+      const nativePkgName = `@tta-lab/pi-${tool}-${hostSuffix}`;
       const nativePkgDir = join(workspace, "packages", "native", `pi-${tool}-${hostSuffix}`);
-      mkdirSync(join(nativePkgDir, "bin"), { recursive: true });
-      copyFileSync(join(workspace, fixture), join(nativePkgDir, "bin", tool));
-      chmodSync(join(nativePkgDir, "bin", tool), 0o755);
+      const manifest = JSON.parse(readFileSync(join(nativePkgDir, "package.json"), "utf8"));
+      const tempNative = join(tmp, `native-${tool}-${hostSuffix}`);
+      rmSync(tempNative, { recursive: true, force: true });
+      mkdirSync(join(tempNative, "bin"), { recursive: true });
+      writeFileSync(join(tempNative, "package.json"), JSON.stringify(manifest, null, 2));
+      copyFileSync(join(workspace, fixture), join(tempNative, "bin", tool));
+      chmodSync(join(tempNative, "bin", tool), 0o755);
 
-      const nativeTgz = pack(nativePkgDir, `@tta-lab/pi-${tool}-${hostSuffix}`);
+      const nativeTgz = pack(tempNative, nativePkgName);
       const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
 
       const installRoot = join(tmp, `install-${tool}`);

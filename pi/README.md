@@ -101,6 +101,33 @@ node scripts/test-release-invariants.mjs
 
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to all sixteen
 manifests, `scripts/stage-natives.mjs` copies the cross-compiled Go binaries
-into the native packages, and native packages publish before their main
-packages. The release workflow runs `scripts/release-dry-run.mjs` to verify the
-ordering and exact versions before publishing.
+into the native packages (failing on a missing or wrong-platform artifact),
+and native packages publish before their main packages. The release workflow
+runs `scripts/release-dry-run.mjs` to verify the ordering and exact versions
+before publishing.
+
+### Local debugging
+
+An extension resolves only its host platform's native package binary (for
+example `@tta-lab/pi-src-darwin-arm64/bin/src`); it never reads `PATH` or
+`$GOBIN`. To debug against a real Go binary, build the current-platform binary
+into the matching native package, then load the extension directly or install
+the package locally:
+
+```bash
+pnpm --dir pi install
+pnpm --dir pi run build
+
+CGO_ENABLED=0 go build -o pi/packages/native/pi-src-darwin-arm64/bin/src ./cmd/src
+file pi/packages/native/pi-src-darwin-arm64/bin/src   # Mach-O 64-bit arm64
+
+pi -e ./pi/packages/pi-src/dist/index.js
+# or
+pi install /Users/neil/code/guion-opensource/organon/pi/packages/pi-src
+```
+
+The repository test suite stages throwaway fixture binaries into the native
+packages only during the run (vitest global setup/teardown) and removes them
+afterwards, so they are never picked up by a local session. Replace the
+host-platform binary name (`darwin-arm64`, `linux-x64`, `linux-arm64`) and the
+tool as needed.
