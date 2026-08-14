@@ -1,0 +1,39 @@
+{
+  "name": "@tta-lab/pi-og",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi extension for guarded Organon Git and forge operations: clone, push, pull, PR lifecycle, and CI status through the og daemon without MCP.",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "optionalDependencies": {
+    "@tta-lab/pi-og-darwin-arm64": "workspace:*",
+    "@tta-lab/pi-og-linux-x64": "workspace:*",
+    "@tta-lab/pi-og-linux-arm64": "workspace:*"
+  },
+  "devDependencies": {
+    "@tta-lab/pi-shared": "workspace:*",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@types/node": "24.0.0",
+    "typebox": "1.3.7"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

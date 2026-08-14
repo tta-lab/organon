@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -11,44 +9,58 @@ import (
 )
 
 func runAuthStatus(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	resp, err := daemonCall("/auth/status", og.Request{WorkDir: workDir})
 	if err != nil {
 		return err
+	}
+	if err := og.ValidateAuthResponse(resp, alias); err != nil {
+		return err
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogAuthJSON{Project: alias, Auth: *resp.Auth})
 	}
 	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runPRDaemonWithOutput(cmd *cobra.Command, path string, req og.Request) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	req.WorkDir = workDir
 	resp, err := daemonCall(path, req)
 	if err != nil {
 		return err
 	}
-	if resp.PR != nil {
-		return printPR(cmd, resp.PR)
+	if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+		return err
 	}
-	printDaemonResponse(cmd, resp)
-	return nil
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
+	}
+	return printPR(cmd, resp.PR)
 }
 
 func runLinesDaemon(cmd *cobra.Command, path string, req og.Request) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	req.WorkDir = workDir
 	resp, err := daemonCall(path, req)
 	if err != nil {
 		return err
+	}
+	if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+		return err
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogPRLinesJSON{Project: alias, PR: *resp.PR, Lines: resp.Lines})
 	}
 	if len(resp.Lines) == 0 {
 		printDaemonResponse(cmd, resp)
@@ -79,8 +91,7 @@ func printDaemonResponse(cmd *cobra.Command, resp og.Response) {
 }
 
 func printPR(cmd *cobra.Command, pr *og.PullRequest) error {
-	jsonOut, _ := cmd.Flags().GetBool("json")
-	if jsonOut {
+	if jsonFlag(cmd) {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(pr)

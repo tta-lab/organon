@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +56,7 @@ func newRootCmd() *cobra.Command {
 	}
 	replaceCmd.SilenceUsage = true
 	replaceCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID to replace")
+	replaceCmd.Flags().Bool("json", false, "Output the machine-readable result as JSON")
 	_ = replaceCmd.MarkFlagRequired("symbol-id")
 
 	insertCmd := &cobra.Command{
@@ -67,6 +69,7 @@ func newRootCmd() *cobra.Command {
 	insertCmd.SilenceUsage = true
 	insertCmd.Flags().String("after", "", "Insert after symbol ID")
 	insertCmd.Flags().String("before", "", "Insert before symbol ID")
+	insertCmd.Flags().Bool("json", false, "Output the machine-readable result as JSON")
 
 	deleteCmd := &cobra.Command{
 		Use:   "delete <file> --symbol-id <id>",
@@ -77,6 +80,7 @@ func newRootCmd() *cobra.Command {
 	}
 	deleteCmd.SilenceUsage = true
 	deleteCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID to delete")
+	deleteCmd.Flags().Bool("json", false, "Output the machine-readable result as JSON")
 	_ = deleteCmd.MarkFlagRequired("symbol-id")
 
 	commentCmd := &cobra.Command{
@@ -89,6 +93,7 @@ func newRootCmd() *cobra.Command {
 	commentCmd.SilenceUsage = true
 	commentCmd.Flags().StringP("symbol-id", "s", "", "Symbol ID")
 	commentCmd.Flags().Bool("read", false, "Read existing doc comment instead of writing")
+	commentCmd.Flags().Bool("json", false, "Output the machine-readable result as JSON")
 	_ = commentCmd.MarkFlagRequired("symbol-id")
 
 	editCmd := &cobra.Command{
@@ -105,8 +110,34 @@ func newRootCmd() *cobra.Command {
 		"Read BEFORE content from a file instead of stdin (use with --after-file)")
 	editCmd.Flags().String("after-file", "",
 		"Read AFTER content from a file instead of stdin (use with --before-file)")
+	editCmd.Flags().Bool("edits-json", false,
+		"Read a JSON edits envelope from stdin: {\"edits\":[{\"oldText\":...,\"newText\":...}]}")
+	editCmd.Flags().Bool("json", false, "Output the machine-readable result as JSON")
 
-	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, newMCPCmd())
+	symbolsCmd := &cobra.Command{
+		Use:   "symbols <file>",
+		Short: "Show the typed symbol outline (JSON with --json)",
+		Long:  helpSymbols,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSymbols,
+	}
+	symbolsCmd.SilenceUsage = true
+	symbolsCmd.Flags().Bool("json", false, "Output the typed outline as JSON")
+
+	readCmd := &cobra.Command{
+		Use:   "read <file>",
+		Short: "Read a file, symbol, or line range (JSON with --json)",
+		Long:  helpRead,
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRead,
+	}
+	readCmd.SilenceUsage = true
+	readCmd.Flags().StringP("symbol-id", "s", "", "Symbol or Markdown section ID to read")
+	readCmd.Flags().Int("offset", 0, "1-indexed line offset within the selected content")
+	readCmd.Flags().Int("limit", 0, "Maximum number of lines to read (0 = all)")
+	readCmd.Flags().Bool("json", false, "Output the machine-readable read result as JSON")
+
+	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, symbolsCmd, readCmd)
 	return root
 }
 
@@ -149,6 +180,9 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 	filename := args[0]
 	source, err := os.ReadFile(filename)
 	if err != nil {
+		return err
+	}
+	if err := validateTextSource(filename, source); err != nil {
 		return err
 	}
 
@@ -206,6 +240,7 @@ func runReplace(cmd *cobra.Command, args []string) error {
 
 	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	depth := getDepth(cmd)
+	jsonOut, _ := cmd.Flags().GetBool("json")
 
 	newContent, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -216,6 +251,9 @@ func runReplace(cmd *cobra.Command, args []string) error {
 		result, err := markdown.ReplaceSection(source, symbolID, newContent)
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return writeMutationJSON(filename, "replace", symbolID, source, result)
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
@@ -234,6 +272,9 @@ func runReplace(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if jsonOut {
+		return writeMutationJSON(filename, "replace", symbolID, source, result)
+	}
 
 	return writeAndShow(filename, source, result, depth)
 }
@@ -248,6 +289,7 @@ func runInsert(cmd *cobra.Command, args []string) error {
 	afterID, _ := cmd.Flags().GetString("after")
 	beforeID, _ := cmd.Flags().GetString("before")
 	depth := getDepth(cmd)
+	jsonOut, _ := cmd.Flags().GetBool("json")
 
 	if afterID == "" && beforeID == "" {
 		return fmt.Errorf("either --after or --before is required")
@@ -267,6 +309,9 @@ func runInsert(cmd *cobra.Command, args []string) error {
 		}
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return writeMutationJSON(filename, "insert", targetID(afterID, beforeID), source, result)
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
@@ -290,6 +335,9 @@ func runInsert(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if jsonOut {
+		return writeMutationJSON(filename, "insert", targetID(afterID, beforeID), source, result)
+	}
 
 	return writeAndShow(filename, source, result, depth)
 }
@@ -303,11 +351,15 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 	symbolID, _ := cmd.Flags().GetString("symbol-id")
 	depth := getDepth(cmd)
+	jsonOut, _ := cmd.Flags().GetBool("json")
 
 	if isMarkdown(filename) {
 		result, err := markdown.DeleteSection(source, symbolID)
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return writeMutationJSON(filename, "delete", symbolID, source, result)
 		}
 		return writeAndShow(filename, source, result, depth)
 	}
@@ -325,6 +377,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	result, err := srcop.Delete(filename, source, symbolID, depth)
 	if err != nil {
 		return err
+	}
+	if jsonOut {
+		return writeMutationJSON(filename, "delete", symbolID, source, result)
 	}
 
 	return writeAndShow(filename, source, result, depth)
@@ -357,10 +412,15 @@ func runComment(cmd *cobra.Command, args []string) error {
 			filename, shellQuote(filename))
 	}
 
+	jsonOut, _ := cmd.Flags().GetBool("json")
+
 	if readOnly {
 		comment, err := srcop.ReadComment(filename, source, symbolID, depth)
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return printJSON(commentJSON{Path: filename, SymbolID: symbolID, Comment: comment})
 		}
 		fmt.Print(comment)
 		return nil
@@ -374,6 +434,9 @@ func runComment(cmd *cobra.Command, args []string) error {
 	result, err := srcop.WriteComment(filename, source, symbolID, newComment, depth)
 	if err != nil {
 		return err
+	}
+	if jsonOut {
+		return writeMutationJSON(filename, "comment", symbolID, source, result)
 	}
 
 	return writeAndShow(filename, source, result, depth)
@@ -424,6 +487,11 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	editsJSON, _ := cmd.Flags().GetBool("edits-json")
+	if editsJSON {
+		return runEditBatch(filename, source)
+	}
+
 	beforeFile, err := cmd.Flags().GetString("before-file")
 	if err != nil {
 		return fmt.Errorf("internal: --before-file flag error: %w", err)
@@ -443,8 +511,13 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read stdin: %w", err)
 	}
 
+	jsonOut, _ := cmd.Flags().GetBool("json")
+
 	sectionID, _ := cmd.Flags().GetString("symbol-id")
 	if sectionID != "" {
+		if jsonOut {
+			return runEditScopedJSON(cmd, filename, source, stdinContent, sectionID)
+		}
 		return runEditScoped(cmd, filename, source, stdinContent, sectionID)
 	}
 
@@ -453,9 +526,72 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if jsonOut {
+		return writeMutationJSON(filename, "edit", "", source, result.Content)
+	}
 
 	printDisclosure(os.Stderr, result)
 	return writeAndShow(filename, source, result.Content, depth)
+}
+
+// runEditBatch applies the public Pi batch edit contract: stdin carries a JSON
+// envelope {"edits":[{"oldText":...,"newText":...}]} and stdout carries one
+// machine-readable result. All replacements are validated against the original
+// file before any write.
+func runEditBatch(filename string, source []byte) error {
+	stdinContent, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+	var envelope struct {
+		Edits []struct {
+			OldText string `json:"oldText"`
+			NewText string `json:"newText"`
+		} `json:"edits"`
+	}
+	if err := json.Unmarshal(stdinContent, &envelope); err != nil {
+		return fmt.Errorf("invalid --edits-json envelope: %w", err)
+	}
+	if len(envelope.Edits) == 0 {
+		return fmt.Errorf("edits must not be empty")
+	}
+	edits := make([]srcop.BatchEdit, 0, len(envelope.Edits))
+	for _, e := range envelope.Edits {
+		edits = append(edits, srcop.BatchEdit{OldText: e.OldText, NewText: e.NewText})
+	}
+	result, err := srcop.ApplyBatch(filename, source, edits)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filename, result.Content, 0o644); err != nil {
+		return err
+	}
+	return printJSON(editBatchJSON{
+		Path: filename, Diff: result.Diff, Patch: result.Patch,
+		FirstChangedLine: result.FirstChangedLine, EditsApplied: len(edits),
+	})
+}
+
+// runEditScopedJSON applies a single text edit scoped to one symbol/section and
+// prints the machine-readable result.
+func runEditScopedJSON(cmd *cobra.Command, filename string, source, input []byte, sectionID string) error {
+	depth := getDepth(cmd)
+	start, end, err := resolveSectionBounds(filename, source, sectionID, depth)
+	if err != nil {
+		return err
+	}
+	start = lineStartAt(source, start)
+	end = lineEndAfter(source, end)
+	slice := source[start:end]
+	result, err := srcop.Edit(filename, slice, input)
+	if err != nil {
+		return err
+	}
+	final := make([]byte, 0, len(source)-(end-start)+len(result.Content))
+	final = append(final, source[:start]...)
+	final = append(final, result.Content...)
+	final = append(final, source[end:]...)
+	return writeMutationJSON(filename, "edit", sectionID, source, final)
 }
 
 // runEditWithFiles handles the --before-file/--after-file edit path.

@@ -1,4 +1,4 @@
-// Package srcview provides trusted-byte source inspection and safe project file reads.
+// Package srcview provides trusted in-memory source inspection.
 //
 // Plane: shared
 package srcview

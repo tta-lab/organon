@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,14 +31,14 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateDaemonClone(resp.Clone); err != nil {
+	if err := og.ValidateCloneResponse(resp); err != nil {
 		return err
 	}
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(resp.Clone)
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(ogCloneJSON{Clone: *resp.Clone})
 	}
 	if resp.Clone.Registered {
 		cmd.Printf("Cloned %s to %s\n", resp.Clone.Alias, resp.Clone.Path)
@@ -50,36 +49,48 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 }
 
 func runGitPush(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	force, _ := cmd.Flags().GetBool("force")
 	resp, err := daemonCall("/git/push", og.Request{WorkDir: workDir, Force: force})
 	if err != nil {
 		return err
 	}
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return err
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
+	}
 	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runGitPull(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, alias, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	resp, err := daemonCall("/git/pull", og.Request{WorkDir: workDir})
 	if err != nil {
 		return err
+	}
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return err
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
 	printDaemonResponse(cmd, resp)
 	return nil
 }
 
 func runGitTag(cmd *cobra.Command, args []string) error {
-	workDir, err := os.Getwd()
+	workDir, _, err := resolveDaemonWorkDir(cmd)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
 	bump, _ := cmd.Flags().GetString("bump")
 	if bump != "" && len(args) > 0 {

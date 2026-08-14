@@ -1,0 +1,17 @@
+{
+  "name": "@tta-lab/pi-web-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Native darwin/arm64 binary for @tta-lab/pi-web. Installed as an optional dependency by the matching main package.",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "web": "bin/web"
+  },
+  "files": [
+    "bin"
+  ]
+}

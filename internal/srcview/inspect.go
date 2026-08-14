@@ -37,14 +37,6 @@ type Outline struct {
 	Symbols  []Symbol `json:"symbols"`
 }
 
-// ReadResult is a bounded symbol read with byte offsets into the file.
-type ReadResult struct {
-	Content   string
-	Start     int
-	End       int
-	Truncated bool
-}
-
 // Inspector reads structure from caller-trusted filename and source bytes.
 type Inspector struct {
 	filename string
@@ -114,45 +106,22 @@ func (i *Inspector) Outline() (Outline, error) {
 	return Outline{Language: language, Symbols: symbols}, nil
 }
 
-// Read reads a targetable symbol or section, including an attached code doc comment.
-func (i *Inspector) Read(symbolID string, limit int) (ReadResult, error) {
-	outline, err := i.Outline()
-	if err != nil {
-		return ReadResult{}, err
-	}
-	for _, symbol := range outline.Symbols {
-		if symbol.ID != symbolID || !symbol.Targetable {
-			continue
-		}
-		end := symbol.EndByte
-		truncated := false
-		if limit > 0 && end-symbol.readStart > limit {
-			end = symbol.readStart + limit
-			for end > symbol.readStart && !isUTF8Boundary(i.source, end) {
-				end--
-			}
-			if end == symbol.readStart {
-				return ReadResult{}, fmt.Errorf("limit %d is too small for the next UTF-8 character", limit)
-			}
-			truncated = true
-		}
-		return ReadResult{
-			Content: string(i.source[symbol.readStart:end]), Start: symbol.readStart, End: end, Truncated: truncated,
-		}, nil
-	}
-	return ReadResult{}, fmt.Errorf("symbol %q not found", symbolID)
-}
-
-// ReadContent preserves the established CLI representation of a full symbol or section.
+// ReadContent returns a full targetable symbol or Markdown section, including
+// an attached code doc comment.
 func (i *Inspector) ReadContent(symbolID string) (string, error) {
 	if IsMarkdown(i.filename) {
 		return markdown.ReadSection(i.source, symbolID)
 	}
-	result, err := i.Read(symbolID, 0)
+	outline, err := i.Outline()
 	if err != nil {
 		return "", err
 	}
-	return result.Content, nil
+	for _, symbol := range outline.Symbols {
+		if symbol.ID == symbolID && symbol.Targetable {
+			return string(i.source[symbol.readStart:symbol.EndByte]), nil
+		}
+	}
+	return "", fmt.Errorf("symbol %q not found", symbolID)
 }
 
 // RenderTree renders the inspector outline in the existing CLI format.
@@ -169,8 +138,4 @@ func (i *Inspector) RenderTree() (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrNoStructure, i.filename)
 	}
 	return tree.Render(nodes), nil
-}
-
-func isUTF8Boundary(source []byte, offset int) bool {
-	return offset == 0 || offset == len(source) || source[offset]&0xc0 != 0x80
 }

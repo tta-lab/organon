@@ -20,5 +20,8 @@ var helpComment string
 //go:embed help/edit.md
 var helpEdit string
 
-//go:embed help/mcp.md
-var helpMCP string
+//go:embed help/symbols.md
+var helpSymbols string
+
+//go:embed help/read.md
+var helpRead string

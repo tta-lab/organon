@@ -28,11 +28,18 @@ go.work.sum
 .env
 
 # Binaries
+/og
 /project
 /src
 /token
 /url
 /web
+
+# GoReleaser release output
+/dist/
+
+# Agent-local plans, specs, and tickets
+/.scratch/
 
 # Local Navidrome playlists and maintenance scripts are machine-owned.
 /playlists/navidrome/

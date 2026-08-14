@@ -1,0 +1,17 @@
+{
+  "name": "@tta-lab/pi-src-linux-arm64",
+  "version": "0.1.0",
+  "description": "Native linux/arm64 binary for @tta-lab/pi-src. Installed as an optional dependency by the matching main package.",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "src": "bin/src"
+  },
+  "files": [
+    "bin"
+  ]
+}

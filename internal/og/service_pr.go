@@ -10,8 +10,8 @@ import (
 
 func (s Service) PRCreate(req Request) (Response, error) {
 	title := stringValue(req.Title)
-	if strings.TrimSpace(title) == "" {
-		return Response{}, fmt.Errorf("PR title must not be blank")
+	if err := ValidatePRTitle(title); err != nil {
+		return Response{}, err
 	}
 	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
@@ -48,11 +48,15 @@ func (s Service) PRView(req Request) (Response, error) {
 }
 
 func (s Service) PRFind(req Request) (Response, error) {
+	state, err := NormalizePRState(req.State)
+	if err != nil {
+		return Response{}, err
+	}
 	ctx, err := s.resolveRepoContextFor(req.WorkDir)
 	if err != nil {
 		return Response{}, err
 	}
-	pr, err := findPR(ctx, req.State)
+	pr, err := findPR(ctx, state)
 	if err != nil {
 		return Response{}, err
 	}
@@ -60,8 +64,8 @@ func (s Service) PRFind(req Request) (Response, error) {
 }
 
 func (s Service) PRGet(req Request) (Response, error) {
-	if req.Index <= 0 {
-		return Response{}, fmt.Errorf("PR ID must be positive")
+	if err := ValidatePositivePRID(req.Index); err != nil {
+		return Response{}, err
 	}
 	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
 	if err != nil {
@@ -78,11 +82,8 @@ func (s Service) PRModify(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")
 	}
-	if req.Title == nil && req.Body == nil {
-		return Response{}, fmt.Errorf("nothing to update: provide title and/or body")
-	}
-	if req.Title != nil && strings.TrimSpace(*req.Title) == "" {
-		return Response{}, fmt.Errorf("PR title must not be blank")
+	if err := ValidatePRModifyInput(req.Title, req.Body); err != nil {
+		return Response{}, err
 	}
 	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
@@ -110,8 +111,8 @@ func (s Service) PRComment(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")
 	}
-	if req.Body == nil || strings.TrimSpace(*req.Body) == "" {
-		return Response{}, fmt.Errorf("comment body must not be blank")
+	if err := ValidatePRCommentBody(req.Body); err != nil {
+		return Response{}, err
 	}
 	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
@@ -173,6 +174,9 @@ func (s Service) PRFailures(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")
 	}
+	if err := ValidatePRLogTail(req.Tail); err != nil {
+		return Response{}, err
+	}
 	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
@@ -195,6 +199,9 @@ func (s Service) PRLog(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")
 	}
+	if err := ValidatePRLogTail(req.Tail); err != nil {
+		return Response{}, err
+	}
 	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
 	if err != nil {
 		return Response{}, err
@@ -211,11 +218,7 @@ func (s Service) PRLog(req Request) (Response, error) {
 	if !hasCIFailures(ci) {
 		return success(Response{PR: pr, Lines: lines}), nil
 	}
-	tail := req.Tail
-	if tail < 0 {
-		tail = 0
-	}
-	failures, err := getCIFailureDetails(ctx, pr, tail)
+	failures, err := getCIFailureDetails(ctx, pr, req.Tail)
 	if err != nil {
 		lines = append(lines, "warning: could not fetch failure logs: "+err.Error())
 		return success(Response{PR: pr, Lines: lines}), nil

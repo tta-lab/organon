@@ -1,0 +1,179 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  cliError,
+  nativePackageName,
+  parseSingleJsonDoc,
+  resolveBinaryPath,
+  runCli,
+} from "../src/index.js";
+import { detectPlatform } from "../src/platform.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const fixtures = join(here, "..", "testdata");
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`child did not write ${path}`);
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`child ${pid} did not exit after cancellation`);
+}
+
+describe("platform detection", () => {
+  it("detects the current host as one of the supported triples", () => {
+    const triple = detectPlatform();
+    expect(["darwin", "linux"]).toContain(triple.os);
+    expect(["arm64", "x64"]).toContain(triple.arch);
+  });
+
+  it("names the host native package for a tool", () => {
+    const { os, arch } = detectPlatform();
+    expect(nativePackageName("project")).toBe(`@tta-lab/pi-project-${os}-${arch}`);
+  });
+});
+
+describe("binary resolution", () => {
+  it("resolves the host native package's bin/<tool> via the resolver", () => {
+    const { os, arch } = detectPlatform();
+    const resolved = resolveBinaryPath("project", {
+      resolve: (specifier) => {
+        expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
+        return join(here, "fake-node-modules", specifier);
+      },
+    });
+    expect(resolved.endsWith(`/bin/project`) || resolved.endsWith(`\\bin\\project`)).toBe(true);
+  });
+
+  it("throws an actionable error when the native package is missing", () => {
+    expect(() =>
+      resolveBinaryPath("project", {
+        resolve: () => {
+          throw new Error("Cannot find module");
+        },
+      }),
+    ).toThrow(/native package @tta-lab\/pi-project-/);
+  });
+});
+
+describe("subprocess adapter", () => {
+  it("passes fixed argv, writes stdin, and returns stdout/stderr/exitCode", async () => {
+    const result = await runCli(process.execPath, {
+      args: [join(fixtures, "echo-args.mjs"), "list", "--json"],
+      stdin: "hello\nworld",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("diag\n");
+    const out = JSON.parse(result.stdout);
+    expect(out.argv).toEqual(["list", "--json"]);
+    expect(out.stdin).toBe("hello\nworld");
+  });
+
+  it("rejects with Operation aborted when the signal fires", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runCli(process.execPath, { args: [join(fixtures, "hang.mjs")], signal: controller.signal }),
+    ).rejects.toThrow("Operation aborted");
+  });
+
+  it("terminates an already-started child when the signal aborts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-run-cli-"));
+    const pidPath = join(directory, "pid");
+    const controller = new AbortController();
+    const pending = runCli(process.execPath, {
+      args: [join(fixtures, "pid-hang.mjs"), pidPath],
+      signal: controller.signal,
+    });
+    let pid = 0;
+
+    try {
+      await waitForFile(pidPath);
+      pid = Number(readFileSync(pidPath, "utf8"));
+      expect(pid).toBeGreaterThan(0);
+      controller.abort();
+      await expect(pending).rejects.toThrow("Operation aborted");
+      await waitForProcessExit(pid);
+    } finally {
+      controller.abort();
+      await pending.catch(() => undefined);
+      if (pid > 0) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // The expected path is that SIGTERM from AbortSignal already exited it.
+        }
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates a nonzero exit code without throwing", async () => {
+    const result = await runCli(process.execPath, { args: [join(fixtures, "fail.mjs")] });
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("boom");
+  });
+
+  it("rejects with a concise start failure for a missing binary", async () => {
+    await expect(runCli(join(here, "does-not-exist"), { args: [] })).rejects.toThrow(
+      /failed to start/,
+    );
+  });
+});
+
+describe("JSON result parsing", () => {
+  it("parses exactly one JSON document and tolerates trailing newline", () => {
+    expect(parseSingleJsonDoc<{ a: number }>('{"a":1}\n')).toEqual({ a: 1 });
+  });
+
+  it("rejects empty and invalid output", () => {
+    expect(() => parseSingleJsonDoc("")).toThrow(/no JSON output/);
+    expect(() => parseSingleJsonDoc('{"a":1} trailing')).toThrow(/invalid JSON/);
+  });
+
+  it("normalizes cobra errors and empty stderr", async () => {
+    expect((await cliError("Error: text not found\n", 1)).message).toBe("text not found");
+    expect((await cliError("", 7)).message).toBe("command exited with code 7");
+  });
+
+  it("bounds oversized stderr and saves the original output", async () => {
+    const stderr = "Error: " + "failure ".repeat(20_000) + "\nsecond diagnostic\n";
+    const error = await cliError(stderr, 1);
+    const fullOutputPath = error.message.match(/Full output saved to: ([^\]]+)/)?.[1];
+
+    try {
+      expect(Buffer.byteLength(error.message, "utf8")).toBeLessThanOrEqual(50 * 1024);
+      expect(error.message).toContain("Inspect the saved stderr before retrying.");
+      expect(fullOutputPath).toBeTruthy();
+      expect(readFileSync(fullOutputPath!, "utf8")).toBe(stderr);
+    } finally {
+      if (fullOutputPath) {
+        rmSync(dirname(fullOutputPath), { recursive: true, force: true });
+      }
+    }
+  });
+});

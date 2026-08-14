@@ -67,6 +67,23 @@ func TestMarkdownDispatch_Tree(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestTreeOrReadRejectsSignatureDetectedBinary(t *testing.T) {
+	source := append([]byte{0x7F, 'E', 'L', 'F'}, []byte("\npackage sample\n\nfunc Foo() {}\n")...)
+	f := filepath.Join(t.TempDir(), "binary.go")
+	require.NoError(t, os.WriteFile(f, source, 0o644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("tree", false, "")
+	cmd.Flags().String("symbol-id", "", "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+	out := captureStdout(t, func() {
+		err := runTreeOrRead(cmd, []string{f})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "binary file")
+	})
+	assert.Empty(t, out, "no symbol tree may be emitted for binary input")
+}
+
 func TestMarkdownDispatch_ReadSection(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.md")

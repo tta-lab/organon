@@ -18,6 +18,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+
       - name: Download dependencies
         run: go mod download
 
@@ -44,3 +54,76 @@ jobs:
 
       - name: Build
         run: make build
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Pi format check
+        working-directory: pi
+        run: pnpm exec prettier --check .
+
+      - name: Pi typecheck
+        working-directory: pi
+        run: pnpm exec tsc -p tsconfig.json --noEmit
+
+      - name: Pi build
+        working-directory: pi
+        run: pnpm -r --filter './packages/pi-*' run build
+
+      - name: Pi tests
+        working-directory: pi
+        run: pnpm exec vitest run
+
+      - name: Pi release invariants
+        working-directory: pi
+        run: node scripts/test-release-invariants.mjs
+
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Pi extensions
+        working-directory: pi
+        run: pnpm -r --filter './packages/pi-*' run build
+
+      - name: Snapshot release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: release --snapshot --clean
+
+      - name: Stage native binaries and verify them
+        working-directory: pi
+        run: |
+          node scripts/stage-natives.mjs ../dist
+          for f in packages/native/pi-*/bin/*; do
+            test -x "$f" || { echo "$f is not executable"; exit 1; }
+          done
+          echo "all native binaries present and executable"
+
+      - name: Verify tag-to-artifact release invariants
+        working-directory: pi
+        run: node scripts/test-release-invariants.mjs ../dist

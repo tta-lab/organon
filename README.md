@@ -236,7 +236,7 @@ reactivate or reuse the exposed migration PAT.
 
 ## MCP servers
 
-`project`, `og`, `web`, `skill`, and `src` each provide a typed stdio MCP server. Configure
+`project`, `og`, `web`, and `skill` each provide a typed stdio MCP server. Configure
 them as separate processes so clients can grant only the tools a session needs:
 
 ```json
@@ -245,8 +245,7 @@ them as separate processes so clients can grant only the tools a session needs:
     "organon-project": { "command": "project", "args": ["mcp"] },
     "organon-og": { "command": "og", "args": ["mcp"] },
     "organon-web": { "command": "web", "args": ["mcp"] },
-    "organon-skill": { "command": "skill", "args": ["mcp"] },
-    "organon-src": { "command": "src", "args": ["mcp"] }
+    "organon-skill": { "command": "skill", "args": ["mcp"] }
   }
 }
 ```
@@ -270,13 +269,6 @@ The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
-`src mcp` exposes only `symbols` and `read`. Both require an exact registered
-project alias and repository-relative file path. `symbols` returns code symbols
-or Markdown sections with IDs; `read` accepts one ID or a bounded UTF-8 byte
-range. The server follows symlinks only when they remain inside the registered
-project and rejects source files larger than 16 MiB before reading. It has no
-mutation tools and requires no revision or SHA argument.
-
 `og mcp` exposes twelve tools: auth status, clone, push, pull, PR create/find,
 and PR get/modify/comment/checks/log/failures. It mirrors CLI current-branch
 workflows against the registered checkout's current branch. Force push uses
@@ -286,6 +278,19 @@ operation; `pr_get`, modify, comment, checks, log, and failures use the current
 branch when the ID is omitted. Tag remains CLI-only. Restart the daemon after
 changing `og.toml`; restart web MCP after changing web configuration. Run
 `<tool> mcp --help` for each server's tool list and configuration details.
+
+## Pi extensions
+
+Pi reaches Organon through four independently installable extension packages
+(`@tta-lab/pi-src`, `@tta-lab/pi-web`, `@tta-lab/pi-project`, `@tta-lab/pi-og`)
+instead of MCP configuration. Each registers one global tool backed by a
+platform-matched native binary and carries its own npm release. `pi-src`
+replaces Pi's built-in `read` and `edit` with symbol-aware operations and exact
+multi-edit batches; the `web`, `project`, and `og` tools preserve the MCP domain
+behavior over a local subprocess. See [`pi/README.md`](pi/README.md) for
+installation, supported platforms, the `src` takeover behavior, and the opaque
+symbol-ID rules. The `web`, `project`, `og`, and `skill` MCP servers remain for
+non-Pi clients; the project-scoped `src` MCP server is removed.
 
 ## Why
 

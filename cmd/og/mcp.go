@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -16,12 +14,6 @@ import (
 	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/og"
 	"github.com/tta-lab/organon/internal/project"
-)
-
-const (
-	defaultLogTail = 50
-	maximumLogTail = 1000
-	stateOpen      = "open"
 )
 
 type ogDaemonCaller interface {
@@ -137,8 +129,8 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	if tail {
 		tailSchema := schema.Properties["tail"]
 		tailSchema.Minimum = jsonschema.Ptr(0.0)
-		tailSchema.Maximum = jsonschema.Ptr(float64(maximumLogTail))
-		tailSchema.Default = json.RawMessage(fmt.Sprint(defaultLogTail))
+		tailSchema.Maximum = jsonschema.Ptr(float64(og.MaxPRLogTail))
+		tailSchema.Default = json.RawMessage(fmt.Sprint(og.DefaultPRLogTail))
 	}
 	if force := schema.Properties["force"]; force != nil {
 		force.Default = json.RawMessage("false")
@@ -153,8 +145,8 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 		}
 	}
 	if state := schema.Properties["state"]; state != nil {
-		state.Default = json.RawMessage(`"` + stateOpen + `"`)
-		state.Enum = []any{stateOpen, "closed", stateAll}
+		state.Default = json.RawMessage(`"` + og.PRStateOpen + `"`)
+		state.Enum = []any{og.PRStateOpen, og.PRStateClosed, og.PRStateAll}
 	}
 	return schema
 }
@@ -181,13 +173,6 @@ func callOGDaemon(
 		return og.Response{}, fmt.Errorf("call og daemon: %w", err)
 	}
 	return resp, nil
-}
-
-func validatePositivePRID(id int64) error {
-	if id <= 0 {
-		return fmt.Errorf("PR ID must be positive")
-	}
-	return nil
 }
 
 func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) error {
@@ -226,7 +211,7 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 		if err != nil {
 			return nil, ogCloneOutput{}, fmt.Errorf("call og daemon: %w", err)
 		}
-		if err := validateDaemonClone(resp.Clone); err != nil {
+		if err := og.ValidateCloneResponse(resp); err != nil {
 			return nil, ogCloneOutput{}, err
 		}
 		return nil, ogCloneOutput{Clone: *resp.Clone}, nil
@@ -276,7 +261,7 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 	) (*mcp.CallToolResult, ogPROutput, error) {
 		if input.PRID == nil {
 			return callWorktreePRTool(
-				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: stateAll},
+				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: og.PRStateAll},
 			)
 		}
 		return callPRTool(ctx, projects, caller, input.Project, "/pr/get", *input.PRID)
@@ -322,8 +307,8 @@ func prCreateHandler(
 		_ *mcp.CallToolRequest,
 		input ogPRCreateInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
-		if strings.TrimSpace(input.Title) == "" {
-			return nil, ogPROutput{}, fmt.Errorf("PR title must not be blank")
+		if err := og.ValidatePRTitle(input.Title); err != nil {
+			return nil, ogPROutput{}, err
 		}
 		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/create", og.Request{
 			Title: &input.Title,
@@ -341,12 +326,9 @@ func prFindHandler(
 		_ *mcp.CallToolRequest,
 		input ogPRFindInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
-		state := input.State
-		if state == "" {
-			state = stateOpen
-		}
-		if state != stateOpen && state != "closed" && state != stateAll {
-			return nil, ogPROutput{}, fmt.Errorf("PR state must be open, closed, or all")
+		state, err := og.NormalizePRState(input.State)
+		if err != nil {
+			return nil, ogPROutput{}, err
 		}
 		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/find", og.Request{State: state})
 	}
@@ -363,8 +345,8 @@ func callMessageTool(
 	if err != nil {
 		return nil, ogMessageOutput{}, err
 	}
-	if strings.TrimSpace(resp.Message) == "" {
-		return nil, ogMessageOutput{}, fmt.Errorf("og daemon returned no operation result")
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return nil, ogMessageOutput{}, err
 	}
 	return nil, ogMessageOutput{Project: alias, Message: resp.Message}, nil
 }
@@ -380,7 +362,7 @@ func callWorktreePRTool(
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
-	if err := validateDaemonWorktreePR(resp.PR); err != nil {
+	if err := og.ValidatePRResponse(resp, 0); err != nil {
 		return nil, ogPROutput{}, err
 	}
 	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil
@@ -399,15 +381,8 @@ func authStatusHandler(
 		if err != nil {
 			return nil, ogAuthOutput{}, err
 		}
-		if resp.Auth == nil {
-			return nil, ogAuthOutput{}, fmt.Errorf("og daemon returned no authentication status")
-		}
-		if resp.Auth.Project != input.Project {
-			return nil, ogAuthOutput{}, fmt.Errorf(
-				"og daemon returned authentication status for project %q, want %q",
-				resp.Auth.Project,
-				input.Project,
-			)
+		if err := og.ValidateAuthResponse(resp, input.Project); err != nil {
+			return nil, ogAuthOutput{}, err
 		}
 		return nil, ogAuthOutput{Project: input.Project, Auth: *resp.Auth}, nil
 	}
@@ -426,11 +401,8 @@ func prModifyHandler(
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
-		if input.Title == nil && input.Body == nil {
-			return nil, ogPROutput{}, fmt.Errorf("nothing to update: provide title and/or body")
-		}
-		if input.Title != nil && strings.TrimSpace(*input.Title) == "" {
-			return nil, ogPROutput{}, fmt.Errorf("PR title must not be blank")
+		if err := og.ValidatePRModifyInput(input.Title, input.Body); err != nil {
+			return nil, ogPROutput{}, err
 		}
 		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/modify", og.Request{
 			Index: prID, Title: input.Title, Body: input.Body,
@@ -438,14 +410,8 @@ func prModifyHandler(
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
-		if err := validateDaemonPR(resp.PR, prID); err != nil {
+		if err := og.ValidatePRModifyResponse(resp, prID, input.Title, input.Body); err != nil {
 			return nil, ogPROutput{}, err
-		}
-		if input.Title != nil && resp.PR.Title != *input.Title {
-			return nil, ogPROutput{}, fmt.Errorf("og daemon returned pull request with unexpected title")
-		}
-		if input.Body != nil && resp.PR.Body != *input.Body {
-			return nil, ogPROutput{}, fmt.Errorf("og daemon returned pull request with unexpected body")
 		}
 		return nil, ogPROutput{Project: input.Project, PR: *resp.PR}, nil
 	}
@@ -464,8 +430,8 @@ func prCommentHandler(
 		if err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		if strings.TrimSpace(input.Body) == "" {
-			return nil, ogCommentOutput{}, fmt.Errorf("comment body must not be blank")
+		if err := og.ValidatePRCommentBody(&input.Body); err != nil {
+			return nil, ogCommentOutput{}, err
 		}
 		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/comment", og.Request{
 			Index: prID, Body: &input.Body,
@@ -473,7 +439,7 @@ func prCommentHandler(
 		if err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		if err := validateDaemonComment(resp.Comment, prID, input.Body); err != nil {
+		if err := og.ValidateCommentResponse(resp, prID, input.Body); err != nil {
 			return nil, ogCommentOutput{}, err
 		}
 		return nil, ogCommentOutput{Project: input.Project, Comment: *resp.Comment}, nil
@@ -487,14 +453,14 @@ func callPRTool(
 	alias, path string,
 	id int64,
 ) (*mcp.CallToolResult, ogPROutput, error) {
-	if err := validatePositivePRID(id); err != nil {
+	if err := og.ValidatePositivePRID(id); err != nil {
 		return nil, ogPROutput{}, err
 	}
 	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id})
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
-	if err := validateDaemonPR(resp.PR, id); err != nil {
+	if err := og.ValidatePRResponse(resp, id); err != nil {
 		return nil, ogPROutput{}, err
 	}
 	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil
@@ -547,14 +513,14 @@ func callPRLinesTool(
 	if err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	if tail < 0 || tail > maximumLogTail {
-		return nil, ogPRLinesOutput{}, fmt.Errorf("tail must be between 0 and %d", maximumLogTail)
+	if err := og.ValidatePRLogTail(tail); err != nil {
+		return nil, ogPRLinesOutput{}, err
 	}
 	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id, Tail: tail})
 	if err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	if err := validateDaemonPR(resp.PR, id); err != nil {
+	if err := og.ValidatePRResponse(resp, id); err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
 	return nil, ogPRLinesOutput{Project: alias, PR: *resp.PR, Lines: resp.Lines}, nil
@@ -564,93 +530,10 @@ func optionalMCPPRID(id *int64) (int64, error) {
 	if id == nil {
 		return 0, nil
 	}
-	if err := validatePositivePRID(*id); err != nil {
+	if err := og.ValidatePositivePRID(*id); err != nil {
 		return 0, err
 	}
 	return *id, nil
-}
-
-func validateDaemonPR(pr *og.PullRequest, expectedID int64) error {
-	if pr == nil {
-		return fmt.Errorf("og daemon returned no pull request")
-	}
-	if pr.Index <= 0 {
-		return fmt.Errorf("og daemon returned invalid PR ID %d", pr.Index)
-	}
-	if expectedID > 0 && pr.Index != expectedID {
-		return fmt.Errorf("og daemon returned PR ID %d, want %d", pr.Index, expectedID)
-	}
-	return nil
-}
-
-func validateDaemonWorktreePR(pr *og.PullRequest) error {
-	if pr == nil || pr.Index <= 0 {
-		return fmt.Errorf("og daemon returned an invalid pull request")
-	}
-	return nil
-}
-
-func validateDaemonComment(comment *og.Comment, expectedPRID int64, expectedBody string) error {
-	if comment == nil {
-		return fmt.Errorf("og daemon returned no comment")
-	}
-	identityMismatch := comment.ID <= 0 || comment.PRID <= 0 ||
-		(expectedPRID > 0 && comment.PRID != expectedPRID)
-	contentMismatch := comment.Body != expectedBody || strings.TrimSpace(comment.URL) == ""
-	if identityMismatch || contentMismatch {
-		return fmt.Errorf("og daemon returned an invalid comment result")
-	}
-	return nil
-}
-
-func validateDaemonClone(result *og.CloneResult) error {
-	if result == nil {
-		return fmt.Errorf("og daemon returned no clone result")
-	}
-	if !filepath.IsAbs(result.Path) || strings.TrimSpace(result.Host) == "" ||
-		strings.TrimSpace(result.Owner) == "" || strings.TrimSpace(result.Repo) == "" ||
-		strings.TrimSpace(result.Provider) == "" || strings.TrimSpace(result.Remote) == "" {
-		return fmt.Errorf("og daemon returned an invalid clone result")
-	}
-	if err := validateDaemonCloneProvider(result.Provider); err != nil {
-		return err
-	}
-	if result.Registered {
-		if err := project.ValidateAlias(result.Alias); err != nil {
-			return fmt.Errorf("og daemon returned an invalid registered clone alias: %w", err)
-		}
-	} else if result.Alias != "" || result.Archived {
-		return fmt.Errorf("og daemon returned invalid unregistered clone state")
-	}
-	if err := validateDaemonCloneRemote(result); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateDaemonCloneProvider(provider string) error {
-	switch provider {
-	case "github", "forgejo", "generic":
-		return nil
-	default:
-		return fmt.Errorf("og daemon returned invalid clone provider %q", provider)
-	}
-}
-
-func validateDaemonCloneRemote(result *og.CloneResult) error {
-	u, err := url.Parse(result.Remote)
-	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-		(u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, result.Host) {
-		return fmt.Errorf("og daemon returned an invalid clone remote")
-	}
-	if (result.Provider == "github" || result.Provider == "generic") && u.Scheme != "https" {
-		return fmt.Errorf("og daemon returned an insecure clone remote")
-	}
-	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
-	if len(parts) != 2 || parts[0] != result.Owner || strings.TrimSuffix(parts[1], ".git") != result.Repo {
-		return fmt.Errorf("og daemon returned mismatched clone identity")
-	}
-	return nil
 }
 
 func newOGMCPCmd() *cobra.Command {

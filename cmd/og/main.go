@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tta-lab/organon/internal/og"
 )
 
 func main() {
@@ -23,6 +25,9 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
+
+	cmd.PersistentFlags().String("project", "",
+		"Exact registered project alias; resolved to its checkout path for guarded operations")
 
 	cmd.AddCommand(newPRCmd())
 	cmd.AddCommand(newGitPushCmd())
@@ -59,7 +64,7 @@ func newPRCmd() *cobra.Command {
 }
 
 func newPRCreateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "create <title>",
 		Short: "Create a pull request",
 		Long:  "Create a pull request. The PR body is read from stdin.",
@@ -71,6 +76,8 @@ EOF`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runPRCreate,
 	}
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
+	return cmd
 }
 
 func newPRViewCmd(use string) *cobra.Command {
@@ -82,6 +89,7 @@ func newPRViewCmd(use string) *cobra.Command {
 func newPRFindCmd() *cobra.Command {
 	cmd := newRunnableCmd("find", "Find a pull request for the current branch", runPRFind)
 	cmd.Flags().String("state", "open", "PR state to search: open, closed, or all")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
@@ -105,6 +113,8 @@ func newPRModifyCmd() *cobra.Command {
 Replace the PR body with this text.
 EOF`
 	cmd.Flags().String("title", "", "New PR title")
+	cmd.Flags().Bool("clear-body", false, "Explicitly clear the PR body")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
 }
@@ -116,26 +126,30 @@ func newPRCommentCmd() *cobra.Command {
 	cmd.Example = `cat <<'EOF' | og pr comment --pr-id 123
 Tests now pass. Please review again.
 EOF`
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRChecksCmd(use, short string) *cobra.Command {
 	cmd := newRunnableCmd(use, short, runPRChecks)
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRLogCmd() *cobra.Command {
 	cmd := newRunnableCmd("log", "Show CI status and failure logs for the current PR", runPRLog)
-	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 
 func newPRFailuresCmd(use string) *cobra.Command {
 	cmd := newRunnableCmd(use, "Show CI failure logs for the current PR", runPRFailures)
-	cmd.Flags().Int("tail", 50, "Number of log tail lines to fetch")
+	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
 }
@@ -147,11 +161,13 @@ func addOptionalPRIDFlag(cmd *cobra.Command) {
 func newGitPushCmd() *cobra.Command {
 	cmd := newRunnableCmd("push", "Push the current branch", runGitPush)
 	cmd.Flags().Bool("force", false, "Force push with --force-with-lease")
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
 func newGitPullCmd() *cobra.Command {
 	cmd := newRunnableCmd("pull", "Pull the current branch or clean up a closed PR branch", runGitPull)
+	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	cmd.Long = `Pull the current branch with fast-forward only.
 
 When the current feature branch has a closed PR, og returns to the default
@@ -192,7 +208,9 @@ func newAuthCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
-	cmd.AddCommand(newRunnableCmd(cmdStatus, "Show authentication status", runAuthStatus))
+	authStatus := newRunnableCmd(cmdStatus, "Show authentication status", runAuthStatus)
+	authStatus.Flags().Bool("json", false, "Output the structured result as JSON")
+	cmd.AddCommand(authStatus)
 	return cmd
 }
 
