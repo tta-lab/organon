@@ -155,7 +155,8 @@ func TestReadJSONSymbolID(t *testing.T) {
 	}))
 	assert.Equal(t, fooID, out.SymbolID)
 	assert.Contains(t, out.Content, "Foo docs")
-	assert.Equal(t, 3, out.StartLine) // doc comment starts on line 3
+	assert.Equal(t, 1, out.StartLine) // symbol-relative first line
+	assert.Equal(t, 4, out.TotalLines) // doc comment + function body
 	assert.False(t, out.Truncated)
 }
 
@@ -220,7 +221,7 @@ func TestReadJSONSymbolRelativeOffsetLimit(t *testing.T) {
 		require.NoError(t, runReadJSON(cmd, []string{f}))
 	}))
 	assert.Equal(t, "\t// a\n\t// b", out.Content)
-	assert.Equal(t, 4, out.StartLine) // file line of symbol line 2
+	assert.Equal(t, 2, out.StartLine) // symbol-relative line 2
 }
 
 func TestReadJSONLineTruncationContinuation(t *testing.T) {
@@ -251,6 +252,75 @@ func TestReadJSONFirstLineExceedsLimit(t *testing.T) {
 	assert.True(t, out.FirstLineExceedsLimit)
 	assert.True(t, out.Truncated)
 	assert.Equal(t, "", out.Content)
+}
+
+func TestReadJSONMediaSignatureDetection(t *testing.T) {
+	png := append([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, []byte{0, 0, 0, 13, 'I', 'H', 'D', 'R'}...)
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0}
+	gif := []byte("GIF89a")
+	webp := append([]byte("RIFF"), append(make([]byte, 4), []byte("WEBP")...)...)
+	bmp := make([]byte, 54)
+	copy(bmp, "BM")
+	bmp[2], bmp[3], bmp[4], bmp[5] = 100, 0, 0, 0 // file size (pixel data follows)
+	bmp[10], bmp[11], bmp[12], bmp[13] = 54, 0, 0, 0 // pixel data offset
+	bmp[14], bmp[15], bmp[16], bmp[17] = 40, 0, 0, 0 // DIB header size
+	bmp[26], bmp[27] = 1, 0 // color planes
+	bmp[28], bmp[29] = 24, 0 // bits per pixel
+	cases := []struct {
+		name   string
+		data   []byte
+		mime   string
+	}{
+		{"png", png, "image/png"},
+		{"jpeg", jpeg, "image/jpeg"},
+		{"gif", gif, "image/gif"},
+		{"webp", webp, "image/webp"},
+		{"bmp", bmp, "image/bmp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			f := filepath.Join(dir, "image."+tc.name)
+			require.NoError(t, os.WriteFile(f, tc.data, 0o644))
+			out := decodeRead(t, captureStdout(t, func() {
+				require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+			}))
+			require.NotNil(t, out.Media, "media missing for %s", tc.name)
+			assert.Equal(t, "image", out.Media.Kind)
+			assert.Equal(t, tc.mime, out.Media.Mime)
+			assert.NotEmpty(t, out.Media.DataBase64)
+			// The adapter must never receive decoded UTF-8 text for media.
+			assert.Equal(t, "", out.Content)
+		})
+	}
+}
+
+func TestReadJSONRejectsAnimatedPNGVisibly(t *testing.T) {
+	// PNG signature + IHDR chunk + acTL chunk before IDAT is an animated PNG.
+	pngChunk := func(typ string, data []byte) []byte {
+		out := []byte{0, 0, 0, byte(len(data))}
+		out = append(out, []byte(typ)...)
+		out = append(out, data...)
+		out = append(out, 0, 0, 0, 0) // CRC placeholder
+		return out
+	}
+	animated := append([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, pngChunk("IHDR", make([]byte, 13))...)
+	animated = append(animated, pngChunk("acTL", make([]byte, 8))...)
+	dir := t.TempDir()
+	f := filepath.Join(dir, "animated.png")
+	require.NoError(t, os.WriteFile(f, animated, 0o644))
+	err := runReadJSON(newReadCmd(), []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+}
+
+func TestReadJSONRejectsUnsupportedBinaryVisibly(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "blob.dat")
+	require.NoError(t, os.WriteFile(f, []byte("PK\x03\x04binary\x00zip\n"), 0o644))
+	err := runReadJSON(newReadCmd(), []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "binary file")
 }
 
 func TestReadJSONMissingFile(t *testing.T) {

@@ -25,6 +25,3 @@ var helpSymbols string
 
 //go:embed help/read.md
 var helpRead string
-
-//go:embed help/mcp.md
-var helpMCP string

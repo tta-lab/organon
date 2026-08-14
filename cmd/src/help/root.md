@@ -17,8 +17,6 @@ lets you navigate and modify them precisely without guessing line numbers.
   2. src path/to/file.go -s Ab              # read one symbol by ID (--symbol-id also works)
   3. src replace path/to/file.go -s Ab < new.go  # replace it
 
-Use `src mcp` to serve read-only project-alias-based `symbols` and `read` tools
-over stdio. MCP file paths are always repository-relative.
 
 ## Supported languages
 Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and

@@ -38,6 +38,12 @@ importers:
 
   packages/native/pi-project-linux-x64: {}
 
+  packages/native/pi-web-darwin-arm64: {}
+
+  packages/native/pi-web-linux-arm64: {}
+
+  packages/native/pi-web-linux-x64: {}
+
   packages/pi-project:
     devDependencies:
       "@earendil-works/pi-ai":
@@ -65,6 +71,34 @@ importers:
       "@tta-lab/pi-project-linux-x64":
         specifier: workspace:*
         version: link:../native/pi-project-linux-x64
+
+  packages/pi-web:
+    devDependencies:
+      "@earendil-works/pi-ai":
+        specifier: 0.84.1
+        version: 0.84.1(ws@8.21.3)(zod@4.4.3)
+      "@earendil-works/pi-coding-agent":
+        specifier: 0.84.1
+        version: 0.84.1(ws@8.21.3)(zod@4.4.3)
+      "@tta-lab/pi-shared":
+        specifier: workspace:*
+        version: link:../shared
+      "@types/node":
+        specifier: 24.0.0
+        version: 24.0.0
+      typebox:
+        specifier: 1.3.7
+        version: 1.3.7
+    optionalDependencies:
+      "@tta-lab/pi-web-darwin-arm64":
+        specifier: workspace:*
+        version: link:../native/pi-web-darwin-arm64
+      "@tta-lab/pi-web-linux-arm64":
+        specifier: workspace:*
+        version: link:../native/pi-web-linux-arm64
+      "@tta-lab/pi-web-linux-x64":
+        specifier: workspace:*
+        version: link:../native/pi-web-linux-x64
 
   packages/shared:
     devDependencies:
@@ -2486,7 +2520,7 @@ snapshots:
       "@aws-sdk/types": 3.974.3
       "@smithy/core": 3.33.0
       "@smithy/fetch-http-handler": 5.7.0
-      "@smithy/node-http-handler": 4.7.3
+      "@smithy/node-http-handler": 4.11.0
       "@smithy/types": 4.17.0
       tslib: 2.8.1
 

@@ -245,8 +245,7 @@ them as separate processes so clients can grant only the tools a session needs:
     "organon-project": { "command": "project", "args": ["mcp"] },
     "organon-og": { "command": "og", "args": ["mcp"] },
     "organon-web": { "command": "web", "args": ["mcp"] },
-    "organon-skill": { "command": "skill", "args": ["mcp"] },
-    "organon-src": { "command": "src", "args": ["mcp"] }
+    "organon-skill": { "command": "skill", "args": ["mcp"] }
   }
 }
 ```
@@ -269,13 +268,6 @@ ranks token matches across skill names, descriptions, and categories.
 The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
-
-`src mcp` exposes only `symbols` and `read`. Both require an exact registered
-project alias and repository-relative file path. `symbols` returns code symbols
-or Markdown sections with IDs; `read` accepts one ID or a bounded UTF-8 byte
-range. The server follows symlinks only when they remain inside the registered
-project and rejects source files larger than 16 MiB before reading. It has no
-mutation tools and requires no revision or SHA argument.
 
 `og mcp` exposes twelve tools: auth status, clone, push, pull, PR create/find,
 and PR get/modify/comment/checks/log/failures. It mirrors CLI current-branch

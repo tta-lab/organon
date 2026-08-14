@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aymanbagabas/go-udiff"
+	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/srcview"
@@ -21,19 +23,23 @@ type symbolOutlineJSON struct {
 	Symbols    []srcview.Symbol `json:"symbols"`
 }
 
-// readJSON is the machine-readable result of `src read --json`.
+// readJSON is the machine-readable result of `src read --json`. Line
+// positions (StartLine, TotalLines, NextOffset) are relative to the selected
+// content: the whole file, or the exact symbol/section when symbol_id is
+// present. Offset and limit are 1-indexed line positions in the same frame.
 type readJSON struct {
-	Path                  string `json:"path"`
-	SymbolID              string `json:"symbol_id,omitempty"`
-	Content               string `json:"content"`
-	StartLine             int    `json:"start_line"`
-	TotalLines            int    `json:"total_lines"`
-	Truncated             bool   `json:"truncated"`
-	TruncatedBy           string `json:"truncated_by,omitempty"`
-	OutputLines           int    `json:"output_lines,omitempty"`
-	OutputBytes           int    `json:"output_bytes,omitempty"`
-	NextOffset            int    `json:"next_offset,omitempty"`
-	FirstLineExceedsLimit bool   `json:"first_line_exceeds_limit,omitempty"`
+	Path                  string     `json:"path"`
+	SymbolID              string     `json:"symbol_id,omitempty"`
+	Content               string     `json:"content"`
+	StartLine             int        `json:"start_line"`
+	TotalLines            int        `json:"total_lines"`
+	TotalBytes            int        `json:"total_bytes"`
+	Truncated             bool       `json:"truncated"`
+	TruncatedBy           string     `json:"truncated_by,omitempty"`
+	OutputLines           int        `json:"output_lines,omitempty"`
+	OutputBytes           int        `json:"output_bytes,omitempty"`
+	NextOffset            int        `json:"next_offset,omitempty"`
+	FirstLineExceedsLimit bool       `json:"first_line_exceeds_limit,omitempty"`
 	Media                 *mediaJSON `json:"media,omitempty"`
 }
 
@@ -47,6 +53,91 @@ type mediaJSON struct {
 
 func printJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
+}
+
+// mutationJSON is the machine-readable result of a symbol mutation.
+type mutationJSON struct {
+	Path             string `json:"path"`
+	Action           string `json:"action"`
+	SymbolID         string `json:"symbol_id,omitempty"`
+	Diff             string `json:"diff"`
+	FirstChangedLine int    `json:"first_changed_line,omitempty"`
+}
+
+// commentJSON is the machine-readable result of a comment read.
+type commentJSON struct {
+	Path     string `json:"path"`
+	SymbolID string `json:"symbol_id"`
+	Comment  string `json:"comment"`
+}
+
+// editBatchJSON is the machine-readable result of `src edit --edits-json --json`.
+type editBatchJSON struct {
+	Path             string `json:"path"`
+	Diff             string `json:"diff"`
+	Patch            string `json:"patch"`
+	FirstChangedLine int    `json:"first_changed_line,omitempty"`
+	EditsApplied     int    `json:"edits_applied"`
+}
+
+// isBinaryBytes reports binary content via null bytes in the first 8 KiB.
+func isBinaryBytes(data []byte) bool {
+	check := data
+	if len(check) > 8192 {
+		check = check[:8192]
+	}
+	return strings.IndexByte(string(check), 0) >= 0
+}
+
+func targetID(afterID, beforeID string) string {
+	if afterID != "" {
+		return afterID
+	}
+	return beforeID
+}
+
+// writeMutationJSON writes the mutation result to disk and prints the
+// machine-readable result, keeping diagnostics off stdout.
+func writeMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	if err := os.WriteFile(filename, result, 0o644); err != nil {
+		return err
+	}
+	diffText, first := diffSummary(filename, source, result)
+	return printJSON(mutationJSON{
+		Path: filename, Action: action, SymbolID: symbolID,
+		Diff: diffText, FirstChangedLine: first,
+	})
+}
+
+// diffSummary renders a unified diff between old and new content and the
+// 1-indexed line of the first change in the new file.
+func diffSummary(filename string, old, new []byte) (string, int) {
+	edits := myers.ComputeEdits(string(old), string(new))
+	u, err := udiff.ToUnifiedDiff("a/"+filename, "b/"+filename, string(old), edits, 4)
+	if err != nil {
+		return "", 0
+	}
+	return u.String(), firstChangedLine(u)
+}
+
+// firstChangedLine returns the 1-indexed line of the first change in the new
+// file, walking the first hunk until the first Delete or Insert line. Context
+// (Equal) lines advance the new-side line counter; deletions count as a change
+// at the current new-side line, matching the Pi built-in edit's reporting.
+func firstChangedLine(u udiff.UnifiedDiff) int {
+	if len(u.Hunks) == 0 {
+		return 0
+	}
+	newLine := u.Hunks[0].ToLine
+	for _, line := range u.Hunks[0].Lines {
+		switch line.Kind {
+		case udiff.Equal:
+			newLine++
+		case udiff.Insert, udiff.Delete:
+			return newLine
+		}
+	}
+	return 0
 }
 
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
@@ -100,7 +191,6 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 
 func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
 	content := string(source)
-	startLine := 1
 	totalLines := strings.Count(content, "\n") + 1
 
 	if symbolID != "" {
@@ -108,17 +198,22 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		if err != nil {
 			return readJSON{}, err
 		}
-		content, startLine, totalLines = read.Content, read.StartLine, read.TotalLines
+		content, totalLines = read.Content, read.TotalLines
 	}
 
 	result := readJSON{
-		Path: filename, SymbolID: symbolID, TotalLines: totalLines,
+		Path: filename, SymbolID: symbolID, TotalLines: totalLines, TotalBytes: len(source),
 	}
 
-	if media, ok := detectMedia(source); ok && symbolID == "" {
-		result.Media = &media
-		result.Content = ""
-		return result, nil
+	if symbolID == "" {
+		if media, ok := detectMedia(source); ok {
+			result.Media = &media
+			result.Content = ""
+			return result, nil
+		}
+		if looksLikeImageButUnsupported(source) || isBinaryBytes(source) {
+			return readJSON{}, mediaErrorFor(source, filename)
+		}
 	}
 
 	lines := strings.Split(content, "\n")
@@ -135,7 +230,7 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		lines = lines[startIdx:]
 	}
 	content = strings.Join(lines, "\n")
-	result.StartLine = startLine + startIdx
+	result.StartLine = 1 + startIdx
 
 	tr := truncate.Head(content, truncate.DefaultMaxLines, truncate.DefaultMaxBytes)
 	result.Content = tr.Content
