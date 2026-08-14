@@ -1,0 +1,268 @@
+#!/usr/bin/env node
+// Test-only fake src CLI: performs real file operations and emits the
+// documented JSON contract of the Go binary for symbols/read/replace/insert/
+// delete/comment/edit.
+import { readFileSync, writeFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+const path = args[1];
+const rest = args.slice(2);
+
+function flag(name) {
+  const i = rest.indexOf("--" + name);
+  if (i === -1) return undefined;
+  const v = rest[i + 1];
+  return v === undefined || v.startsWith("--") ? "true" : v;
+}
+const hasFlag = (name) => rest.includes("--" + name);
+
+function symbolId(i) {
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  let n = i;
+  let out = "";
+  do {
+    out = chars[n % 62] + out;
+    n = Math.floor(n / 62);
+  } while (n > 0);
+  return out;
+}
+
+function outline(source) {
+  const lines = source.split("\n");
+  const symbols = [];
+  let idx = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^func (\w+)/);
+    if (m) {
+      const start = i;
+      let end = i;
+      while (end < lines.length && lines[end] !== "}") end++;
+      const block = lines.slice(start, end + 1).join("\n");
+      const hasDoc = lines[i - 1]?.startsWith("//");
+      const docStart = hasDoc ? i - 1 : start;
+      symbols.push({
+        id: symbolId(idx++),
+        targetable: true,
+        name: m[1],
+        kind: "function",
+        parent: "",
+        level: 1,
+        start_byte: 0,
+        end_byte: block.length,
+        start_line: start + 1,
+        end_line: end + 1,
+        has_doc: !!hasDoc,
+        _docStart: docStart,
+        _end: end,
+      });
+    }
+  }
+  return symbols;
+}
+
+function readSymbol(source, id) {
+  for (const s of outline(source)) {
+    if (s.id === id) {
+      const lines = source.split("\n");
+      return lines.slice(s._docStart, s._end + 1).join("\n");
+    }
+  }
+  return null;
+}
+
+function countLines(text) {
+  return text.split("\n").length;
+}
+
+const raw = readFileSync(path);
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_SIG = Buffer.from([0xff, 0xd8, 0xff]);
+
+function detectMedia(buf) {
+  if (buf.length >= PNG_SIG.length && buf.subarray(0, PNG_SIG.length).equals(PNG_SIG)) {
+    return { kind: "image", mime: "image/png", data_base64: buf.toString("base64") };
+  }
+  if (buf.length >= JPEG_SIG.length && buf.subarray(0, JPEG_SIG.length).equals(JPEG_SIG)) {
+    return { kind: "image", mime: "image/jpeg", data_base64: buf.toString("base64") };
+  }
+  return undefined;
+}
+
+const source = raw.toString("utf8");
+
+if (cmd === "symbols") {
+  const syms = outline(source).map(({ _docStart, _end, ...s }) => s);
+  process.stdout.write(
+    JSON.stringify({ path, language: "go", total_bytes: source.length, symbols: syms }) + "\n",
+  );
+  process.exit(0);
+}
+
+if (cmd === "read") {
+  const media = detectMedia(raw);
+  if (media && !flag("symbol-id")) {
+    process.stdout.write(JSON.stringify({ path, content: "", media }) + "\n");
+    process.exit(0);
+  }
+  const id = flag("symbol-id");
+  const offset = parseInt(flag("offset") || "0", 10);
+  const limit = parseInt(flag("limit") || "0", 10);
+  let content = source;
+  let symbolId_ = undefined;
+  if (id && id !== "true") {
+    const block = readSymbol(source, id);
+    if (block === null) {
+      process.stderr.write(`Error: symbol \"${id}\" not found; run --tree to see current IDs\n`);
+      process.exit(1);
+    }
+    content = block;
+    symbolId_ = id;
+  }
+  const total_lines = countLines(content);
+  let lines = content.split("\n");
+  if (offset > 1) lines = lines.slice(offset - 1);
+  if (limit > 0 && offset + limit < lines.length + (offset > 1 ? offset - 1 : 0)) {
+    lines = lines.slice(0, limit);
+  }
+  const selected = lines.join("\n");
+  const outputLines = countLines(selected);
+  const truncated = outputLines < total_lines;
+  process.stdout.write(
+    JSON.stringify({
+      path,
+      symbol_id: symbolId_,
+      content: selected,
+      start_line: offset > 1 ? offset : 1,
+      total_lines,
+      total_bytes: source.length,
+      truncated,
+      truncated_by: truncated ? "lines" : undefined,
+      output_lines: outputLines,
+      output_bytes: selected.length,
+      next_offset: truncated ? (offset > 1 ? offset : 1) + outputLines : undefined,
+    }) + "\n",
+  );
+  process.exit(0);
+}
+
+function writeAndReport(action, symbolId_, newSource, oldSource) {
+  writeFileSync(path, newSource);
+  const diff =
+    oldSource
+      .split("\n")
+      .map((l) => "-" + l)
+      .join("\n") +
+    "\n" +
+    newSource
+      .split("\n")
+      .map((l) => "+" + l)
+      .join("\n");
+  process.stdout.write(
+    JSON.stringify({ path, action, symbol_id: symbolId_, diff, first_changed_line: 1 }) + "\n",
+  );
+}
+
+function symbolBounds(sourceText, id) {
+  const syms = outline(sourceText);
+  const s = syms.find((x) => x.id === id);
+  if (!s) {
+    process.stderr.write(`Error: symbol \"${id}\" not found; run --tree to see current IDs\n`);
+    process.exit(1);
+  }
+  const lines = sourceText.split("\n");
+  return { start: s._docStart, end: s._end + 1, lines };
+}
+
+if (cmd === "replace") {
+  const id = flag("symbol-id");
+  const content = readFileSync(0, "utf8");
+  const { start, end, lines } = symbolBounds(source, id);
+  const next = [
+    ...lines.slice(0, start),
+    ...content.replace(/\n$/, "").split("\n"),
+    ...lines.slice(end),
+  ].join("\n");
+  writeAndReport("replace", id, next, source);
+  process.exit(0);
+}
+
+if (cmd === "delete") {
+  const id = flag("symbol-id");
+  const { start, end, lines } = symbolBounds(source, id);
+  const next = [...lines.slice(0, start), ...lines.slice(end)].join("\n");
+  writeAndReport("delete", id, next, source);
+  process.exit(0);
+}
+
+if (cmd === "insert") {
+  const id = flag("after") || flag("before");
+  const position = hasFlag("after") ? "after" : "before";
+  const content = readFileSync(0, "utf8").replace(/\n$/, "").split("\n");
+  const { start, end, lines } = symbolBounds(source, id);
+  const at = position === "after" ? end : start;
+  const next = [...lines.slice(0, at), ...content, ...lines.slice(at)].join("\n");
+  writeAndReport("insert", id, next, source);
+  process.exit(0);
+}
+
+if (cmd === "comment") {
+  const id = flag("symbol-id");
+  const syms = outline(source);
+  const s = syms.find((x) => x.id === id);
+  if (!s) {
+    process.stderr.write(`Error: symbol \"${id}\" not found\n`);
+    process.exit(1);
+  }
+  if (hasFlag("read")) {
+    const lines = source.split("\n");
+    process.stdout.write(
+      JSON.stringify({ path, symbol_id: id, comment: lines[s._docStart] ?? "" }) + "\n",
+    );
+    process.exit(0);
+  }
+  const content = readFileSync(0, "utf8").replace(/\n$/, "");
+  const lines = source.split("\n");
+  lines[s._docStart] = content;
+  writeAndReport("comment", id, lines.join("\n"), source);
+  process.exit(0);
+}
+
+if (cmd === "edit") {
+  const envelope = JSON.parse(readFileSync(0, "utf8"));
+  let next = source;
+  for (const edit of envelope.edits) {
+    const count = next.split(edit.oldText).length - 1;
+    if (count !== 1) {
+      process.stderr.write(
+        `Error: edit oldText ${count === 0 ? "not found" : "not unique (" + count + " matches)"} in ${path}\n`,
+      );
+      process.exit(1);
+    }
+    next = next.replace(edit.oldText, edit.newText);
+  }
+  writeFileSync(path, next);
+  const diff =
+    source
+      .split("\n")
+      .map((l) => "-" + l)
+      .join("\n") +
+    "\n" +
+    next
+      .split("\n")
+      .map((l) => "+" + l)
+      .join("\n");
+  process.stdout.write(
+    JSON.stringify({
+      path,
+      diff,
+      patch: diff,
+      first_changed_line: 1,
+      edits_applied: envelope.edits.length,
+    }) + "\n",
+  );
+  process.exit(0);
+}
+
+process.stderr.write(`Error: unknown command ${cmd}\n`);
+process.exit(2);
