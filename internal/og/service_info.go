@@ -1,7 +1,6 @@
 package og
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -27,7 +26,7 @@ var requiredGitHubPermissions = []requiredGitHubPermission{
 }
 
 func (s Service) AuthStatus(req Request) (Response, error) {
-	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRemoteRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -65,7 +64,7 @@ func (s Service) githubAuthStatus(ctx *repoContext) (Response, error) {
 	if s.githubBroker == nil {
 		return Response{}, fmt.Errorf("GitHub App authentication is not configured")
 	}
-	status, err := s.githubBroker.Status(context.Background(), ctx.Owner, ctx.Repo)
+	status, err := s.githubBroker.Status(operationContext(ctx), ctx.Owner, ctx.Repo)
 	if err != nil {
 		return Response{}, err
 	}

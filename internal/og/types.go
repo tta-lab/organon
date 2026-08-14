@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Request is the typed local daemon request.
+// Request is the typed input for one direct OG operation.
 type Request struct {
 	Context   context.Context `json:"-"`
 	WorkDir   string          `json:"work_dir,omitempty"`
@@ -23,7 +23,7 @@ type Request struct {
 	Tail      int             `json:"tail,omitempty"`
 }
 
-// Response is the typed local daemon response.
+// Response is the typed result of one direct OG operation.
 type Response struct {
 	OK      bool         `json:"ok"`
 	Error   string       `json:"error,omitempty"`
@@ -49,7 +49,7 @@ type CloneResult struct {
 	AlreadyExisted bool   `json:"already_existed"`
 }
 
-// Comment is the stable comment shape returned by the daemon.
+// Comment is the stable comment shape returned by OG.
 type Comment struct {
 	ID        int64     `json:"id"`
 	PRID      int64     `json:"pr_id"`

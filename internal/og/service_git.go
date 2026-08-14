@@ -10,7 +10,7 @@ import (
 )
 
 func (s Service) GitPush(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -34,7 +34,7 @@ func (s Service) GitPush(req Request) (Response, error) {
 }
 
 func (s Service) GitPull(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -105,7 +105,7 @@ func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
 }
 
 func (s Service) GitTag(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}

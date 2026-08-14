@@ -16,10 +16,6 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
-type ogDaemonCaller interface {
-	CallContext(context.Context, string, og.Request) (og.Response, error)
-}
-
 type ogProjectInput struct {
 	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
 }
@@ -68,7 +64,7 @@ type ogPRCommentInput struct {
 type ogPRTailInput struct {
 	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
-	Tail    int    `json:"tail,omitempty" jsonschema:"optional number of log tail lines; defaults to 50"`
+	Tail    *int   `json:"tail,omitempty" jsonschema:"optional number of log tail lines; defaults to 50"`
 }
 
 type ogAuthOutput struct {
@@ -156,25 +152,6 @@ func setInputSchema[T any](tool *mcp.Tool, tail bool) *mcp.Tool {
 	return tool
 }
 
-func callOGDaemon(
-	ctx context.Context,
-	projects *project.Store,
-	caller ogDaemonCaller,
-	alias, path string,
-	req og.Request,
-) (og.Response, error) {
-	entry, err := projects.Get(alias)
-	if err != nil {
-		return og.Response{}, fmt.Errorf("resolve project: %w", err)
-	}
-	req.WorkDir = entry.Path
-	resp, err := caller.CallContext(ctx, path, req)
-	if err != nil {
-		return og.Response{}, fmt.Errorf("call og daemon: %w", err)
-	}
-	return resp, nil
-}
-
 func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) error {
 	hasProject := strings.TrimSpace(projectAlias) != ""
 	hasURL := strings.TrimSpace(rawURL) != ""
@@ -190,12 +167,12 @@ func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) e
 	return nil
 }
 
-func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server {
+func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",
-		"Clone an HTTP(S) repository to its daemon-derived project or reference path.",
+		"Clone an HTTP(S) repository to its controlled project or reference path.",
 		false, false, true,
 	), false), func(
 		ctx context.Context,
@@ -205,11 +182,11 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 		if err := validateCloneSelector(input.Project, input.URL, input.Alias, input.Reference); err != nil {
 			return nil, ogCloneOutput{}, err
 		}
-		resp, err := caller.CallContext(ctx, "/git/clone", og.Request{
-			Project: input.Project, URL: input.URL, Alias: input.Alias, Reference: input.Reference,
+		resp, err := executor.GitClone(og.Request{
+			Context: ctx, Project: input.Project, URL: input.URL, Alias: input.Alias, Reference: input.Reference,
 		})
 		if err != nil {
-			return nil, ogCloneOutput{}, fmt.Errorf("call og daemon: %w", err)
+			return nil, ogCloneOutput{}, fmt.Errorf("execute clone: %w", err)
 		}
 		if err := og.ValidateCloneResponse(resp); err != nil {
 			return nil, ogCloneOutput{}, err
@@ -220,13 +197,13 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
 		"auth_status", "Inspect forge authentication",
 		"Inspect secret-free forge authentication status for one registered project.", true, false, true,
-	), false), authStatusHandler(projects, caller))
+	), false), authStatusHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPushInput](ogTool(
 		"push", "Push current branch",
 		"Push the registered checkout's current branch; force uses force-with-lease and is rejected on the default branch.",
 		false, true, true,
-	), false), pushHandler(projects, caller))
+	), false), pushHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
 		"pull", "Pull current branch",
@@ -237,18 +214,18 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 		_ *mcp.CallToolRequest,
 		input ogProjectInput,
 	) (*mcp.CallToolResult, ogMessageOutput, error) {
-		return callMessageTool(ctx, projects, caller, input.Project, "/git/pull", og.Request{})
+		return callMessageTool(ctx, projects, input.Project, og.Request{}, executor.GitPull)
 	})
 
 	mcp.AddTool(server, setInputSchema[ogPRCreateInput](ogTool(
 		"pr_create", "Create pull request",
 		"Push the registered checkout's current branch and create its pull request.", false, false, false,
-	), false), prCreateHandler(projects, caller))
+	), false), prCreateHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRFindInput](ogTool(
 		"pr_find", "Find current branch pull request",
 		"Find a pull request for the registered checkout's current branch by state.", true, false, true,
-	), false), prFindHandler(projects, caller))
+	), false), prFindHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(
 		"pr_get", "Get pull request",
@@ -260,48 +237,40 @@ func newOGMCPServer(projects *project.Store, caller ogDaemonCaller) *mcp.Server 
 		input ogPRInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
 		if input.PRID == nil {
-			return callWorktreePRTool(
-				ctx, projects, caller, input.Project, "/pr/view", og.Request{State: og.PRStateAll},
-			)
+			return callPRProjectTool(ctx, projects, input.Project, og.Request{State: og.PRStateAll}, executor.PRView)
 		}
-		return callPRTool(ctx, projects, caller, input.Project, "/pr/get", *input.PRID)
+		return callPRTool(ctx, projects, input.Project, *input.PRID, executor.PRGet)
 	})
 
 	mcp.AddTool(server, setInputSchema[ogPRModifyInput](ogTool(
 		"pr_modify", "Modify pull request",
 		"Modify title and/or body by positive PR ID or for the registered checkout's current branch when omitted.",
 		false, true, true,
-	), false), prModifyHandler(projects, caller))
+	), false), prModifyHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRCommentInput](ogTool(
 		"pr_comment", "Comment on pull request",
 		"Comment by positive PR ID or on the registered checkout's current branch when omitted.", false, false, false,
-	), false), prCommentHandler(projects, caller))
+	), false), prCommentHandler(projects, executor))
 
-	addPRLinesTool(server, projects, caller, "pr_checks", "Inspect pull request checks", "/pr/checks", false)
-	addPRLinesTool(server, projects, caller, "pr_log", "Inspect pull request CI log", "/pr/log", true)
-	addPRLinesTool(server, projects, caller, "pr_failures", "Inspect pull request failures", "/pr/failures", true)
+	addPRLinesTool(server, projects, "pr_checks", "Inspect pull request checks", executor.PRChecks, false)
+	addPRLinesTool(server, projects, "pr_log", "Inspect pull request CI log", executor.PRLog, true)
+	addPRLinesTool(server, projects, "pr_failures", "Inspect pull request failures", executor.PRFailures, true)
 
 	return server
 }
 
-func pushHandler(
-	projects *project.Store,
-	caller ogDaemonCaller,
-) mcp.ToolHandlerFor[ogPushInput, ogMessageOutput] {
+func pushHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogPushInput, ogMessageOutput] {
 	return func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input ogPushInput,
 	) (*mcp.CallToolResult, ogMessageOutput, error) {
-		return callMessageTool(ctx, projects, caller, input.Project, "/git/push", og.Request{Force: input.Force})
+		return callMessageTool(ctx, projects, input.Project, og.Request{Force: input.Force}, executor.GitPush)
 	}
 }
 
-func prCreateHandler(
-	projects *project.Store,
-	caller ogDaemonCaller,
-) mcp.ToolHandlerFor[ogPRCreateInput, ogPROutput] {
+func prCreateHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogPRCreateInput, ogPROutput] {
 	return func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
@@ -310,17 +279,14 @@ func prCreateHandler(
 		if err := og.ValidatePRTitle(input.Title); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/create", og.Request{
+		return callPRProjectTool(ctx, projects, input.Project, og.Request{
 			Title: &input.Title,
 			Body:  &input.Body,
-		})
+		}, executor.PRCreate)
 	}
 }
 
-func prFindHandler(
-	projects *project.Store,
-	caller ogDaemonCaller,
-) mcp.ToolHandlerFor[ogPRFindInput, ogPROutput] {
+func prFindHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogPRFindInput, ogPROutput] {
 	return func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
@@ -330,18 +296,18 @@ func prFindHandler(
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
-		return callWorktreePRTool(ctx, projects, caller, input.Project, "/pr/find", og.Request{State: state})
+		return callPRProjectTool(ctx, projects, input.Project, og.Request{State: state}, executor.PRFind)
 	}
 }
 
 func callMessageTool(
 	ctx context.Context,
 	projects *project.Store,
-	caller ogDaemonCaller,
-	alias, path string,
+	alias string,
 	req og.Request,
+	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogMessageOutput, error) {
-	resp, err := callOGDaemon(ctx, projects, caller, alias, path, req)
+	resp, err := callProject(ctx, projects, alias, req, operation)
 	if err != nil {
 		return nil, ogMessageOutput{}, err
 	}
@@ -351,14 +317,14 @@ func callMessageTool(
 	return nil, ogMessageOutput{Project: alias, Message: resp.Message}, nil
 }
 
-func callWorktreePRTool(
+func callPRProjectTool(
 	ctx context.Context,
 	projects *project.Store,
-	caller ogDaemonCaller,
-	alias, path string,
+	alias string,
 	req og.Request,
+	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPROutput, error) {
-	resp, err := callOGDaemon(ctx, projects, caller, alias, path, req)
+	resp, err := callProject(ctx, projects, alias, req, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
@@ -368,16 +334,33 @@ func callWorktreePRTool(
 	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil
 }
 
-func authStatusHandler(
+func callProject(
+	ctx context.Context,
 	projects *project.Store,
-	caller ogDaemonCaller,
-) mcp.ToolHandlerFor[ogProjectInput, ogAuthOutput] {
+	alias string,
+	req og.Request,
+	operation func(og.Request) (og.Response, error),
+) (og.Response, error) {
+	entry, err := projects.Get(alias)
+	if err != nil {
+		return og.Response{}, fmt.Errorf("resolve project: %w", err)
+	}
+	req.WorkDir = entry.Path
+	req.Context = ctx
+	resp, err := operation(req)
+	if err != nil {
+		return og.Response{}, fmt.Errorf("execute OG operation: %w", err)
+	}
+	return resp, nil
+}
+
+func authStatusHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogProjectInput, ogAuthOutput] {
 	return func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input ogProjectInput,
 	) (*mcp.CallToolResult, ogAuthOutput, error) {
-		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/auth/status", og.Request{})
+		resp, err := callProject(ctx, projects, input.Project, og.Request{}, executor.AuthStatus)
 		if err != nil {
 			return nil, ogAuthOutput{}, err
 		}
@@ -388,10 +371,7 @@ func authStatusHandler(
 	}
 }
 
-func prModifyHandler(
-	projects *project.Store,
-	caller ogDaemonCaller,
-) mcp.ToolHandlerFor[ogPRModifyInput, ogPROutput] {
+func prModifyHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogPRModifyInput, ogPROutput] {
 	return func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
@@ -404,9 +384,9 @@ func prModifyHandler(
 		if err := og.ValidatePRModifyInput(input.Title, input.Body); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/modify", og.Request{
+		resp, err := callProject(ctx, projects, input.Project, og.Request{
 			Index: prID, Title: input.Title, Body: input.Body,
-		})
+		}, executor.PRModify)
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
@@ -418,8 +398,7 @@ func prModifyHandler(
 }
 
 func prCommentHandler(
-	projects *project.Store,
-	caller ogDaemonCaller,
+	projects *project.Store, executor og.Executor,
 ) mcp.ToolHandlerFor[ogPRCommentInput, ogCommentOutput] {
 	return func(
 		ctx context.Context,
@@ -433,9 +412,9 @@ func prCommentHandler(
 		if err := og.ValidatePRCommentBody(&input.Body); err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		resp, err := callOGDaemon(ctx, projects, caller, input.Project, "/pr/comment", og.Request{
+		resp, err := callProject(ctx, projects, input.Project, og.Request{
 			Index: prID, Body: &input.Body,
-		})
+		}, executor.PRComment)
 		if err != nil {
 			return nil, ogCommentOutput{}, err
 		}
@@ -449,14 +428,14 @@ func prCommentHandler(
 func callPRTool(
 	ctx context.Context,
 	projects *project.Store,
-	caller ogDaemonCaller,
-	alias, path string,
+	alias string,
 	id int64,
+	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPROutput, error) {
 	if err := og.ValidatePositivePRID(id); err != nil {
 		return nil, ogPROutput{}, err
 	}
-	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id})
+	resp, err := callProject(ctx, projects, alias, og.Request{Index: id}, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
@@ -469,8 +448,8 @@ func callPRTool(
 func addPRLinesTool(
 	server *mcp.Server,
 	projects *project.Store,
-	caller ogDaemonCaller,
-	name, title, path string,
+	name, title string,
+	operation func(og.Request) (og.Response, error),
 	withTail bool,
 ) {
 	if !withTail {
@@ -483,7 +462,7 @@ func addPRLinesTool(
 			_ *mcp.CallToolRequest,
 			input ogPRInput,
 		) (*mcp.CallToolResult, ogPRLinesOutput, error) {
-			return callPRLinesTool(ctx, projects, caller, input.Project, path, input.PRID, 0)
+			return callPRLinesTool(ctx, projects, input.Project, input.PRID, 0, operation)
 		})
 		return
 	}
@@ -497,17 +476,21 @@ func addPRLinesTool(
 		_ *mcp.CallToolRequest,
 		input ogPRTailInput,
 	) (*mcp.CallToolResult, ogPRLinesOutput, error) {
-		return callPRLinesTool(ctx, projects, caller, input.Project, path, input.PRID, input.Tail)
+		tail := og.DefaultPRLogTail
+		if input.Tail != nil {
+			tail = *input.Tail
+		}
+		return callPRLinesTool(ctx, projects, input.Project, input.PRID, tail, operation)
 	})
 }
 
 func callPRLinesTool(
 	ctx context.Context,
 	projects *project.Store,
-	caller ogDaemonCaller,
-	alias, path string,
+	alias string,
 	idInput *int64,
 	tail int,
+	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPRLinesOutput, error) {
 	id, err := optionalMCPPRID(idInput)
 	if err != nil {
@@ -516,7 +499,7 @@ func callPRLinesTool(
 	if err := og.ValidatePRLogTail(tail); err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	resp, err := callOGDaemon(ctx, projects, caller, alias, path, og.Request{Index: id, Tail: tail})
+	resp, err := callProject(ctx, projects, alias, og.Request{Index: id, Tail: tail}, operation)
 	if err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
@@ -543,12 +526,18 @@ func newOGMCPCmd() *cobra.Command {
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			projects := project.NewStore(config.ProjectsPath())
+			if err := config.InjectDotEnvFallback(); err != nil {
+				cmd.PrintErrf("warning: could not load .env: %v\n", err)
+			}
+			service, err := og.LoadService(config.OGConfigPath(), config.DefaultConfigDir())
+			if err != nil {
+				return err
+			}
+			projects := service.ProjectStore()
 			if _, err := projects.Snapshot(); err != nil {
 				return err
 			}
-			client := og.NewClientFromEnv()
-			return newOGMCPServer(projects, client).Run(cmd.Context(), &mcp.StdioTransport{})
+			return newOGMCPServer(projects, service).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }

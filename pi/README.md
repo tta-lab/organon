@@ -11,7 +11,7 @@ host.
 | `@tta-lab/pi-src`     | `src`     | Structure-aware file reading and editing (replaces Pi's built-in `read` and `edit` while active) |
 | `@tta-lab/pi-web`     | `web`     | Web search, page fetch, library documentation, Sourcegraph code search                           |
 | `@tta-lab/pi-project` | `project` | List and get registered projects                                                                 |
-| `@tta-lab/pi-og`      | `og`      | Guarded Git and forge operations through the og daemon                                           |
+| `@tta-lab/pi-og`      | `og`      | Guarded Git and forge operations through the package-local og binary                             |
 
 ## Install
 

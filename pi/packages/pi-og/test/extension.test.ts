@@ -77,7 +77,7 @@ describe("pi-og extension", () => {
     }
   });
 
-  it("auth_status passes the alias and returns the auth record", async () => {
+  it("auth_status works with only the package-local fixture binary", async () => {
     const result = await call({ action: "auth_status", project: "ko" });
     const details = result.details as {
       project: string;
@@ -89,7 +89,7 @@ describe("pi-og extension", () => {
     expect((result.content[0] as { text: string }).text).toContain("Authenticated");
   });
 
-  it("push/pull forward force and return the daemon message", async () => {
+  it("push/pull forward force and return the OG message", async () => {
     const push = await call({ action: "push", project: "ko", force: true });
     expect((push.content[0] as { text: string }).text).toBe("push completed");
     const pull = await call({ action: "pull", project: "ko" });
@@ -184,7 +184,7 @@ describe("pi-og extension", () => {
     }
   });
 
-  it("daemon policy failures surface as concise errors", async () => {
+  it("OG policy failures surface as concise errors", async () => {
     await expect(call({ action: "push", project: "ko", force: false })).resolves.toBeTruthy();
   });
 

@@ -13,7 +13,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err := ValidatePRTitle(title); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -31,7 +31,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 }
 
 func (s Service) PRView(req Request) (Response, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -52,7 +52,7 @@ func (s Service) PRFind(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -67,7 +67,7 @@ func (s Service) PRGet(req Request) (Response, error) {
 	if err := ValidatePositivePRID(req.Index); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
+	ctx, err := s.resolveRemoteRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -85,7 +85,7 @@ func (s Service) PRModify(req Request) (Response, error) {
 	if err := ValidatePRModifyInput(req.Title, req.Body); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	ctx, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -114,7 +114,7 @@ func (s Service) PRComment(req Request) (Response, error) {
 	if err := ValidatePRCommentBody(req.Body); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	ctx, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -140,7 +140,7 @@ func (s Service) PRChecks(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")
 	}
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	ctx, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -177,7 +177,7 @@ func (s Service) PRFailures(req Request) (Response, error) {
 	if err := ValidatePRLogTail(req.Tail); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	ctx, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -202,7 +202,7 @@ func (s Service) PRLog(req Request) (Response, error) {
 	if err := ValidatePRLogTail(req.Tail); err != nil {
 		return Response{}, err
 	}
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	ctx, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -226,6 +226,15 @@ func (s Service) PRLog(req Request) (Response, error) {
 	lines = append(lines, "")
 	lines = append(lines, formatPRLogFailureDetails(failures)...)
 	return success(Response{PR: pr, Lines: lines}), nil
+}
+
+func (s Service) resolvePRContextForRequest(req Request) (*repoContext, error) {
+	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
+	if err != nil {
+		return nil, err
+	}
+	bindRequestContext(ctx, req)
+	return ctx, nil
 }
 
 func (s Service) resolvePRContext(workDir string, index int64) (*repoContext, error) {

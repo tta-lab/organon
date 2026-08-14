@@ -45,7 +45,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/sgraph/` — Sourcegraph public GraphQL code search
 - `internal/web/` — shared typed web application service used by CLI and MCP adapters
 - `internal/project/` — hot, archive-aware path and canonical-remote registry shared by CLI, MCP, and og
-- `internal/og/` — daemon-owned Git/forge policy and typed local protocol
+- `internal/og/` — direct Git/forge policy, configuration, and typed domain operations
 - `internal/ogconfig/` — whole-file og configuration and remote trust classification
 
 ### CLI and MCP Parity

@@ -36,7 +36,7 @@ type cloneInvocation struct {
 
 var runGitCloneFunc = runGitClone
 
-// GitClone clones one URL into its daemon-owned derived path.
+// GitClone clones one URL into its controlled derived path.
 func (s Service) GitClone(req Request) (Response, error) {
 	ctx := requestContext(req)
 	if err := ctx.Err(); err != nil {

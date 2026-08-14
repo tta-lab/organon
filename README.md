@@ -127,8 +127,8 @@ is ignored by Git. Navidrome requires an admin account for this global change.
 
 ### `og` — guarded forge operations
 
-`og` runs GitHub PR and Git network operations through its local daemon. GitHub
-authentication uses repository-scoped installation tokens minted by a GitHub
+`og` runs GitHub PR and Git network operations directly inside the calling CLI or MCP
+process. GitHub authentication uses repository-scoped installation tokens minted by a GitHub
 App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
 continues to use its existing token environment variables.
 
@@ -156,7 +156,7 @@ App token has Contents write permission, so GitHub rulesets are the hard merge
 and default-branch boundary.
 
 After downloading a private key, keep it outside the repository and configure
-the daemon:
+OG:
 
 ```bash
 install -d -m 700 ~/.config/ttal/og
@@ -174,12 +174,49 @@ allowed_base_urls = ["http://forgejo.localhost:17480"]
 EOF
 chmod 600 ~/.config/ttal/og.toml
 
-make install
-og daemon restart
-og daemon health
 ```
 
-Clone URLs through the daemon so destination, authentication, and registration
+Before replacing a pre-direct-execution installation, stop and remove its user service
+with the old installed binary. On macOS:
+
+```bash
+OLD_OG="$HOME/.local/bin/og"
+SERVICE="gui/$(id -u)/io.guion.og.daemon"
+"$OLD_OG" daemon stop || true
+"$OLD_OG" daemon uninstall || true
+launchctl bootout "$SERVICE" 2>/dev/null || true
+if launchctl print "$SERVICE" >/dev/null 2>&1; then
+  echo "old og service is still running; stop it before upgrading" >&2
+  exit 1
+fi
+rm -f "$HOME/Library/LaunchAgents/io.guion.og.daemon.plist"
+```
+
+On Linux:
+
+```bash
+OLD_OG="$HOME/.local/bin/og"
+"$OLD_OG" daemon stop || true
+"$OLD_OG" daemon uninstall || true
+systemctl --user stop og.service 2>/dev/null || true
+if systemctl --user is-active --quiet og.service; then
+  echo "old og service is still running; stop it before upgrading" >&2
+  exit 1
+fi
+rm -f "$HOME/.config/systemd/user/og.service"
+systemctl --user daemon-reload
+```
+
+The direct-execution release has no daemon lifecycle commands; run this cleanup
+before replacing the old binary.
+
+```bash
+make install
+og auth status --project organon
+```
+
+
+Clone URLs through OG so destination, authentication, and registration
 stay on one boundary:
 
 ```bash
@@ -211,26 +248,27 @@ Then use a disposable feature branch to verify `og push`, `og pr create`,
 push and PR activity to the App bot. Also verify that an SSH-configured origin
 is unchanged on disk, an uninstalled managed write fails without fallback, and
 a third-party public repository can pull anonymously but cannot write. Inspect
-daemon logs and local Git configuration for credential material without
+command errors and local Git configuration for credential material without
 printing any secret values. Remove the downloaded key copy after this passes;
 GitHub can issue a replacement, so no private-key backup is required.
 
 Only after all three owners pass, remove local `github_token_env` keys and
-GitHub PAT variables from `~/.config/ttal/.env` and shell startup files. Restart
-the daemon, repeat a representative App-only push and PR check, and then revoke
-the migration PAT.
+GitHub PAT variables from `~/.config/ttal/.env` and shell startup files. Run
+the command again, repeat a representative App-only push and PR check, and then
+revoke the migration PAT.
 
 Installation tokens are automatic, memory-only, repository-scoped, and expire
 after about one hour. The App private key is long-lived: it must never enter an
 agent environment or Git child process. Direct `git`, `gh`, and arbitrary API
-calls are outside the daemon credential boundary and may still use personal
+calls are outside OG's credential boundary and may still use personal
 credentials; mandatory GitHub rulesets protect the default branch in those
 paths.
 
 For key rotation, create a replacement App key, install it with mode `0600`,
-restart the daemon, verify all owners with `og auth status`, and then revoke and
+run `og auth status` again, verify all owners, and then revoke and
 remove the old key. Before PAT revocation, rollback means reinstalling the
-previous `og` binary and restarting its daemon with the existing migration PAT.
+previous `og` binary and stopping and uninstalling the old service with the existing
+migration PAT.
 After revocation, emergency rollback requires a new narrow temporary PAT; never
 reactivate or reuse the exposed migration PAT.
 
@@ -256,8 +294,8 @@ are single-layer names and cannot contain dots. Project registry updates are
 visible on the next MCP call. The
 repository-oriented `og` tools accept only that alias; they do not accept a
 filesystem path, working directory, MCP root, file URI, or credential. `clone`
-accepts a URL instead. The `og` daemon must already be running and owns Git,
-registration, policy, and forge credentials.
+accepts a URL instead. The `og` MCP process loads configuration once and owns Git,
+registration, policy, and forge credentials for its lifetime.
 
 `skill mcp` exposes `skill_list`, `skill_find`, and `skill_get`. With no project
 argument it searches only global skill directories. With an exact registered
@@ -275,7 +313,7 @@ workflows against the registered checkout's current branch. Force push uses
 force-with-lease and is rejected on the default branch. Pull retains the CLI's
 guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
 operation; `pr_get`, modify, comment, checks, log, and failures use the current
-branch when the ID is omitted. Tag remains CLI-only. Restart the daemon after
+branch when the ID is omitted. Tag remains CLI-only. Start a new `og` process after
 changing `og.toml`; restart web MCP after changing web configuration. Run
 `<tool> mcp --help` for each server's tool list and configuration details.
 
@@ -345,7 +383,7 @@ logos (agent loop)
 
 - **Small cores, thin adapters** — CLI and MCP commands share typed internal
   services instead of duplicating business rules. Most commands parse, act,
-  and exit; `og` uses a local credential-owning daemon.
+  and exit; `og` composes its credentials and policy in the calling process.
 - **Stdin for content** — new code goes through heredoc. One multiline arg, not two.
 - **2-char IDs** — base62 identifiers for symbols/sections, same system as [flicknote](https://github.com/tta-lab/flicknote).
 - **Tree-sitter** — syntax-level AST parsing. No LSP server needed.
