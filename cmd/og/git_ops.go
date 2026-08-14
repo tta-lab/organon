@@ -59,10 +59,10 @@ func runGitPush(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return err
+	}
 	if jsonFlag(cmd) {
-		if err := og.ValidateMessageResponse(resp); err != nil {
-			return err
-		}
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
 	printDaemonResponse(cmd, resp)
@@ -78,10 +78,10 @@ func runGitPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return err
+	}
 	if jsonFlag(cmd) {
-		if err := og.ValidateMessageResponse(resp); err != nil {
-			return err
-		}
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
 	printDaemonResponse(cmd, resp)

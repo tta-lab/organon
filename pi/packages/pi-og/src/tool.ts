@@ -117,10 +117,22 @@ export const ogSchema = Type.Union([
       action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
-      title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
+      title: Type.String({ description: "Replacement pull request title" }),
       body: Type.Optional(
         Type.String({ description: "Replacement pull request body; an empty string clears it" }),
       ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
+      project: Type.String({ description: projectDesc }),
+      pr_id: Type.Optional(positivePrId),
+      title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
+      body: Type.String({
+        description: "Replacement pull request body; an empty string clears it",
+      }),
     },
     { additionalProperties: false },
   ),

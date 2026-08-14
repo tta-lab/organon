@@ -37,20 +37,13 @@ func runPRDaemonWithOutput(cmd *cobra.Command, path string, req og.Request) erro
 	if err != nil {
 		return err
 	}
-	if resp.PR != nil {
-		if jsonFlag(cmd) {
-			if err := og.ValidatePRResponse(resp, req.Index); err != nil {
-				return err
-			}
-			return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
-		}
-		return printPR(cmd, resp.PR)
+	if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+		return err
 	}
 	if jsonFlag(cmd) {
-		return og.ValidatePRResponse(resp, req.Index)
+		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 	}
-	printDaemonResponse(cmd, resp)
-	return nil
+	return printPR(cmd, resp.PR)
 }
 
 func runLinesDaemon(cmd *cobra.Command, path string, req og.Request) error {
@@ -63,10 +56,10 @@ func runLinesDaemon(cmd *cobra.Command, path string, req og.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+		return err
+	}
 	if jsonFlag(cmd) {
-		if err := og.ValidatePRResponse(resp, req.Index); err != nil {
-			return err
-		}
 		return printJSON(cmd, ogPRLinesJSON{Project: alias, PR: *resp.PR, Lines: resp.Lines})
 	}
 	if len(resp.Lines) == 0 {

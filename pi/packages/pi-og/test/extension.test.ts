@@ -39,7 +39,12 @@ describe("pi-og extension", () => {
     expect(Value.Check(ogSchema, { action: "pr_create", project: "ko", title: "t" })).toBe(true);
     expect(Value.Check(ogSchema, { action: "pr_find", project: "ko", state: "closed" })).toBe(true);
     expect(Value.Check(ogSchema, { action: "pr_get", project: "ko", pr_id: 3 })).toBe(true);
+    expect(Value.Check(ogSchema, { action: "pr_modify", project: "ko", title: "t" })).toBe(true);
     expect(Value.Check(ogSchema, { action: "pr_modify", project: "ko", body: "" })).toBe(true);
+    expect(
+      Value.Check(ogSchema, { action: "pr_modify", project: "ko", title: "t", body: "b" }),
+    ).toBe(true);
+    expect(Value.Check(ogSchema, { action: "pr_modify", project: "ko" })).toBe(false);
     expect(Value.Check(ogSchema, { action: "pr_comment", project: "ko", body: "note" })).toBe(true);
     expect(Value.Check(ogSchema, { action: "pr_log", project: "ko", tail: 100 })).toBe(true);
     expect(Value.Check(ogSchema, { action: "pr_get", project: "ko", pr_id: 0 })).toBe(false);

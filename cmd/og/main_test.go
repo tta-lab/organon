@@ -490,6 +490,72 @@ func TestPRViewJSONPrintsCISummary(t *testing.T) {
 	}
 }
 
+func TestHumanDaemonResponsesUseSharedValidation(t *testing.T) {
+	runWithoutUsage := func(args ...string) (string, error) {
+		var outBuf, errBuf bytes.Buffer
+		cmd := newRootCmd(&outBuf, &errBuf)
+		cmd.SilenceUsage = true
+		cmd.SetArgs(args)
+		err := cmd.Execute()
+		return outBuf.String(), err
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		resp og.Response
+		want string
+	}{
+		{
+			name: "PR response",
+			args: []string{"pr", "view"},
+			resp: og.Response{OK: true, Message: "malformed PR response"},
+			want: "no pull request",
+		},
+		{
+			name: "invalid PR ID",
+			args: []string{"pr", "view"},
+			resp: og.Response{OK: true, PR: &og.PullRequest{Index: 0, Title: "malformed"}},
+			want: "invalid PR ID",
+		},
+		{
+			name: "lines response",
+			args: []string{"pr", "log"},
+			resp: og.Response{OK: true, Lines: []string{"malformed CI line"}},
+			want: "no pull request",
+		},
+		{
+			name: "push message",
+			args: []string{"push"},
+			resp: og.Response{OK: true, Message: " \n"},
+			want: "no operation result",
+		},
+		{
+			name: "pull message",
+			args: []string{"pull"},
+			resp: og.Response{OK: true, Message: " \n"},
+			want: "no operation result",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(tc.resp)
+			}))
+			defer server.Close()
+			t.Setenv("OG_DAEMON_URL", server.URL)
+
+			stdout, err := runWithoutUsage(tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("runOG(%v) error = %v, want %q", tc.args, err, tc.want)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want no malformed response rendering", stdout)
+			}
+		})
+	}
+}
+
 func TestPRLogRoutesToLogEndpoint(t *testing.T) {
 	var got og.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -501,6 +567,7 @@ func TestPRLogRoutesToLogEndpoint(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(og.Response{
 			OK:    true,
+			PR:    &og.PullRequest{Index: 7, Title: "ci", State: "open"},
 			Lines: []string{"CI Status for abc12345: failed", "Failure Details:"},
 		})
 	}))
@@ -546,6 +613,8 @@ func TestPRCommandsSendExplicitPRIDToDaemon(t *testing.T) {
 				resp := og.Response{OK: true, Message: "ok", Lines: []string{"ok"}}
 				if tt.path == "/pr/comment" {
 					resp.Comment = &og.Comment{ID: 1, PRID: 41, Body: "review note", URL: "https://example.com/c/1"}
+				} else {
+					resp.PR = &og.PullRequest{Index: 41, Title: "ci", State: "open"}
 				}
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
