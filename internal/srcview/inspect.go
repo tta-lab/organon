@@ -164,7 +164,7 @@ func (i *Inspector) ReadSymbolLines(symbolID string) (SymbolRead, error) {
 		return SymbolRead{
 			Content:    content,
 			StartLine:  lineNumberAt(i.source, start),
-			TotalLines: bytes.Count([]byte(content), []byte("\n")) + 1,
+			TotalLines: realLineCount(content),
 		}, nil
 	}
 	result, err := i.Read(symbolID, 0)
@@ -174,12 +174,22 @@ func (i *Inspector) ReadSymbolLines(symbolID string) (SymbolRead, error) {
 	return SymbolRead{
 		Content:    result.Content,
 		StartLine:  lineNumberAt(i.source, result.Start),
-		TotalLines: bytes.Count([]byte(result.Content), []byte("\n")) + 1,
+		TotalLines: realLineCount(result.Content),
 	}, nil
 }
 
 func lineNumberAt(source []byte, offset int) int {
 	return bytes.Count(source[:offset], []byte("\n")) + 1
+}
+
+// realLineCount returns the number of lines in content, excluding the phantom
+// empty element a trailing newline produces when splitting on "\n".
+func realLineCount(content string) int {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return len(lines) - 1
+	}
+	return len(lines)
 }
 
 // ReadContent preserves the established CLI representation of a full symbol or section.

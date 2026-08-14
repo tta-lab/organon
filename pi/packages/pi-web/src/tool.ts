@@ -1,9 +1,15 @@
 import { createRequire } from "node:module";
 
-import { formatSize, truncateHead, type TruncationResult } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
-import { cliError, parseSingleJsonDoc, resolveBinaryPath, runCli } from "@tta-lab/pi-shared";
+import {
+  cliError,
+  parseSingleJsonDoc,
+  resolveBinaryPath,
+  runCli,
+  truncateForModel,
+} from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
 
@@ -12,14 +18,14 @@ const DEFAULT_TREE_THRESHOLD = 5000;
 export const webSchema = Type.Union([
   Type.Object(
     {
-      action: Type.Literal("search"),
+      action: StringEnum(["search"] as const, { description: "Action to perform" }),
       query: Type.String({ description: "Web search query" }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: Type.Literal("fetch"),
+      action: StringEnum(["fetch"] as const, { description: "Action to perform" }),
       url: Type.String({ description: "HTTP or HTTPS URL to fetch" }),
       tree: Type.Optional(Type.Boolean({ description: "Show the page heading tree" })),
       section_id: Type.Optional(
@@ -32,7 +38,6 @@ export const webSchema = Type.Union([
         Type.Integer({
           description: "Automatic tree threshold; defaults to " + DEFAULT_TREE_THRESHOLD,
           default: DEFAULT_TREE_THRESHOLD,
-          minimum: 0,
         }),
       ),
     },
@@ -40,21 +45,20 @@ export const webSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("docs_resolve"),
+      action: StringEnum(["docs_resolve"] as const, { description: "Action to perform" }),
       query: Type.String({ description: "Library name or package query" }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: Type.Literal("docs_fetch"),
+      action: StringEnum(["docs_fetch"] as const, { description: "Action to perform" }),
       library_id: Type.String({ description: "Context7 library ID returned by docs_resolve" }),
       topic: Type.Optional(Type.String({ description: "Optional documentation topic" })),
       tokens: Type.Optional(
         Type.Integer({
           description: "Optional token budget; zero uses the backend default",
           default: 0,
-          minimum: 0,
         }),
       ),
     },
@@ -62,7 +66,7 @@ export const webSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("sgraph"),
+      action: StringEnum(["sgraph"] as const, { description: "Action to perform" }),
       query: Type.String({ description: "Sourcegraph search query" }),
       count: Type.Optional(
         Type.Integer({
@@ -82,7 +86,6 @@ export const webSchema = Type.Union([
         Type.Integer({
           description: "Optional timeout in seconds; zero disables the timeout",
           default: 0,
-          minimum: 0,
         }),
       ),
     },
@@ -160,31 +163,6 @@ function isAction<T extends Action["action"]>(
  * an actionable continuation notice. The full structured result stays in
  * tool-result details.
  */
-export function truncateForModel(content: string): {
-  text: string;
-  truncation?: TruncationResult;
-} {
-  const truncation = truncateHead(content);
-  if (!truncation.truncated) {
-    return { text: content };
-  }
-  let text: string;
-  if (truncation.firstLineExceedsLimit) {
-    text = `[First line is ${formatSize(truncation.totalBytes)}, exceeds ${formatSize(50 * 1024)} limit]`;
-  } else if (truncation.truncatedBy === "lines") {
-    text =
-      truncation.content +
-      `\n\n[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines ` +
-      `(${truncation.maxLines} line limit). Use fetch with tree or section_id to navigate the document.]`;
-  } else {
-    text =
-      truncation.content +
-      `\n\n[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes)} limit). ` +
-      `Use fetch with tree or section_id to navigate the document.]`;
-  }
-  return { text, truncation };
-}
-
 export function webTool() {
   return {
     name: "web",
@@ -269,30 +247,34 @@ function render(
     const lines = data.results.map(
       (r) => `${r.position}. ${r.title}\n   URL: ${r.link}\n   ${r.snippet}`,
     );
-    const text =
+    const raw =
       lines.length === 0
         ? "No search results."
         : `Found ${lines.length} search results (provider: ${data.provider}):\n\n` +
           lines.join("\n\n");
-    return { content: [{ type: "text", text }], details: data };
+    return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
   }
   if (isAction(input, "fetch")) {
     const data = parseSingleJsonDoc<FetchResult>(stdout);
-    const { text, truncation } = truncateForModel(data.content);
+    const { text, truncation } = truncateForModel(data.content, {
+      hint: "Use fetch with tree or section_id to navigate the document.",
+    });
     return { content: [{ type: "text", text }], details: { ...data, truncation } };
   }
   if (isAction(input, "docs_resolve")) {
     const data = parseSingleJsonDoc<DocsResolveResult>(stdout);
     const lines = data.libraries.map((lib) => `- ${lib.id}: ${lib.title}`);
-    const text =
+    const raw =
       lines.length === 0
         ? `No libraries found for ${JSON.stringify(input.query)}`
         : `Found ${lines.length} libraries:\n` + lines.join("\n");
-    return { content: [{ type: "text", text }], details: data };
+    return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
   }
   if (isAction(input, "docs_fetch")) {
     const data = parseSingleJsonDoc<DocsFetchResult>(stdout);
-    const { text, truncation } = truncateForModel(data.content);
+    const { text, truncation } = truncateForModel(data.content, {
+      hint: "Refetch with a narrower topic or tokens budget for the remainder.",
+    });
     return { content: [{ type: "text", text }], details: { ...data, truncation } };
   }
   const data = parseSingleJsonDoc<SGraphResult>(stdout);

@@ -17,16 +17,22 @@ const positivePrId = Type.Integer({
 
 export const ogSchema = Type.Union([
   Type.Object(
-    { action: Type.Literal("auth_status"), project: Type.String({ description: projectDesc }) },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    { action: Type.Literal("pull"), project: Type.String({ description: projectDesc }) },
+    {
+      action: StringEnum(["auth_status"] as const, { description: "Action to perform" }),
+      project: Type.String({ description: projectDesc }),
+    },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: Type.Literal("push"),
+      action: StringEnum(["pull"] as const, { description: "Action to perform" }),
+      project: Type.String({ description: projectDesc }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      action: StringEnum(["push"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       force: Type.Optional(
         Type.Boolean({
@@ -39,14 +45,14 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("clone"),
+      action: StringEnum(["clone"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: Type.Literal("clone"),
+      action: StringEnum(["clone"] as const, { description: "Action to perform" }),
       url: Type.String({ description: "HTTP(S) repository URL with exactly owner/repo" }),
       alias: Type.Optional(
         Type.String({ description: "Optional exact single-layer project alias" }),
@@ -62,7 +68,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_create"),
+      action: StringEnum(["pr_create"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       title: Type.String({ description: "Non-blank pull request title" }),
       body: Type.Optional(
@@ -73,7 +79,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_find"),
+      action: StringEnum(["pr_find"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       state: Type.Optional(
         StringEnum(["open", "closed", "all"] as const, {
@@ -86,7 +92,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_get"),
+      action: StringEnum(["pr_get"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
     },
@@ -94,7 +100,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_checks"),
+      action: StringEnum(["pr_checks"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
     },
@@ -102,7 +108,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_modify"),
+      action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
       title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
@@ -114,7 +120,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_comment"),
+      action: StringEnum(["pr_comment"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
       body: Type.String({ description: "Non-blank pull request comment body (may be multiline)" }),
@@ -123,7 +129,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_log"),
+      action: StringEnum(["pr_log"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(
@@ -139,7 +145,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("pr_failures"),
+      action: StringEnum(["pr_failures"] as const, { description: "Action to perform" }),
       project: Type.String({ description: projectDesc }),
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -18,8 +17,8 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if resp.Auth == nil {
-		return fmt.Errorf("og daemon returned no authentication status")
+	if err := og.ValidateAuthResponse(resp, alias); err != nil {
+		return err
 	}
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogAuthJSON{Project: alias, Auth: *resp.Auth})
@@ -40,12 +39,15 @@ func runPRDaemonWithOutput(cmd *cobra.Command, path string, req og.Request) erro
 	}
 	if resp.PR != nil {
 		if jsonFlag(cmd) {
+			if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+				return err
+			}
 			return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 		}
 		return printPR(cmd, resp.PR)
 	}
 	if jsonFlag(cmd) {
-		return fmt.Errorf("og daemon returned no pull request")
+		return og.ValidatePRResponse(resp, req.Index)
 	}
 	printDaemonResponse(cmd, resp)
 	return nil
@@ -62,8 +64,8 @@ func runLinesDaemon(cmd *cobra.Command, path string, req og.Request) error {
 		return err
 	}
 	if jsonFlag(cmd) {
-		if resp.PR == nil {
-			return fmt.Errorf("og daemon returned no pull request")
+		if err := og.ValidatePRResponse(resp, req.Index); err != nil {
+			return err
 		}
 		return printJSON(cmd, ogPRLinesJSON{Project: alias, PR: *resp.PR, Lines: resp.Lines})
 	}

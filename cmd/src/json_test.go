@@ -140,7 +140,7 @@ func TestReadJSONWholeFile(t *testing.T) {
 	assert.Equal(t, f, out.Path)
 	assert.Equal(t, "package sample\n\nfunc Foo() {}\n", out.Content)
 	assert.Equal(t, 1, out.StartLine)
-	assert.Equal(t, 4, out.TotalLines)
+	assert.Equal(t, 3, out.TotalLines)
 	assert.False(t, out.Truncated)
 }
 
@@ -152,7 +152,7 @@ func TestReadJSONPlainTextWithoutStructure(t *testing.T) {
 		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
 	}))
 	assert.Equal(t, "line one\nline two\n", out.Content)
-	assert.Equal(t, 3, out.TotalLines)
+	assert.Equal(t, 2, out.TotalLines)
 }
 
 func TestReadJSONSymbolID(t *testing.T) {
@@ -204,7 +204,7 @@ func TestReadJSONExplicitLimitSetsContinuation(t *testing.T) {
 	}))
 	assert.False(t, out.Truncated)
 	assert.Equal(t, 3, out.OutputLines)
-	assert.Equal(t, 11, out.TotalLines)
+	assert.Equal(t, 10, out.TotalLines)
 	// The caller-limited window must still advertise the next offset.
 	assert.Equal(t, 4, out.NextOffset)
 }
@@ -225,10 +225,32 @@ func TestReadJSONOffsetLimitPagination(t *testing.T) {
 	}))
 	assert.Equal(t, "line xxx\nline xxxx", out.Content)
 	assert.Equal(t, 3, out.StartLine)
-	assert.Equal(t, 13, out.TotalLines)
+	assert.Equal(t, 12, out.TotalLines)
 	assert.False(t, out.Truncated)
 }
 
+func TestReadJSONRejectsOffsetPastLastRealLine(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "two.txt")
+	// Two real lines; the trailing newline produces a phantom third split
+	// element that is not a line an agent can page to.
+	require.NoError(t, os.WriteFile(f, []byte("a\nb\n"), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("offset", "3"))
+	err := runReadJSON(cmd, []string{f})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "beyond end")
+
+	// The last real line is still readable.
+	cmd2 := newReadCmd()
+	require.NoError(t, cmd2.Flags().Set("offset", "2"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd2, []string{f}))
+	}))
+	assert.Equal(t, "b\n", out.Content)
+	assert.Equal(t, 2, out.TotalLines)
+}
 func TestReadJSONOffsetBeyondEnd(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "short.txt")
@@ -278,7 +300,7 @@ func TestReadJSONLineTruncationContinuation(t *testing.T) {
 	assert.Equal(t, "lines", out.TruncatedBy)
 	assert.Equal(t, 2000, out.OutputLines)
 	assert.Equal(t, 2001, out.NextOffset)
-	assert.Equal(t, 2101, out.TotalLines)
+	assert.Equal(t, 2100, out.TotalLines)
 }
 
 func TestReadJSONFirstLineExceedsLimit(t *testing.T) {
@@ -390,5 +412,5 @@ func TestReadJSONCRLFAndBOM(t *testing.T) {
 		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
 	}))
 	assert.Equal(t, "\xef\xbb\xbfpackage p\r\n\r\nfunc F() {}\r\n", out.Content)
-	assert.Equal(t, 4, out.TotalLines)
+	assert.Equal(t, 3, out.TotalLines)
 }

@@ -24,14 +24,14 @@ const editEntry = Type.Object({
 export const srcSchema = Type.Union([
   Type.Object(
     {
-      action: Type.Literal("symbols"),
+      action: StringEnum(["symbols"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: Type.Literal("read"),
+      action: StringEnum(["read"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.Optional(Type.String({ description: symbolIdDescription })),
       offset: Type.Optional(
@@ -48,7 +48,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("replace"),
+      action: StringEnum(["replace"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
       content: Type.String({
@@ -59,7 +59,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("insert"),
+      action: StringEnum(["insert"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
       position: StringEnum(["before", "after"] as const, {
@@ -71,7 +71,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("delete"),
+      action: StringEnum(["delete"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
     },
@@ -79,7 +79,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("comment"),
+      action: StringEnum(["comment"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
       read: Type.Literal(true, { description: "Read the existing doc comment" }),
@@ -88,7 +88,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("comment"),
+      action: StringEnum(["comment"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
       content: Type.String({ description: "New doc comment (may be multiline)" }),
@@ -97,7 +97,7 @@ export const srcSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("edit"),
+      action: StringEnum(["edit"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       edits: Type.Array(editEntry, {
         description:

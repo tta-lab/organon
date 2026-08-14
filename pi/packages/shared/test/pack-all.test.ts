@@ -27,10 +27,18 @@ const tmp = mkdtempSync(join(tmpdir(), "pi-pack-all-"));
 const readManifest = (tgz: string) =>
   JSON.parse(execFileSync("tar", ["-xOf", tgz, "package/package.json"], { encoding: "utf8" }));
 
+let packCount = 0;
 function pack(dir: string, name: string): string {
-  execFileSync("pnpm", ["pack", "--pack-destination", tmp], { cwd: dir, stdio: "pipe" });
-  const file = readdirSync(tmp).find((f) => f.includes(name.replace("@", "").replace("/", "-")))!;
-  return join(tmp, file);
+  // Pack into a fresh per-call directory so stale tarballs from earlier calls
+  // (or earlier runs) can never be selected by name.
+  const dest = join(tmp, `pack-${packCount++}`);
+  mkdirSync(dest, { recursive: true });
+  execFileSync("pnpm", ["pack", "--pack-destination", dest], { cwd: dir, stdio: "pipe" });
+  const files = readdirSync(dest).filter((f) => f.endsWith(".tgz"));
+  if (files.length !== 1) {
+    throw new Error(`expected one tarball in ${dest}, got ${files.join(",")}`);
+  }
+  return join(dest, files[0]!);
 }
 
 afterAll(() => {
@@ -78,69 +86,87 @@ describe("all sixteen package manifests", () => {
     const smoke: Array<{
       tool: string;
       action: unknown;
-      fixture: string;
       assert: (details: any) => void;
     }> = [
       {
         tool: "src",
         action: { action: "symbols", path: join(tmp, "smoke.go") },
-        fixture: "packages/pi-src/testdata/bin/src",
         assert: (details: any) => expect(details.symbols[0]!.name).toBe("Foo"),
       },
       {
         tool: "web",
         action: { action: "search", query: "tree-sitter" },
-        fixture: "packages/pi-web/testdata/bin/web",
         assert: (details: any) => expect(details.provider).toBe("DuckDuckGo"),
       },
       {
         tool: "project",
         action: { action: "list" },
-        fixture: "packages/pi-project/testdata/bin/project",
         assert: (details: any) => expect(details.projects.length).toBeGreaterThan(0),
       },
       {
         tool: "og",
         action: { action: "auth_status", project: "ko" },
-        fixture: "packages/pi-og/testdata/bin/og",
         assert: (details: any) => expect(details.auth.ready).toBe(true),
       },
     ];
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
-    for (const { tool, action, fixture, assert } of smoke) {
-      // Pack the native package from a throwaway copy so tests never write
-      // fixtures into the workspace native packages (a leftover fixture would
-      // be picked up by local debugging as the tool binary).
+    for (const { tool, action, assert } of smoke) {
+      // Pack the native packages (fixtures are staged in the workspace native
+      // packages by vitest's global setup for this run) and the main package.
       const hostSuffix = `${osName}-${archName}`;
       const nativePkgName = `@tta-lab/pi-${tool}-${hostSuffix}`;
       const nativePkgDir = join(workspace, "packages", "native", `pi-${tool}-${hostSuffix}`);
-      const manifest = JSON.parse(readFileSync(join(nativePkgDir, "package.json"), "utf8"));
-      const tempNative = join(tmp, `native-${tool}-${hostSuffix}`);
-      rmSync(tempNative, { recursive: true, force: true });
-      mkdirSync(join(tempNative, "bin"), { recursive: true });
-      writeFileSync(join(tempNative, "package.json"), JSON.stringify(manifest, null, 2));
-      copyFileSync(join(workspace, fixture), join(tempNative, "bin", tool));
-      chmodSync(join(tempNative, "bin", tool), 0o755);
-
-      const nativeTgz = pack(tempNative, nativePkgName);
+      const nativeTgz = pack(nativePkgDir, nativePkgName);
       const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
 
+      // Real package-manager install: npm resolves the main tarball's optional
+      // dependencies (pinned to the packed native tarballs via overrides) and
+      // applies os/cpu selection. Peer dependencies are skipped because pi
+      // bundles them; the offline flag keeps the registry out of the test.
       const installRoot = join(tmp, `install-${tool}`);
       rmSync(installRoot, { recursive: true, force: true });
       mkdirSync(installRoot, { recursive: true });
-      execFileSync("tar", ["-xzf", mainTgz, "-C", installRoot], { stdio: "pipe" });
-      const pkg = join(installRoot, "package");
-      expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
+      const overrides: Record<string, string> = {};
+      for (const [, , suffix] of TARGETS) {
+        const platformDir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`);
+        const tgz = pack(platformDir, `@tta-lab/pi-${tool}-${suffix}`);
+        overrides[`@tta-lab/pi-${tool}-${suffix}`] = `file:${tgz}`;
+      }
+      writeFileSync(
+        join(installRoot, "package.json"),
+        JSON.stringify({ name: "smoke", private: true, overrides }),
+      );
+      // Run npm from the project dir so the overrides in its package.json
+      // apply; the main tarball is referenced by its absolute path.
+      execFileSync(
+        "npm",
+        [
+          "install",
+          "--offline",
+          "--legacy-peer-deps",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          mainTgz,
+        ],
+        { cwd: installRoot, stdio: "pipe" },
+      );
 
-      // Install the packed native tarball exactly where npm would place the
-      // matching optional dependency.
-      const installedNative = join(pkg, "node_modules", "@tta-lab", `pi-${tool}-${hostSuffix}`);
-      mkdirSync(installedNative, { recursive: true });
-      execFileSync("tar", ["-xzf", nativeTgz, "-C", installedNative, "--strip-components=1"], {
-        stdio: "pipe",
-      });
+      const pkg = join(installRoot, "node_modules", `@tta-lab/pi-${tool}`);
+      expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
+      // The host platform's native optional dependency was selected and
+      // installed with its binary; the other platforms were skipped.
+      const installedNative = join(installRoot, "node_modules", nativePkgName);
       expect(existsSync(join(installedNative, "bin", tool))).toBe(true);
+      console.log("TOOL", tool, "bin ok");
+      for (const [, , suffix] of TARGETS) {
+        if (suffix !== hostSuffix) {
+          expect(
+            existsSync(join(installRoot, "node_modules", "@tta-lab", `pi-${tool}-${suffix}`)),
+          ).toBe(false);
+        }
+      }
 
       // Real Pi discovery: the package manager resolve path feeds the loader.
       const { discoverAndLoadExtensions } = await import("@earendil-works/pi-coding-agent");

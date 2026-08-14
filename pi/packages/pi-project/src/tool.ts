@@ -1,15 +1,22 @@
 import { createRequire } from "node:module";
 
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
-import { resolveBinaryPath, runCli, parseSingleJsonDoc, cliError } from "@tta-lab/pi-shared";
+import {
+  resolveBinaryPath,
+  runCli,
+  parseSingleJsonDoc,
+  cliError,
+  truncateForModel,
+} from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
 
 export const projectSchema = Type.Union([
   Type.Object(
     {
-      action: Type.Literal("list"),
+      action: StringEnum(["list"] as const, { description: "Action to perform" }),
       include_archived: Type.Optional(
         Type.Boolean({ description: "Include archived projects; defaults to false" }),
       ),
@@ -18,7 +25,7 @@ export const projectSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: Type.Literal("get"),
+      action: StringEnum(["get"] as const, { description: "Action to perform" }),
       alias: Type.String({
         description: "Exact registered single-layer project alias",
       }),
@@ -83,9 +90,9 @@ export function projectTool() {
           const label = p.name && p.name !== "" ? p.name : p.alias;
           return `- ${p.alias}: ${label} (${p.path})${p.archived ? " [archived]" : ""}`;
         });
-        const text =
+        const raw =
           lines.length === 0 ? "No projects found." : "Available projects:\n" + lines.join("\n");
-        return { content: [{ type: "text", text }], details: data };
+        return { content: [{ type: "text", text: truncateForModel(raw).text }], details: data };
       }
       const data = parseSingleJsonDoc<ProjectGetResult>(result.stdout);
       const p = data.project;

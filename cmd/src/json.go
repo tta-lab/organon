@@ -81,6 +81,16 @@ type editBatchJSON struct {
 	EditsApplied     int    `json:"edits_applied"`
 }
 
+// realLineCount returns the number of lines in content, excluding the phantom
+// empty element a trailing newline produces when splitting on "\n".
+func realLineCount(content string) int {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return len(lines) - 1
+	}
+	return len(lines)
+}
+
 // isBinaryBytes reports binary content via null bytes in the first 8 KiB.
 func isBinaryBytes(data []byte) bool {
 	check := data
@@ -236,14 +246,14 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 
 func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
 	content := string(source)
-	totalLines := strings.Count(content, "\n") + 1
+	totalLines := realLineCount(content)
 
 	if symbolID != "" {
 		read, err := srcview.NewInspector(filename, source, 2).ReadSymbolLines(symbolID)
 		if err != nil {
 			return readJSON{}, err
 		}
-		content, totalLines = read.Content, read.TotalLines
+		content, totalLines = read.Content, realLineCount(read.Content)
 	}
 
 	result := readJSON{
@@ -266,7 +276,9 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 	if offset > 1 {
 		startIdx = offset - 1
 	}
-	if startIdx > len(lines) {
+	// Reject an offset past the last real line; the phantom empty element from
+	// a final newline is not a line an agent can page to.
+	if startIdx >= len(lines) || startIdx >= totalLines {
 		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (%d lines)", offset, filename, totalLines)
 	}
 	if limit > 0 && startIdx+limit < len(lines) {

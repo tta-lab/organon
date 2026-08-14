@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { truncateForModel, webSchema, webTool } from "../src/tool.js";
+import { truncateForModel } from "../../shared/src/truncate.js";
+import { webSchema, webTool } from "../src/tool.js";
 
 const def = webTool();
 const ctx = { cwd: "/tmp", model: undefined } as any;
@@ -43,7 +44,10 @@ describe("pi-web extension", () => {
       false,
     );
     expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", count: 2.5 })).toBe(false);
-    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", timeout: -1 })).toBe(false);
+    // Negative integers match the MCP contract: the shared Go service
+    // normalizes non-positive count/context and treats non-positive timeout
+    // as disabled.
+    expect(Value.Check(webSchema, { action: "sgraph", query: "repo:x", timeout: -1 })).toBe(true);
     expect(Value.Check(webSchema, { action: "search" })).toBe(false);
     expect(Value.Check(webSchema, { action: "fetch", url: "https://example.com", bogus: 1 })).toBe(
       false,
@@ -128,7 +132,12 @@ describe("pi-web extension", () => {
     expect(truncation!.truncated).toBe(true);
     expect(truncation!.truncatedBy).toBe("lines");
     expect(text).toContain("[Truncated: showing 2000 of 3000 lines");
-    expect(text).toContain("section_id");
+
+    // The fetch action passes an actionable hint; the generic helper appends it.
+    const { text: hinted } = truncateForModel(big, {
+      hint: "Use fetch with tree or section_id to navigate the document.",
+    });
+    expect(hinted).toContain("section_id");
   });
 
   it("abort cancels the CLI child process", async () => {

@@ -32,8 +32,8 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if resp.PR == nil {
-		return fmt.Errorf("og daemon returned no pull request")
+	if err := og.ValidatePRResponse(resp, 0); err != nil {
+		return err
 	}
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
@@ -94,8 +94,8 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if resp.PR == nil {
-		return fmt.Errorf("og daemon returned no pull request")
+	if err := og.ValidatePRModifyResponse(resp, index, titleInput, bodyInput); err != nil {
+		return err
 	}
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
@@ -125,8 +125,8 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if resp.Comment == nil {
-		return fmt.Errorf("og daemon returned no comment")
+	if err := og.ValidateCommentResponse(resp, index, body); err != nil {
+		return err
 	}
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogCommentJSON{Project: alias, Comment: *resp.Comment})
