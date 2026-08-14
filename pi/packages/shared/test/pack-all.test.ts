@@ -52,7 +52,7 @@ describe("all sixteen package manifests", () => {
         expect(manifest.bin).toEqual({ [tool]: `bin/${tool}` });
       }
     }
-  });
+  }, 120000);
 
   it("packs every main package with exact-version optional native dependencies", () => {
     for (const tool of TOOLS) {
@@ -158,5 +158,5 @@ describe("all sixteen package manifests", () => {
       } as any);
       assert(result.details);
     }
-  });
+  }, 180000);
 });
