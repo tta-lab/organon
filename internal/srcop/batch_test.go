@@ -164,3 +164,26 @@ func TestApplyBatchFirstChangedLineAcrossEdits(t *testing.T) {
 		t.Fatalf("content = %q", result.Content)
 	}
 }
+
+func TestApplyBatchRejectsOverlappingOccurrences(t *testing.T) {
+	// "aa" occurs at offsets 0 and 1 of "aaa"; the oldText is ambiguous.
+	source := []byte("aaa\\n")
+	if _, err := ApplyBatch("f.txt", source, []BatchEdit{{OldText: "aa", NewText: "X"}}); err == nil ||
+		!strings.Contains(err.Error(), "2 matches") {
+		t.Fatalf("error = %v, want ambiguous overlap rejection", err)
+	}
+}
+
+func TestApplyBatchCRLFNewTextIsNormalized(t *testing.T) {
+	// A CRLF newText must not become double-CRLF after the line-ending restore.
+	source := []byte("a\\r\\nb\\r\\nc\\r\\n")
+	result, err := ApplyBatch("f.txt", source, []BatchEdit{
+		{OldText: "a", NewText: "A\\r\\nB"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyBatch: %v", err)
+	}
+	if string(result.Content) != "A\\r\\nB\\r\\nb\\r\\nc\\r\\n" {
+		t.Fatalf("content = %q, want normalized CRLF (no \r\r\n)", result.Content)
+	}
+}

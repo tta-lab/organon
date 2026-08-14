@@ -78,3 +78,57 @@ jobs:
       - name: Pi release invariants
         working-directory: pi
         run: node scripts/test-release-invariants.mjs
+
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+
+      - name: Cross-compile all three supported targets
+        run: |
+          for target in "darwin arm64" "linux amd64" "linux arm64"; do
+            set -- $target
+            echo "cross-building $1/$2"
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -o /dev/null               ./cmd/src ./cmd/web ./cmd/project ./cmd/og
+          done
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Pi extensions
+        working-directory: pi
+        run: pnpm -r --filter './packages/pi-*' run build
+
+      - name: Snapshot release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: release --snapshot --clean
+
+      - name: Stage native binaries and verify them
+        working-directory: pi
+        run: |
+          node scripts/stage-natives.mjs ../dist
+          for f in packages/native/pi-*/bin/*; do
+            test -x "$f" || { echo "$f is not executable"; exit 1; }
+          done
+          echo "all native binaries present and executable"
+          file packages/native/pi-*/bin/* | head -20

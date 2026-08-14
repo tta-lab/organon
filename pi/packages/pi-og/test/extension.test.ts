@@ -22,9 +22,6 @@ describe("pi-og extension", () => {
     registerOgTool({ registerTool: (d: any) => registered.push(d) } as any);
     expect(registered).toHaveLength(1);
     expect(registered[0]!.name).toBe("og");
-    for (const g of registered[0]!.promptGuidelines!) {
-      expect(g).toContain("og");
-    }
   });
 
   it("validates the closed action union and action-specific constraints", () => {

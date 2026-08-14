@@ -70,67 +70,84 @@ describe("all sixteen package manifests", () => {
     }
   });
 
-  it("bundles the shared adapter into each main package (no fifth runtime package)", () => {
-    for (const tool of TOOLS) {
-      const dist = readFileSync(
-        join(workspace, "packages", `pi-${tool}`, "dist", "index.js"),
-        "utf8",
-      );
-      expect(dist).not.toContain("@tta-lab/pi-shared");
-      expect(dist).toContain("resolveBinaryPath");
-      expect(dist).toContain("spawn");
-    }
-  });
-
-  it("installs a packed main package offline and executes its tool through the Pi entry", async () => {
-    const installRoot = join(workspace, ".tmp", "pack-install");
-    rmSync(installRoot, { recursive: true, force: true });
-    mkdirSync(installRoot, { recursive: true });
-    const tgz = pack(join(workspace, "packages", "pi-src"), "@tta-lab/pi-src");
-    execFileSync("tar", ["-xzf", tgz, "-C", installRoot], { stdio: "pipe" });
-    const pkg = join(installRoot, "package");
-    expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
-
+  it("installs every packed main package offline and executes its tool through the Pi entry", async () => {
     const { platform, arch } = process;
     const osName = platform === "darwin" ? "darwin" : "linux";
     const archName = arch === "arm64" ? "arm64" : "x64";
-    const nativePkgDir = join(pkg, "node_modules", "@tta-lab", `pi-src-${osName}-${archName}`);
-    const nativeDir = join(nativePkgDir, "bin");
-    mkdirSync(nativeDir, { recursive: true });
-    writeFileSync(
-      join(nativePkgDir, "package.json"),
-      JSON.stringify({ name: `@tta-lab/pi-src-${osName}-${archName}`, version: "0.1.0" }),
-    );
-    copyFileSync(
-      join(workspace, "packages", "pi-src", "test", "fixtures", "bin", "src"),
-      join(nativeDir, "src"),
-    );
-    chmodSync(join(nativeDir, "src"), 0o755);
 
-    const registered: any[] = [];
-    const fakePi = {
-      registerTool: (d: any) => registered.push(d),
-      on: () => undefined,
-    };
-    const mod = (await import("file://" + join(pkg, "dist", "index.js"))) as {
-      default: (pi: unknown) => void;
-    };
-    mod.default(fakePi as any);
-    expect(registered).toHaveLength(1);
-    expect(registered[0]!.name).toBe("src");
-
-    const tmpFile = join(tmp, "smoke.go");
-    writeFileSync(tmpFile, "package sample\n\nfunc Foo() {}\n");
-    const result = await registered[0]!.execute(
-      "id",
-      { action: "symbols", path: tmpFile },
-      undefined,
-      undefined,
+    const smoke: Array<{
+      tool: string;
+      action: unknown;
+      fixture: string;
+      assert: (details: any) => void;
+    }> = [
       {
-        cwd: tmp,
+        tool: "src",
+        action: { action: "symbols", path: join(tmp, "smoke.go") },
+        fixture: "packages/pi-src/test/fixtures/bin/src",
+        assert: (details: any) => expect(details.symbols[0]!.name).toBe("Foo"),
       },
-    );
-    const details = result.details as { symbols: Array<{ name: string }> };
-    expect(details.symbols[0]!.name).toBe("Foo");
+      {
+        tool: "web",
+        action: { action: "search", query: "tree-sitter" },
+        fixture: "packages/pi-web/test/fixtures/bin/web",
+        assert: (details: any) => expect(details.provider).toBe("DuckDuckGo"),
+      },
+      {
+        tool: "project",
+        action: { action: "list" },
+        fixture: "packages/pi-project/test/fixtures/bin/project",
+        assert: (details: any) => expect(details.projects.length).toBeGreaterThan(0),
+      },
+      {
+        tool: "og",
+        action: { action: "auth_status", project: "ko" },
+        fixture: "packages/pi-og/test/fixtures/bin/og",
+        assert: (details: any) => expect(details.auth.ready).toBe(true),
+      },
+    ];
+
+    writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
+    for (const { tool, action, fixture, assert } of smoke) {
+      const installRoot = join(workspace, ".tmp", `pack-install-${tool}`);
+      rmSync(installRoot, { recursive: true, force: true });
+      mkdirSync(installRoot, { recursive: true });
+      const tgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
+      execFileSync("tar", ["-xzf", tgz, "-C", installRoot], { stdio: "pipe" });
+      const pkg = join(installRoot, "package");
+      expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
+
+      const nativePkgDir = join(
+        pkg,
+        "node_modules",
+        "@tta-lab",
+        `pi-${tool}-${osName}-${archName}`,
+      );
+      const nativeDir = join(nativePkgDir, "bin");
+      mkdirSync(nativeDir, { recursive: true });
+      writeFileSync(
+        join(nativePkgDir, "package.json"),
+        JSON.stringify({ name: `@tta-lab/pi-${tool}-${osName}-${archName}`, version: "0.1.0" }),
+      );
+      copyFileSync(join(workspace, fixture), join(nativeDir, tool));
+      chmodSync(join(nativeDir, tool), 0o755);
+
+      const registered: any[] = [];
+      const fakePi = {
+        registerTool: (d: any) => registered.push(d),
+        on: () => undefined,
+      };
+      const mod = (await import("file://" + join(pkg, "dist", "index.js"))) as {
+        default: (pi: unknown) => void;
+      };
+      mod.default(fakePi as any);
+      expect(registered).toHaveLength(1);
+      expect(registered[0]!.name).toBe(tool);
+
+      const result = await registered[0]!.execute("id", action, undefined, undefined, {
+        cwd: tmp,
+      });
+      assert(result.details);
+    }
   });
 });

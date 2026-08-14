@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/spf13/cobra"
@@ -128,6 +129,26 @@ func firstChangedLineBytes(old, new []byte) int {
 	return bytes.Count(new[:pos], []byte("\n")) + 1
 }
 
+// runSymbols dispatches between the human outline and the JSON outline; human
+// output remains the default, --json opts into the machine-readable form.
+func runSymbols(cmd *cobra.Command, args []string) error {
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return runSymbolsJSON(cmd, args)
+	}
+	filename := args[0]
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	rendered, err := srcview.NewInspector(filename, source, 2).RenderTree()
+	if err != nil {
+		return err
+	}
+	fmt.Print(rendered)
+	return nil
+}
+
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
 // fixed depth of 2 so every later symbol operation resolves IDs from the same
 // outline shape.
@@ -148,6 +169,42 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 		TotalBytes: len(source),
 		Symbols:    outline.Symbols,
 	})
+}
+
+// runRead dispatches between the human read and the JSON read; human output
+// remains the default, --json opts into the machine-readable form.
+func runRead(cmd *cobra.Command, args []string) error {
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	if jsonOut {
+		return runReadJSON(cmd, args)
+	}
+	filename := args[0]
+	symbolID, _ := cmd.Flags().GetString("symbol-id")
+	offset, _ := cmd.Flags().GetInt("offset")
+	limit, _ := cmd.Flags().GetInt("limit")
+	if offset < 0 {
+		return fmt.Errorf("offset must be 1 or greater")
+	}
+	if limit < 0 {
+		return fmt.Errorf("limit must be zero or greater")
+	}
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	result, err := buildReadJSON(filename, source, symbolID, offset, limit)
+	if err != nil {
+		return err
+	}
+	if result.Media != nil {
+		fmt.Printf("Read image file [%s]\n", result.Media.Mime)
+		return nil
+	}
+	if result.FirstLineExceedsLimit {
+		return fmt.Errorf("the first line of %s exceeds the 50KB read limit", filename)
+	}
+	fmt.Print(result.Content)
+	return nil
 }
 
 // runReadJSON implements `src read <file> --json`. Offset is a 1-indexed line
@@ -199,7 +256,7 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 			result.Content = ""
 			return result, nil
 		}
-		if looksLikeImageButUnsupported(source) || isBinaryBytes(source) {
+		if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
 			return readJSON{}, mediaErrorFor(source, filename)
 		}
 	}

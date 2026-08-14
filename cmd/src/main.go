@@ -119,7 +119,7 @@ func newRootCmd() *cobra.Command {
 		Short: "Show the typed symbol outline (JSON with --json)",
 		Long:  helpSymbols,
 		Args:  cobra.ExactArgs(1),
-		RunE:  runSymbolsJSON,
+		RunE:  runSymbols,
 	}
 	symbolsCmd.SilenceUsage = true
 	symbolsCmd.Flags().Bool("json", false, "Output the typed outline as JSON")
@@ -129,7 +129,7 @@ func newRootCmd() *cobra.Command {
 		Short: "Read a file, symbol, or line range (JSON with --json)",
 		Long:  helpRead,
 		Args:  cobra.ExactArgs(1),
-		RunE:  runReadJSON,
+		RunE:  runRead,
 	}
 	readCmd.SilenceUsage = true
 	readCmd.Flags().StringP("symbol-id", "s", "", "Symbol or Markdown section ID to read")

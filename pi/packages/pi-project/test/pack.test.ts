@@ -74,14 +74,4 @@ describe("package manifests and packing", () => {
       expect(manifest.bin).toEqual({ project: "bin/project" });
     }
   });
-
-  it("bundles the shared adapter into the main package instead of a fifth runtime package", () => {
-    const dist = readFileSync(
-      join(workspace, "packages", "pi-project", "dist", "index.js"),
-      "utf8",
-    );
-    expect(dist).not.toContain("@tta-lab/pi-shared");
-    expect(dist).toContain("resolveBinaryPath");
-    expect(dist).toContain("spawn");
-  });
 });

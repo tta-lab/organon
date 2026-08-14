@@ -51,13 +51,32 @@ func decodeRead(t *testing.T, stdout string) readJSON {
 	return out
 }
 
+func TestSymbolsHumanDefaultPrintsTree(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	cmd := newSymbolsCmd()
+	out := captureStdout(t, func() {
+		require.NoError(t, runSymbols(cmd, []string{f}))
+	})
+	assert.Contains(t, out, "Foo")
+	assert.Contains(t, out, "func")
+}
+
+func TestReadHumanDefaultPrintsContent(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	cmd := newReadCmd()
+	out := captureStdout(t, func() {
+		require.NoError(t, runRead(cmd, []string{f}))
+	})
+	assert.Equal(t, "package sample\n\nfunc Foo() {}\n", out)
+}
 func TestSymbolsJSONGoOutline(t *testing.T) {
 	f := writeGoFile(t, "package sample\n\n// Foo does work.\nfunc Foo() {}\n\ntype Bar struct {\n\tBaz int\n}\n")
 	out := decodeOutline(t, captureStdout(t, func() {
 		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
 	}))
 	assert.Equal(t, "go", out.Language)
-	assert.Equal(t, len([]byte("package sample\n\n// Foo does work.\nfunc Foo() {}\n\ntype Bar struct {\n\tBaz int\n}\n")), out.TotalBytes)
+	sample := []byte("package sample\n\n// Foo does work.\nfunc Foo() {}\n\ntype Bar struct {\n\tBaz int\n}\n")
+	assert.Equal(t, len(sample), out.TotalBytes)
 	require.NotEmpty(t, out.Symbols)
 	ids := map[string]bool{}
 	for _, s := range out.Symbols {

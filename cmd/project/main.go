@@ -100,12 +100,21 @@ func newGetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
 			store := project.NewStore(config.ProjectsPath())
+
+			// JSON mode mirrors the MCP project_get contract: the alias must be
+			// an exact registered single-layer alias, never an org/repo string.
+			if jsonOut {
+				e, err := store.Get(alias)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: e})
+			}
+
+			// Human mode keeps the reference-repo fallback for org/repo targets.
 			if !strings.Contains(alias, "/") {
 				e, err := store.Get(alias)
 				if err == nil {
-					if jsonOut {
-						return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: e})
-					}
 					fmt.Printf("%s\n", e.Path)
 					return nil
 				}
@@ -113,14 +122,9 @@ func newGetCmd() *cobra.Command {
 					return err
 				}
 			}
-
-			// Fall back to reference repos
 			repoPath, repoErr := reporef.Resolve(alias, config.DefaultReferencesPath())
 			if repoErr != nil {
 				return repoErr
-			}
-			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: project.Entry{Alias: alias, Path: repoPath}})
 			}
 			fmt.Println(repoPath)
 			return nil

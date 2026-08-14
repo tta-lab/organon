@@ -214,32 +214,35 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want func(t *testing.T, stdout string)
+		want func(t *testing.T, stdout string, err error)
 	}{
 		{
-			name: "get",
+			name: "get-json-rejects-org-repo",
 			args: []string{"get", "tta-lab/demo", "--json"},
-			want: func(t *testing.T, stdout string) {
+			want: func(t *testing.T, stdout string, err error) {
 				t.Helper()
-				var output struct {
-					Project map[string]any `json:"project"`
+				if err == nil {
+					t.Fatal("get --json accepted an unregistered org/repo alias")
 				}
-				if err := json.Unmarshal([]byte(stdout), &output); err != nil {
-					t.Fatalf("decode get output: %v", err)
+				if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "invalid project alias") {
+					t.Fatalf("get --json error = %v, want alias rejection", err)
 				}
-				got := output.Project
-				if got["alias"] != "tta-lab/demo" || got["path"] != repoPath || got["archived"] != false {
-					t.Fatalf("get output = %#v", got)
-				}
-				if _, exists := got["org"]; exists {
-					t.Fatalf("get output still exposes org: %#v", got)
+			},
+		},
+		{
+			name: "get-human-preserves-reference-fallback",
+			args: []string{"get", "tta-lab/demo"},
+			want: func(t *testing.T, stdout string, _ error) {
+				t.Helper()
+				if stdout != repoPath+"\n" {
+					t.Fatalf("get output = %q, want %q", stdout, repoPath+"\n")
 				}
 			},
 		},
 		{
 			name: "resolve",
 			args: []string{"resolve", "tta-lab/demo"},
-			want: func(t *testing.T, stdout string) {
+			want: func(t *testing.T, stdout string, _ error) {
 				t.Helper()
 				var got map[string]any
 				if err := json.Unmarshal([]byte(stdout), &got); err != nil {
@@ -256,7 +259,7 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 		{
 			name: "jump",
 			args: []string{"jump", "tta-lab/demo"},
-			want: func(t *testing.T, stdout string) {
+			want: func(t *testing.T, stdout string, _ error) {
 				t.Helper()
 				if stdout != repoPath+"\n" {
 					t.Fatalf("jump output = %q, want %q", stdout, repoPath+"\n")
@@ -268,10 +271,7 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout, err := runProject(t, tt.args)
-			if err != nil {
-				t.Fatalf("run project %v: %v", tt.args, err)
-			}
-			tt.want(t, stdout)
+			tt.want(t, stdout, err)
 		})
 	}
 }

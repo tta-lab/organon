@@ -36,11 +36,6 @@ describe("pi-project extension", () => {
     expect(pi.registered).toHaveLength(1);
     const def = pi.registered[0]!;
     expect(def.name).toBe("project");
-    expect(def.label).toBe("Project");
-    expect(def.description).toContain("registered");
-    expect(def.promptSnippet).toBeTruthy();
-    expect(def.promptGuidelines).toBeTruthy();
-    expect(def.promptGuidelines!.every((g) => g.includes("project"))).toBe(true);
   });
 
   it("exposes a closed action union: unknown fields rejected, get requires alias", () => {

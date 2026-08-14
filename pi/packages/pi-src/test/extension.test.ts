@@ -273,19 +273,15 @@ describe("pi-src mutations", () => {
   });
 });
 
-describe("pi-src prompt guidelines", () => {
-  it("every flat guideline names src", async () => {
+describe("pi-src registration", () => {
+  it("registers exactly one global tool named src", async () => {
     const { registerSrcTool } = await import("../src/tool.js");
-    const registered: Array<{ name: string; promptGuidelines?: string[] }> = [];
+    const registered: Array<{ name: string }> = [];
     registerSrcTool({ registerTool: (d: any) => registered.push(d) } as any);
     expect(registered).toHaveLength(1);
     expect(registered[0]!.name).toBe("src");
-    for (const g of registered[0]!.promptGuidelines!) {
-      expect(g).toContain("src");
-    }
   });
 });
-
 describe("pi-src takeover policy", () => {
   const builtinRead = {
     name: "read",
@@ -327,11 +323,11 @@ describe("pi-src takeover policy", () => {
     expect(pi.current.sort()).toEqual(["bash", "other", "src"].sort());
   });
 
-  it("does not displace builtins that are already inactive", () => {
+  it("always activates src even when no builtins are displaced", () => {
     const pi = fakePi(["bash"], [builtinRead, builtinEdit]);
     const displaced = applyReadTakeover(pi);
     expect(displaced).toEqual([]);
-    expect(pi.current).toEqual(["bash"]);
+    expect(pi.current).toEqual(["bash", "src"]);
   });
 
   it("restores only the remembered subset at shutdown", () => {

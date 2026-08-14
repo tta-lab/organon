@@ -19,7 +19,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 ## Architecture
 
 ### Binaries
-- `cmd/src/` — tree-sitter symbol-aware file reading/editing plus read-only project-scoped MCP
+- `cmd/src/` — tree-sitter symbol-aware file reading/editing with local path resolution and `--json` output for Pi extension adapters
 - `cmd/web/` — unified web tool: `web search` (Exa/Brave/DuckDuckGo) and `web fetch` (page reading)
 - `cmd/skill/` — filesystem-based skill discovery plus read-only MCP
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
@@ -32,8 +32,8 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 - `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
 - `internal/skill/` — filesystem-based skill discovery, frontmatter parsing, and shared CLI/MCP search behavior
 - `internal/token/` — LLM token counting with tiktoken-go; sync.OnceValues lazy init, regex fallback
-- `internal/srcview/` — trusted-byte source outlines and safe registered-project file reads shared by CLI and MCP
-- `internal/safefile/` — descriptor-relative contained file opening shared by project-scoped readers
+- `internal/srcview/` — trusted source outlines and line-oriented reads shared by the CLI and the Pi src extension
+- `internal/truncate/` — Pi-equivalent head truncation (2,000 lines / 50 KB) for CLI JSON output
 
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files

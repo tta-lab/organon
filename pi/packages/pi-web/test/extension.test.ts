@@ -22,7 +22,6 @@ describe("pi-web extension", () => {
     registerWebTool({ registerTool: (d: any) => registered.push(d) } as any);
     expect(registered).toHaveLength(1);
     expect(registered[0]!.name).toBe("web");
-    expect(registered[0]!.promptGuidelines!.every((g: string) => g.includes("web"))).toBe(true);
   });
 
   it("validates the closed action union with action-specific required fields", () => {

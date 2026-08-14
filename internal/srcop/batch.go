@@ -68,8 +68,13 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 			return nil, fmt.Errorf("edit %d: oldText and newText are identical (no-op)", i+1)
 		}
 		old := edit.OldText
+		newText := edit.NewText
 		if hasCRLF {
+			// Both sides are normalized to LF for matching and application;
+			// the final \n -> \r\n restore must never see a literal \r\n from
+			// newText, or it would become \r\r\n.
 			old = strings.ReplaceAll(old, "\r\n", "\n")
+			newText = strings.ReplaceAll(newText, "\r\n", "\n")
 		}
 		if old == "" {
 			return nil, fmt.Errorf("edit %d: oldText is empty after line-ending normalization", i+1)
@@ -86,7 +91,7 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 		}
 		matches = append(matches, batchMatch{
 			start: occurrences[0], end: occurrences[0] + len([]byte(old)),
-			newText: edit.NewText, index: i + 1,
+			newText: newText, index: i + 1,
 		})
 	}
 
@@ -117,6 +122,10 @@ func ApplyBatch(filename string, source []byte, edits []BatchEdit) (*BatchEditRe
 	}, nil
 }
 
+// allIndexes finds every occurrence of needle in haystack, including
+// overlapping ones, so an oldText that matches more than one region — for
+// example "aa" inside "aaa" — is rejected as ambiguous instead of silently
+// replacing only the first region.
 func allIndexes(haystack, needle []byte) []int {
 	var indexes []int
 	pos := 0
@@ -126,7 +135,7 @@ func allIndexes(haystack, needle []byte) []int {
 			break
 		}
 		indexes = append(indexes, pos+idx)
-		pos += idx + len(needle)
+		pos += idx + 1
 		if pos >= len(haystack) {
 			break
 		}

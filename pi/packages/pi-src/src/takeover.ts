@@ -31,10 +31,9 @@ export function applyReadTakeover(pi: TakeoverAPI): string[] {
       displaced.push(name);
     }
   }
-  if (displaced.length === 0) {
-    return displaced;
-  }
   const removed = new Set(displaced);
+  // The src tool is always activated: removed displaced built-ins are dropped,
+  // every unrelated active tool is retained, and src joins the set.
   const next = [
     ...pi.getActiveTools().filter((name) => !removed.has(name as DisplacedName)),
     "src",
