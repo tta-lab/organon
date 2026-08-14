@@ -182,6 +182,9 @@ func runTreeOrRead(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateTextSource(filename, source); err != nil {
+		return err
+	}
 
 	depth := getDepth(cmd)
 	symbolID, _ := cmd.Flags().GetString("symbol-id")

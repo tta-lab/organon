@@ -97,7 +97,7 @@ export const srcSchema = Type.Union([
       action: StringEnum(["comment"] as const, { description: "Action to perform" }),
       path: Type.String({ description: pathDescription }),
       symbol_id: Type.String({ description: symbolIdDescription }),
-      read: Type.Literal(true, { description: "Read the existing doc comment" }),
+      read: Type.Boolean({ description: "Set true to read the existing doc comment" }),
     },
     { additionalProperties: false },
   ),
@@ -213,7 +213,7 @@ type Action =
       content: string;
     }
   | { action: "delete"; path: string; symbol_id: string }
-  | { action: "comment"; path: string; symbol_id: string; read?: true; content?: string }
+  | { action: "comment"; path: string; symbol_id: string; read?: boolean; content?: string }
   | { action: "edit"; path: string; edits: Array<{ oldText: string; newText: string }> };
 
 function isAction<T extends Action["action"]>(
@@ -223,9 +223,7 @@ function isAction<T extends Action["action"]>(
   return input.action === action;
 }
 
-function isReadComment(
-  input: SrcInput,
-): input is Extract<SrcInput, { action: "comment"; read: true }> {
+function isReadComment(input: SrcInput): input is SrcInput & { action: "comment"; read: true } {
   return input.action === "comment" && (input as { read?: boolean }).read === true;
 }
 
@@ -384,10 +382,16 @@ function buildArgs(input: SrcInput, absolutePath: string): { args: string[]; std
         args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--read", "--json"],
       };
     }
-    return {
-      args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--json"],
-      stdin: input.content,
-    };
+    if ("read" in input) {
+      throw new Error("comment read must be true");
+    }
+    if ("content" in input) {
+      return {
+        args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--json"],
+        stdin: input.content,
+      };
+    }
+    throw new Error("comment requires content");
   }
   const edits = JSON.stringify({ edits: input.edits });
   return { args: ["edit", absolutePath, "--edits-json", "--json"], stdin: edits };

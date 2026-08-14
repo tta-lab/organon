@@ -73,6 +73,9 @@ describe("pi-src schema", () => {
       Value.Check(srcSchema, { action: "comment", path: "a.go", symbol_id: "bK", read: true }),
     ).toBe(true);
     expect(
+      Value.Check(srcSchema, { action: "comment", path: "a.go", symbol_id: "bK", read: false }),
+    ).toBe(true);
+    expect(
       Value.Check(srcSchema, {
         action: "comment",
         path: "a.go",
@@ -344,6 +347,13 @@ describe("pi-src mutations", () => {
     const after = readFileSync(path, "utf8");
     expect(after).not.toContain("func Foo");
     expect(after).toContain("func Bar");
+  });
+
+  it("rejects a false comment read flag", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    await expect(
+      call({ action: "comment", path, symbol_id: "any-id", read: false }, { cwd }),
+    ).rejects.toThrow("comment read must be true");
   });
 
   it("comment read returns the doc comment; write replaces it", async () => {

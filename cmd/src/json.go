@@ -207,6 +207,9 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateTextSource(filename, source); err != nil {
+		return err
+	}
 	rendered, err := srcview.NewInspector(filename, source, 2).RenderTree()
 	if err != nil {
 		return err
@@ -222,6 +225,9 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 	filename := args[0]
 	source, err := os.ReadFile(filename)
 	if err != nil {
+		return err
+	}
+	if err := validateTextSource(filename, source); err != nil {
 		return err
 	}
 	outline, err := srcview.NewInspector(filename, source, 2).Outline()

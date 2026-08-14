@@ -132,6 +132,30 @@ func TestSymbolsJSONRejectsNoStructureFile(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSymbolsRejectSignatureDetectedBinaryInHumanAndJSONModes(t *testing.T) {
+	source := append([]byte{0x7F, 'E', 'L', 'F'}, []byte("\npackage sample\n\nfunc Foo() {}\n")...)
+	f := filepath.Join(t.TempDir(), "binary.go")
+	require.NoError(t, os.WriteFile(f, source, 0o644))
+
+	cases := []struct {
+		name string
+		run  func(*cobra.Command, []string) error
+	}{
+		{name: "human", run: runSymbols},
+		{name: "JSON", run: runSymbolsJSON},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := captureStdout(t, func() {
+				err := tc.run(newSymbolsCmd(), []string{f})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "binary file")
+			})
+			assert.Empty(t, out, "no symbols may be emitted for binary input")
+		})
+	}
+}
+
 func TestReadJSONWholeFile(t *testing.T) {
 	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
 	out := decodeRead(t, captureStdout(t, func() {
@@ -225,12 +249,8 @@ func TestReadJSONSymbolReadRejectsBinarySource(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "sample.go")
 	require.NoError(t, os.WriteFile(f, source, 0o644))
 
-	outline := decodeOutline(t, captureStdout(t, func() {
-		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
-	}))
-	require.Len(t, outline.Symbols, 1)
 	cmd := newReadCmd()
-	require.NoError(t, cmd.Flags().Set("symbol-id", outline.Symbols[0].ID))
+	require.NoError(t, cmd.Flags().Set("symbol-id", "any-id"))
 	out := captureStdout(t, func() {
 		err := runReadJSON(cmd, []string{f})
 		require.Error(t, err)

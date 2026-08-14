@@ -19,10 +19,30 @@ function memberSchemas(schema: TSchema): JsonSchemaLike[] {
   return [...(raw.anyOf ?? []), ...(raw.oneOf ?? [])];
 }
 
-// Every action discriminator must be expressed as a string enum, never as a
-// const/Type.Literal, because Pi's docs require StringEnum for Google-compatible
-// tool schemas (some Google/OpenAPI conversion paths cannot express const).
-describe("action discriminators are Google-compatible string enums", () => {
+function constPaths(value: unknown, path = "$", seen = new Set<object>()): string[] {
+  if (value === null || typeof value !== "object") {
+    return [];
+  }
+  if (seen.has(value)) {
+    return [];
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => constPaths(item, `${path}[${index}]`, seen));
+  }
+
+  const record = value as Record<string, unknown>;
+  const paths = Object.prototype.hasOwnProperty.call(record, "const") ? [path] : [];
+  for (const [key, child] of Object.entries(record)) {
+    paths.push(...constPaths(child, `${path}.${key}`, seen));
+  }
+  return paths;
+}
+
+// Pi's docs prohibit const/Type.Literal anywhere in a tool schema because
+// Google's API cannot express those structures. Action discriminators therefore
+// use single-value StringEnum fields instead.
+describe("tool schemas are Google-compatible", () => {
   const tools: Array<[string, TSchema]> = [
     ["src", srcSchema],
     ["web", webSchema],
@@ -30,7 +50,11 @@ describe("action discriminators are Google-compatible string enums", () => {
     ["og", ogSchema],
   ];
 
-  it.each(tools)("%s: every union member's action field uses enum, not const", (name, schema) => {
+  it.each(tools)("%s: contains no const fields at any schema depth", (name, schema) => {
+    expect(constPaths(schema), `${name}: Type.Literal/const is not Google-compatible`).toEqual([]);
+  });
+
+  it.each(tools)("%s: every union member's action field uses a string enum", (name, schema) => {
     const members = memberSchemas(schema);
     expect(members.length).toBeGreaterThan(0);
     for (const member of members) {
