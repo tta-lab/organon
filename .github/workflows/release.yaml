@@ -5,24 +5,40 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+
       - name: Test
         run: make test
-      - name: Release
+
+      - name: Release binaries and archives
         uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
@@ -30,3 +46,41 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Pi extensions
+        working-directory: pi
+        run: pnpm -r --filter './packages/pi-*' run build
+
+      - name: Sync npm version from tag
+        working-directory: pi
+        run: node scripts/sync-version.mjs "${GITHUB_REF_NAME#v}"
+
+      - name: Stage native binaries
+        working-directory: pi
+        run: node scripts/stage-natives.mjs ../dist
+
+      - name: Verify release invariants
+        working-directory: pi
+        run: node scripts/release-dry-run.mjs
+
+      - name: Publish native packages
+        working-directory: pi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in packages/native/pi-*; do
+            (cd "$pkg" && pnpm publish --no-git-checks --access public)
+          done
+
+      - name: Publish main packages
+        working-directory: pi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in packages/pi-src packages/pi-web packages/pi-project packages/pi-og; do
+            (cd "$pkg" && pnpm publish --no-git-checks --access public)
+          done

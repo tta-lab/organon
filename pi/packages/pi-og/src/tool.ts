@@ -334,6 +334,9 @@ function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
     if (input.title !== undefined) {
       args.push("--title", input.title);
     }
+    if (input.body === "") {
+      args.push("--clear-body");
+    }
     args.push("--json");
     return { args, stdin: input.body ?? "" };
   }

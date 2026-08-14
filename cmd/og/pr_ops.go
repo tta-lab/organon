@@ -65,12 +65,13 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	title, _ := cmd.Flags().GetString("title")
+	clearBody, _ := cmd.Flags().GetBool("clear-body")
 	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("read PR body: %w", err)
 	}
 	body := strings.TrimRight(string(bodyBytes), "\n")
-	if title == "" && body == "" {
+	if title == "" && !clearBody && body == "" {
 		return fmt.Errorf("nothing to update: provide --title and/or pipe body via stdin")
 	}
 	index, err := optionalPRID(cmd)
@@ -81,7 +82,10 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("title") {
 		titleInput = &title
 	}
-	if body != "" {
+	if clearBody {
+		empty := ""
+		bodyInput = &empty
+	} else if body != "" {
 		bodyInput = &body
 	}
 	resp, err := daemonCall("/pr/modify", og.Request{

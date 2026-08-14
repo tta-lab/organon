@@ -111,6 +111,7 @@ func newPRModifyCmd() *cobra.Command {
 Replace the PR body with this text.
 EOF`
 	cmd.Flags().String("title", "", "New PR title")
+	cmd.Flags().Bool("clear-body", false, "Explicitly clear the PR body")
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd
