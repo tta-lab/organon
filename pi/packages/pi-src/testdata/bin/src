@@ -78,6 +78,7 @@ function countLines(text) {
 const raw = readFileSync(path);
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG_SIG = Buffer.from([0xff, 0xd8, 0xff]);
+const BMP_SIG = Buffer.from("BM");
 
 function detectMedia(buf) {
   if (buf.length >= PNG_SIG.length && buf.subarray(0, PNG_SIG.length).equals(PNG_SIG)) {
@@ -85,6 +86,9 @@ function detectMedia(buf) {
   }
   if (buf.length >= JPEG_SIG.length && buf.subarray(0, JPEG_SIG.length).equals(JPEG_SIG)) {
     return { kind: "image", mime: "image/jpeg", data_base64: buf.toString("base64") };
+  }
+  if (buf.length >= BMP_SIG.length && buf.subarray(0, BMP_SIG.length).equals(BMP_SIG)) {
+    return { kind: "image", mime: "image/bmp", data_base64: buf.toString("base64") };
   }
   return undefined;
 }

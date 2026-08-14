@@ -162,6 +162,7 @@ function isAction<T extends Action["action"]>(
  * tool-result details.
  */
 export function webTool() {
+  const binary = resolveBinaryPath("web", { require });
   return {
     name: "web",
     label: "Web",
@@ -179,11 +180,10 @@ export function webTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      const binary = resolveBinaryPath("web", { require });
       const args = buildArgs(params);
       const result = await runCli(binary, { args, signal });
       if (result.exitCode !== 0) {
-        throw cliError(result.stderr, result.exitCode);
+        throw await cliError(result.stderr, result.exitCode);
       }
       return await render(params, result.stdout);
     },

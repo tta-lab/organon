@@ -235,6 +235,7 @@ function isAction<T extends Action["action"]>(
 }
 
 export function ogTool() {
+  const binary = resolveBinaryPath("og", { require });
   return {
     name: "og",
     label: "og",
@@ -252,11 +253,10 @@ export function ogTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      const binary = resolveBinaryPath("og", { require });
       const { args, stdin } = buildArgs(params);
       const result = await runCli(binary, { args, stdin, signal });
       if (result.exitCode !== 0) {
-        throw cliError(result.stderr, result.exitCode);
+        throw await cliError(result.stderr, result.exitCode);
       }
       return await render(params, result.stdout);
     },

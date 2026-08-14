@@ -60,6 +60,7 @@ function isList(input: ProjectInput): input is Extract<ProjectInput, { action: "
 }
 
 export function projectTool() {
+  const binary = resolveBinaryPath("project", { require });
   return {
     name: "project",
     label: "Project",
@@ -77,13 +78,12 @@ export function projectTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      const binary = resolveBinaryPath("project", { require });
       const args = isList(params)
         ? ["list", "--json", ...(params.include_archived ? ["--include-archived"] : [])]
         : ["get", params.alias, "--json"];
       const result = await runCli(binary, { args, signal });
       if (result.exitCode !== 0) {
-        throw cliError(result.stderr, result.exitCode);
+        throw await cliError(result.stderr, result.exitCode);
       }
       if (isList(params)) {
         const data = parseSingleJsonDoc<ProjectListResult>(result.stdout);

@@ -143,19 +143,6 @@ func (i *Inspector) Read(symbolID string, limit int) (ReadResult, error) {
 	return ReadResult{}, fmt.Errorf("symbol %q not found", symbolID)
 }
 
-// LineCount returns the number of real lines in content, excluding the phantom
-// empty element a trailing newline produces. Empty content has zero lines.
-func LineCount(content string) int {
-	if content == "" {
-		return 0
-	}
-	count := strings.Count(content, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		count++
-	}
-	return count
-}
-
 // ReadContent preserves the established CLI representation of a full symbol or section.
 func (i *Inspector) ReadContent(symbolID string) (string, error) {
 	if IsMarkdown(i.filename) {

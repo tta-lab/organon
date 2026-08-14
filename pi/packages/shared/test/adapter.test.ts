@@ -1,3 +1,4 @@
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -95,8 +96,25 @@ describe("JSON result parsing", () => {
     expect(() => parseSingleJsonDoc('{"a":1} trailing')).toThrow(/invalid JSON/);
   });
 
-  it("normalizes cobra errors and empty stderr", () => {
-    expect(cliError("Error: text not found\n", 1).message).toBe("text not found");
-    expect(cliError("", 7).message).toBe("command exited with code 7");
+  it("normalizes cobra errors and empty stderr", async () => {
+    expect((await cliError("Error: text not found\n", 1)).message).toBe("text not found");
+    expect((await cliError("", 7)).message).toBe("command exited with code 7");
+  });
+
+  it("bounds oversized stderr and saves the original output", async () => {
+    const stderr = "Error: " + "failure ".repeat(20_000) + "\nsecond diagnostic\n";
+    const error = await cliError(stderr, 1);
+    const fullOutputPath = error.message.match(/Full output saved to: ([^\]]+)/)?.[1];
+
+    try {
+      expect(Buffer.byteLength(error.message, "utf8")).toBeLessThanOrEqual(50 * 1024);
+      expect(error.message).toContain("Inspect the saved stderr before retrying.");
+      expect(fullOutputPath).toBeTruthy();
+      expect(readFileSync(fullOutputPath!, "utf8")).toBe(stderr);
+    } finally {
+      if (fullOutputPath) {
+        rmSync(dirname(fullOutputPath), { recursive: true, force: true });
+      }
+    }
   });
 });

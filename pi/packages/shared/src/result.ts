@@ -1,3 +1,8 @@
+import { truncateForModel } from "./truncate.js";
+
+const MAX_ERROR_LINES = 100;
+const MAX_ERROR_BYTES = 8 * 1024;
+
 /**
  * Parses exactly one JSON document from CLI stdout. Trailing newlines are
  * tolerated; multiple documents or non-JSON output are treated as a contract
@@ -16,14 +21,23 @@ export function parseSingleJsonDoc<T>(stdout: string): T {
   }
 }
 
-/** Normalizes cobra "Error: ..." stderr lines into one concise message. */
-export function cliError(stderr: string, exitCode: number): Error {
+/**
+ * Normalizes Cobra stderr into a concise model-facing error. Oversized stderr
+ * is saved verbatim and replaced by a bounded preview with its full path.
+ */
+export async function cliError(stderr: string, exitCode: number): Promise<Error> {
   const detail = stderr
     .trim()
     .replace(/^Error:\s*/m, "")
-    .replace(/\n/g, " ");
-  if (detail !== "") {
-    return new Error(detail);
+    .replace(/\s+/g, " ");
+  if (detail === "") {
+    return new Error(`command exited with code ${exitCode}`);
   }
-  return new Error(`command exited with code ${exitCode}`);
+  const model = await truncateForModel(detail, {
+    maxLines: MAX_ERROR_LINES,
+    maxBytes: MAX_ERROR_BYTES,
+    fullOutput: stderr,
+    hint: "Inspect the saved stderr before retrying.",
+  });
+  return new Error(model.text);
 }

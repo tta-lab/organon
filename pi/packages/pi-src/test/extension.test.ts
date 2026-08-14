@@ -19,6 +19,21 @@ function makeFile(content: string): { path: string; cwd: string } {
   return { path, cwd: dir };
 }
 
+function onePixelBMP(): Buffer {
+  const bmp = Buffer.alloc(58);
+  bmp.write("BM");
+  bmp.writeUInt32LE(58, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(1, 18);
+  bmp.writeInt32LE(1, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(4, 34);
+  bmp.set([0, 0, 255, 0], 54);
+  return bmp;
+}
+
 const SAMPLE =
   "package sample\n\n// Foo docs.\nfunc Foo() {\n\treturn 1\n}\n\nfunc Bar() {\n\treturn 2\n}\n";
 
@@ -208,6 +223,30 @@ describe("pi-src media reads", () => {
     );
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("Read image file");
+  });
+
+  it("normalizes BMP to PNG before attaching it to the model", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-src-media-"));
+    const path = join(dir, "img.bmp");
+    writeFileSync(path, onePixelBMP());
+
+    const result = await def.execute(
+      "call-media",
+      { action: "read", path } as any,
+      undefined,
+      undefined,
+      { cwd: dir } as any,
+    );
+    const image = result.content.find(
+      (block): block is { type: "image"; data: string; mimeType: string } => block.type === "image",
+    );
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(image).toMatchObject({ mimeType: "image/png" });
+    expect(Buffer.from(image!.data, "base64").subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(text).toContain("[Image converted from image/bmp to image/png.]");
   });
 
   it("adds a non-vision-model note when the current model cannot see images", async () => {

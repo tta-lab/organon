@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
   formatSize,
   truncateHead,
   type TruncationResult,
@@ -18,6 +19,12 @@ export interface ModelText {
 export interface TruncateForModelOptions {
   /** Action-specific guidance for retrieving or narrowing the remaining output. */
   hint?: string;
+  /** Override the standard line cap when a result needs a smaller concise preview. */
+  maxLines?: number;
+  /** Override the standard byte cap when a result needs a smaller concise preview. */
+  maxBytes?: number;
+  /** Complete original output to retain when the rendered text is normalized first. */
+  fullOutput?: string;
 }
 
 /**
@@ -29,17 +36,20 @@ export async function truncateForModel(
   content: string,
   options?: TruncateForModelOptions,
 ): Promise<ModelText> {
-  const truncation = truncateHead(content);
+  const truncation = truncateHead(content, {
+    maxLines: options?.maxLines ?? DEFAULT_MAX_LINES,
+    maxBytes: options?.maxBytes ?? DEFAULT_MAX_BYTES,
+  });
   if (!truncation.truncated) {
     return { text: content };
   }
 
-  const fullOutputPath = await saveFullOutput(content);
+  const fullOutputPath = await saveFullOutput(options?.fullOutput ?? content);
   const hint = options?.hint?.trim() ? ` ${options.hint.trim()}` : "";
   let text: string;
   if (truncation.firstLineExceedsLimit) {
     text =
-      `[First line is ${formatSize(truncation.totalBytes)}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit.` +
+      `[First line is ${formatSize(truncation.totalBytes)}, exceeds ${formatSize(truncation.maxBytes)} limit.` +
       `${hint} Full output saved to: ${fullOutputPath}]`;
   } else if (truncation.truncatedBy === "lines") {
     text =

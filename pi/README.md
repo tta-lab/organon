@@ -69,10 +69,12 @@ single write (BOM and line endings preserved).
 ## MCP servers
 
 The `web`, `project`, `og`, and `skill` MCP servers continue to serve non-Pi
-clients and are unchanged. The old project-scoped `src` MCP server has been
-removed: Pi uses the local-path `src` extension instead, and CLI users use the
-normal `src` command. If you previously configured `organon-src` in your MCP
-client, remove that server entry.
+clients and are unchanged. Pi users who install the matching `web`, `project`,
+`og`, or `src` extension should remove that capability's duplicate MCP server
+configuration from Pi, so it exposes one native tool per capability. The old
+project-scoped `src` MCP server has been removed: Pi uses the local-path `src`
+extension instead, and CLI users use the normal `src` command. If you previously
+configured `organon-src` in an MCP client, remove that server entry.
 
 A native TypeScript/Defuddle implementation of `web.fetch` is a separate future
 spec; this repository's Web extension is a thin adapter over the Go CLI.

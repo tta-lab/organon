@@ -107,11 +107,14 @@ func wholeFileMediaResult(filename string, source []byte, symbolID string, resul
 	return nil, nil
 }
 
-func emptyReadResult(result readJSON, filename string, offset int) (readJSON, error) {
-	if offset > 1 {
-		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (0 lines)", offset, filename)
+// readOffset accepts zero only as Cobra's internal sentinel for an omitted
+// offset. An explicit --offset=0 violates the public one-indexed contract.
+func readOffset(cmd *cobra.Command) (int, error) {
+	offset, _ := cmd.Flags().GetInt("offset")
+	if offset < 0 || (offset == 0 && cmd.Flags().Changed("offset")) {
+		return 0, fmt.Errorf("offset must be 1 or greater")
 	}
-	return result, nil
+	return offset, nil
 }
 
 func targetID(afterID, beforeID string) string {
@@ -204,11 +207,11 @@ func runRead(cmd *cobra.Command, args []string) error {
 	}
 	filename := args[0]
 	symbolID, _ := cmd.Flags().GetString("symbol-id")
-	offset, _ := cmd.Flags().GetInt("offset")
-	limit, _ := cmd.Flags().GetInt("limit")
-	if offset < 0 {
-		return fmt.Errorf("offset must be 1 or greater")
+	offset, err := readOffset(cmd)
+	if err != nil {
+		return err
 	}
+	limit, _ := cmd.Flags().GetInt("limit")
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
@@ -237,12 +240,12 @@ func runRead(cmd *cobra.Command, args []string) error {
 func runReadJSON(cmd *cobra.Command, args []string) error {
 	filename := args[0]
 	symbolID, _ := cmd.Flags().GetString("symbol-id")
-	offset, _ := cmd.Flags().GetInt("offset")
+	offset, err := readOffset(cmd)
+	if err != nil {
+		return err
+	}
 	limit, _ := cmd.Flags().GetInt("limit")
 
-	if offset < 0 {
-		return fmt.Errorf("offset must be 1 or greater")
-	}
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
@@ -260,19 +263,20 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 
 func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
 	content := string(source)
-	totalLines := srcview.LineCount(content)
-
 	if symbolID != "" {
 		symbolContent, err := srcview.NewInspector(filename, source, 2).ReadContent(symbolID)
 		if err != nil {
 			return readJSON{}, err
 		}
 		content = symbolContent
-		totalLines = srcview.LineCount(content)
 	}
 
+	// Pi's built-in read treats strings.Split(text, "\n") as its line model:
+	// an empty file is one empty line, and a trailing newline creates an
+	// addressable final empty line.
+	lines := strings.Split(content, "\n")
 	result := readJSON{
-		Path: filename, SymbolID: symbolID, TotalLines: totalLines, TotalBytes: len(source),
+		Path: filename, SymbolID: symbolID, TotalLines: len(lines), TotalBytes: len(source),
 	}
 
 	mediaResult, err := wholeFileMediaResult(filename, source, symbolID, result)
@@ -283,29 +287,19 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		return *mediaResult, nil
 	}
 
-	// An empty ordinary text file is a successful zero-line read. Treat the
-	// default offset and explicit line-one offset alike; only later pages are
-	// beyond its end.
-	if totalLines == 0 {
-		return emptyReadResult(result, filename, offset)
-	}
-
-	lines := strings.Split(content, "\n")
 	startIdx := 0
-	if offset > 1 {
+	if offset > 0 {
 		startIdx = offset - 1
 	}
-	// Reject an offset past the last real line; the phantom empty element from
-	// a final newline is not a line an agent can page to.
-	if startIdx >= len(lines) || startIdx >= totalLines {
-		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (%d lines)", offset, filename, totalLines)
+	if startIdx >= len(lines) {
+		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (%d lines)", offset, filename, len(lines))
 	}
-	if limit > 0 && startIdx+limit < len(lines) {
-		lines = lines[startIdx : startIdx+limit]
-	} else {
-		lines = lines[startIdx:]
+
+	selected := lines[startIdx:]
+	if limit > 0 && limit < len(selected) {
+		selected = selected[:limit]
 	}
-	content = strings.Join(lines, "\n")
+	content = strings.Join(selected, "\n")
 	result.StartLine = 1 + startIdx
 
 	tr := truncate.Head(content, truncate.DefaultMaxLines, truncate.DefaultMaxBytes)

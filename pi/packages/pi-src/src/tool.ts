@@ -1,8 +1,14 @@
 import { createRequire } from "node:module";
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { formatSize, resizeImage, type TruncationResult } from "@earendil-works/pi-coding-agent";
+import {
+  convertToPng,
+  formatDimensionNote,
+  formatSize,
+  resizeImage,
+  type TruncationResult,
+  withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
 import {
@@ -270,6 +276,7 @@ export function toTruncation(result: ReadResult): TruncationResult | undefined {
 }
 
 export function srcTool() {
+  const binary = resolveBinaryPath("src", { require });
   return {
     name: "src",
     label: "src",
@@ -293,7 +300,6 @@ export function srcTool() {
       >;
       details: unknown;
     }> {
-      const binary = resolveBinaryPath("src", { require });
       const absolutePath = resolveSourcePath(params.path, ctx.cwd);
       const run = () => runAndRender(binary, params, absolutePath, signal, ctx.model);
       if (isAction(params, "edit") || isMutation(params)) {
@@ -330,7 +336,7 @@ async function runAndRender(
   const { args, stdin } = buildArgs(params, absolutePath);
   const result = await runCli(binary, { args, stdin, signal });
   if (result.exitCode !== 0) {
-    throw cliError(result.stderr, result.exitCode);
+    throw await cliError(result.stderr, result.exitCode);
   }
   return render(params, result.stdout, model);
 }
@@ -470,6 +476,54 @@ function nonVisionNote(model?: { input?: string[] }): string | undefined {
   return NON_VISION_NOTE;
 }
 
+interface NormalizedInlineImage {
+  data: string;
+  mimeType: string;
+  convertedFrom?: string;
+}
+
+function baseImageMimeType(mimeType: string): string {
+  return mimeType.split(";")[0]?.trim().toLowerCase() ?? mimeType.toLowerCase();
+}
+
+function supportedInlineMimeType(mimeType: string): string | undefined {
+  switch (mimeType) {
+    case "image/png":
+      return "image/png";
+    case "image/jpeg":
+    case "image/jpg":
+      return "image/jpeg";
+    case "image/gif":
+      return "image/gif";
+    case "image/webp":
+      return "image/webp";
+    default:
+      return undefined;
+  }
+}
+
+// Mirrors Pi's processImage normalization before resizeImage: BMP and any
+// other recognized non-inline MIME are decoded to PNG before attachment.
+async function normalizeInlineImage(
+  data: string,
+  mimeType: string,
+): Promise<NormalizedInlineImage | undefined> {
+  const baseMimeType = baseImageMimeType(mimeType);
+  const supportedMimeType = supportedInlineMimeType(baseMimeType);
+  if (supportedMimeType) {
+    return { data, mimeType: supportedMimeType };
+  }
+  const converted = await convertToPng(data, mimeType);
+  if (!converted) {
+    return undefined;
+  }
+  return { ...converted, convertedFrom: baseMimeType };
+}
+
+function mediaOmittedText(mimeType: string, message: string, note?: string): string {
+  return [`Read image file [${mimeType}]`, message, note].filter(Boolean).join("\n");
+}
+
 async function renderMedia(
   data: ReadResult,
   model?: { input?: string[] },
@@ -481,21 +535,56 @@ async function renderMedia(
 }> {
   const media = data.media!;
   const note = nonVisionNote(model);
-  const bytes = Buffer.from(media.data_base64, "base64");
-  const resized = await resizeImage(bytes, media.mime, { maxWidth: 2000, maxHeight: 2000 });
-  if (!resized) {
-    let text = `Read image file [${media.mime}]\n[Image omitted: could not be resized below the inline image size limit.]`;
-    if (note) {
-      text += `\n${note}`;
-    }
-    return { content: [{ type: "text", text }], details: { mime: media.mime } };
+  const normalized = await normalizeInlineImage(media.data_base64, media.mime);
+  if (!normalized) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: mediaOmittedText(
+            media.mime,
+            "[Image omitted: could not be converted to a supported inline image format.]",
+            note,
+          ),
+        },
+      ],
+      details: { mime: media.mime },
+    };
   }
-  const textNote = note
-    ? `Read image file [${resized.mimeType}]\n${note}`
-    : `Read image file [${resized.mimeType}]`;
+
+  const resized = await resizeImage(Buffer.from(normalized.data, "base64"), normalized.mimeType, {
+    maxWidth: 2000,
+    maxHeight: 2000,
+  });
+  if (!resized) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: mediaOmittedText(
+            normalized.mimeType,
+            "[Image omitted: could not be resized below the inline image size limit.]",
+            note,
+          ),
+        },
+      ],
+      details: { mime: media.mime },
+    };
+  }
+
+  const hints = [
+    normalized.convertedFrom && normalized.convertedFrom !== resized.mimeType
+      ? `[Image converted from ${normalized.convertedFrom} to ${resized.mimeType}.]`
+      : undefined,
+    formatDimensionNote(resized),
+    note,
+  ].filter((hint): hint is string => Boolean(hint));
   return {
     content: [
-      { type: "text", text: textNote },
+      {
+        type: "text",
+        text: [`Read image file [${resized.mimeType}]`, ...hints].join("\n"),
+      },
       { type: "image", data: resized.data, mimeType: resized.mimeType },
     ],
     details: { mime: media.mime, width: resized.width, height: resized.height },
