@@ -20,12 +20,12 @@ func TestInspectorCodeOutlineAndDocRead(t *testing.T) {
 	if !symbol.Targetable || !symbol.HasDoc || symbol.Kind != "function" || symbol.StartByte <= 0 {
 		t.Fatalf("symbol = %#v", symbol)
 	}
-	read, err := inspector.Read(symbol.ID, 32)
+	content, err := inspector.ReadContent(symbol.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(read.Content, "// Greet says hello.") || !read.Truncated {
-		t.Fatalf("read = %#v", read)
+	if !strings.HasPrefix(content, "// Greet says hello.") || !strings.Contains(content, "return \"hello \"") {
+		t.Fatalf("content = %q", content)
 	}
 }
 
@@ -45,12 +45,12 @@ func TestInspectorMarkdownExposesUntargetableH1AndStableSections(t *testing.T) {
 	if !setup.Targetable || setup.Kind != "section" || setup.Parent != "Guide" {
 		t.Fatalf("setup = %#v", setup)
 	}
-	read, err := NewInspector("guide.md", source, 2).Read(setup.ID, 256*1024)
+	content, err := NewInspector("guide.md", source, 2).ReadContent(setup.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(read.Content, "### Linux") {
-		t.Fatalf("section read = %q", read.Content)
+	if !strings.Contains(content, "### Linux") {
+		t.Fatalf("section read = %q", content)
 	}
 }
 

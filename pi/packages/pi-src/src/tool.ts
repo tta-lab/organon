@@ -152,6 +152,7 @@ export interface ReadResult {
   content: string;
   start_line: number;
   total_lines: number;
+  truncation_total_lines?: number;
   total_bytes: number;
   truncated: boolean;
   truncated_by?: string;
@@ -267,7 +268,7 @@ export function toTruncation(result: ReadResult): TruncationResult | undefined {
     content: result.content,
     truncated: true,
     truncatedBy: (result.truncated_by ?? "bytes") as "lines" | "bytes" | null,
-    totalLines: result.total_lines,
+    totalLines: result.truncation_total_lines ?? result.total_lines,
     totalBytes: result.total_bytes,
     outputLines: result.output_lines ?? 0,
     outputBytes: result.output_bytes ?? 0,

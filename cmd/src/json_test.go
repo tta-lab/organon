@@ -194,7 +194,8 @@ func TestReadJSONRejectsExplicitZeroOffset(t *testing.T) {
 }
 
 func TestReadJSONSymbolID(t *testing.T) {
-	f := writeGoFile(t, "package sample\n\n// Foo docs.\nfunc Foo() {\n\t// body\n}\n\nfunc Bar() {}\n")
+	source := "package sample\n\n// Foo docs.\nfunc Foo() {\n\t// body\n}\n\nfunc Bar() {}\n"
+	f := writeGoFile(t, source)
 	outline := decodeOutline(t, captureStdout(t, func() {
 		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
 	}))
@@ -214,7 +215,28 @@ func TestReadJSONSymbolID(t *testing.T) {
 	assert.Contains(t, out.Content, "Foo docs")
 	assert.Equal(t, 1, out.StartLine)  // symbol-relative first line
 	assert.Equal(t, 4, out.TotalLines) // doc comment + function body
+	assert.Equal(t, len(out.Content), out.TotalBytes)
+	assert.Less(t, out.TotalBytes, len(source))
 	assert.False(t, out.Truncated)
+}
+
+func TestReadJSONSymbolReadRejectsBinarySource(t *testing.T) {
+	source := append([]byte("package sample\n\nfunc Foo() {}\n"), 0, 'b', 'i', 'n')
+	f := filepath.Join(t.TempDir(), "sample.go")
+	require.NoError(t, os.WriteFile(f, source, 0o644))
+
+	outline := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	require.Len(t, outline.Symbols, 1)
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", outline.Symbols[0].ID))
+	out := captureStdout(t, func() {
+		err := runReadJSON(cmd, []string{f})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "binary file")
+	})
+	assert.Empty(t, out, "no symbol prefix may be emitted from a binary source")
 }
 
 func TestReadJSONSymbolIDRejectsDisplayName(t *testing.T) {
@@ -345,25 +367,36 @@ func TestReadJSONLineTruncationContinuation(t *testing.T) {
 	assert.Equal(t, 2000, out.OutputLines)
 	assert.Equal(t, 2001, out.NextOffset)
 	assert.Equal(t, 2101, out.TotalLines)
+	assert.Equal(t, 2100, out.TruncationTotalLines)
 }
 
-func TestReadJSONLineLimitAdvertisesTrailingEmptyLine(t *testing.T) {
+func TestReadJSONTerminalEmptyLineDoesNotTriggerTruncation(t *testing.T) {
 	lines := make([]string, 0, 2000)
 	for i := 0; i < 2000; i++ {
 		lines = append(lines, "line")
 	}
 	dir := t.TempDir()
 	f := filepath.Join(dir, "line-limit.txt")
-	require.NoError(t, os.WriteFile(f, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+	content := strings.Join(lines, "\n") + "\n"
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o644))
 
 	out := decodeRead(t, captureStdout(t, func() {
 		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
 	}))
-	assert.True(t, out.Truncated)
-	assert.Equal(t, "lines", out.TruncatedBy)
+	assert.Equal(t, content, out.Content)
+	assert.False(t, out.Truncated)
 	assert.Equal(t, 2000, out.OutputLines)
 	assert.Equal(t, 2001, out.TotalLines)
-	assert.Equal(t, 2001, out.NextOffset)
+	assert.Zero(t, out.NextOffset)
+
+	limited := newReadCmd()
+	require.NoError(t, limited.Flags().Set("limit", "2000"))
+	limitedOut := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(limited, []string{f}))
+	}))
+	assert.False(t, limitedOut.Truncated)
+	assert.Equal(t, 2000, limitedOut.OutputLines)
+	assert.Equal(t, 2001, limitedOut.NextOffset)
 
 	last := newReadCmd()
 	require.NoError(t, last.Flags().Set("offset", "2001"))

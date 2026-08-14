@@ -8,7 +8,15 @@ import (
 func TestHeadUntruncated(t *testing.T) {
 	content := "a\nb\nc\n"
 	r := Head(content, 10, 1024)
-	if r.Truncated || r.Content != content || r.TotalLines != 4 || r.TotalBytes != len(content) {
+	if r.Truncated || r.Content != content || r.TotalLines != 3 || r.OutputLines != 3 || r.TotalBytes != len(content) {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
+func TestHeadDoesNotCountTerminalEmptySegment(t *testing.T) {
+	content := strings.Repeat("x\n", 2000)
+	r := Head(content, 2000, 1<<20)
+	if r.Truncated || r.Content != content || r.TotalLines != 2000 || r.OutputLines != 2000 {
 		t.Fatalf("result = %+v", r)
 	}
 }
@@ -22,7 +30,7 @@ func TestHeadLineLimit(t *testing.T) {
 	if r.Content != "x\nx\nx" {
 		t.Fatalf("content = %q", r.Content)
 	}
-	if r.OutputLines != 3 || r.TotalLines != 11 {
+	if r.OutputLines != 3 || r.TotalLines != 10 {
 		t.Fatalf("lines = %d/%d", r.OutputLines, r.TotalLines)
 	}
 }
@@ -60,7 +68,7 @@ func TestHeadBytesHitBeforeLines(t *testing.T) {
 
 func TestHeadEmptyContent(t *testing.T) {
 	r := Head("", 10, 1024)
-	if r.Truncated || r.Content != "" || r.TotalLines != 1 {
+	if r.Truncated || r.Content != "" || r.TotalLines != 0 || r.OutputLines != 0 {
 		t.Fatalf("result = %+v", r)
 	}
 }

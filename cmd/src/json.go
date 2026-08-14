@@ -27,13 +27,16 @@ type symbolOutlineJSON struct {
 // readJSON is the machine-readable result of `src read --json`. Line
 // positions (StartLine, TotalLines, NextOffset) are relative to the selected
 // content: the whole file, or the exact symbol/section when symbol_id is
-// present. Offset and limit are 1-indexed line positions in the same frame.
+// present. TotalLines uses pagination's addressable-line model;
+// TruncationTotalLines uses Pi truncateHead's counted-line model. Offset and
+// limit are 1-indexed line positions in the same frame.
 type readJSON struct {
 	Path                  string     `json:"path"`
 	SymbolID              string     `json:"symbol_id,omitempty"`
 	Content               string     `json:"content"`
 	StartLine             int        `json:"start_line"`
 	TotalLines            int        `json:"total_lines"`
+	TruncationTotalLines  int        `json:"truncation_total_lines,omitempty"`
 	TotalBytes            int        `json:"total_bytes"`
 	Truncated             bool       `json:"truncated"`
 	TruncatedBy           string     `json:"truncated_by,omitempty"`
@@ -120,19 +123,25 @@ func hasBinarySignature(data []byte) bool {
 	return false
 }
 
-// wholeFileMediaResult validates non-symbol reads and returns a completed
-// media result when the source is a supported image.
-func wholeFileMediaResult(filename string, source []byte, symbolID string, result readJSON) (*readJSON, error) {
-	if symbolID != "" {
-		return nil, nil
+// validateTextSource rejects unsupported image variants and binary input before
+// a symbol parser can expose a text-looking prefix from an otherwise binary file.
+func validateTextSource(filename string, source []byte) error {
+	if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
+		return mediaErrorFor(source, filename)
 	}
+	return nil
+}
+
+// wholeFileMediaResult returns a supported-image result or validates a text
+// whole-file read. Symbol reads call validateTextSource before extraction.
+func wholeFileMediaResult(filename string, source []byte, result readJSON) (*readJSON, error) {
 	if media, ok := detectMedia(source); ok {
 		result.Media = &media
 		result.Content = ""
 		return &result, nil
 	}
-	if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
-		return nil, mediaErrorFor(source, filename)
+	if err := validateTextSource(filename, source); err != nil {
+		return nil, err
 	}
 	return nil, nil
 }
@@ -292,29 +301,37 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 }
 
 func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
-	content := string(source)
+	var content string
 	if symbolID != "" {
+		if err := validateTextSource(filename, source); err != nil {
+			return readJSON{}, err
+		}
 		symbolContent, err := srcview.NewInspector(filename, source, 2).ReadContent(symbolID)
 		if err != nil {
 			return readJSON{}, err
 		}
 		content = symbolContent
+	} else {
+		content = string(source)
 	}
 
-	// Pi's built-in read treats strings.Split(text, "\n") as its line model:
-	// an empty file is one empty line, and a trailing newline creates an
-	// addressable final empty line.
+	// Pi's built-in read treats strings.Split(text, "\n") as its pagination
+	// model: an empty file is one empty line, and a trailing newline creates an
+	// addressable final empty line. truncate.Head uses its own counted-line
+	// model, which excludes that terminal empty segment.
 	lines := strings.Split(content, "\n")
 	result := readJSON{
-		Path: filename, SymbolID: symbolID, TotalLines: len(lines), TotalBytes: len(source),
+		Path: filename, SymbolID: symbolID, TotalLines: len(lines), TotalBytes: len(content),
 	}
 
-	mediaResult, err := wholeFileMediaResult(filename, source, symbolID, result)
-	if err != nil {
-		return readJSON{}, err
-	}
-	if mediaResult != nil {
-		return *mediaResult, nil
+	if symbolID == "" {
+		mediaResult, err := wholeFileMediaResult(filename, source, result)
+		if err != nil {
+			return readJSON{}, err
+		}
+		if mediaResult != nil {
+			return *mediaResult, nil
+		}
 	}
 
 	startIdx := 0
@@ -326,8 +343,10 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 	}
 
 	selected := lines[startIdx:]
+	userLimited := false
 	if limit > 0 && limit < len(selected) {
 		selected = selected[:limit]
+		userLimited = true
 	}
 	content = strings.Join(selected, "\n")
 	result.StartLine = 1 + startIdx
@@ -339,12 +358,19 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 	result.OutputLines = tr.OutputLines
 	result.OutputBytes = tr.OutputBytes
 	result.FirstLineExceedsLimit = tr.FirstLineExceedsLimit
-	// Continuation applies whenever more lines follow the output: either the
-	// Pi truncation contract cut it short, or a caller-specified limit stopped
-	// early. Without it an agent reading a limited window would not know the
-	// next offset to continue from.
-	if !tr.FirstLineExceedsLimit && result.StartLine+result.OutputLines-1 < result.TotalLines {
-		result.NextOffset = result.StartLine + result.OutputLines
+	if tr.Truncated {
+		result.TruncationTotalLines = tr.TotalLines
+	}
+	// A continuation applies only when Pi's output truncation stopped early or
+	// an explicit limit selected fewer addressable lines. A terminal empty
+	// segment is addressable for pagination but does not itself cause truncation.
+	if !tr.FirstLineExceedsLimit {
+		switch {
+		case tr.Truncated:
+			result.NextOffset = result.StartLine + tr.OutputLines
+		case userLimited:
+			result.NextOffset = result.StartLine + len(selected)
+		}
 	}
 	return result, nil
 }

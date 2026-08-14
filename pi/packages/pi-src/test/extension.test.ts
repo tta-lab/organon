@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { renderReadText, srcSchema, srcTool } from "../src/tool.js";
+import { renderReadText, srcSchema, srcTool, toTruncation } from "../src/tool.js";
 import { createTakeoverHandlers, applyReadTakeover, restoreReadTakeover } from "../src/takeover.js";
 import { resolveSourcePath } from "../src/paths.js";
 
@@ -178,6 +178,22 @@ describe("pi-src read and symbols", () => {
     expect(text).toContain(
       "[Showing lines 1-3 of 10. Use offset=4 to continue. Full content is available at: f]",
     );
+  });
+
+  it("uses Pi counted lines for truncation details", () => {
+    const truncation = toTruncation({
+      path: "f",
+      content: "line\n".repeat(2000),
+      start_line: 1,
+      total_lines: 2001,
+      truncation_total_lines: 2000,
+      total_bytes: 10_000,
+      truncated: true,
+      truncated_by: "lines",
+      output_lines: 2000,
+      next_offset: 2001,
+    });
+    expect(truncation?.totalLines).toBe(2000);
   });
 
   it("truncates and saves large symbol outlines and comments", async () => {
