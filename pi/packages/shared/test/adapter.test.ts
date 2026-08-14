@@ -1,4 +1,5 @@
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +16,33 @@ import { detectPlatform } from "../src/platform.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "..", "testdata");
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`child did not write ${path}`);
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`child ${pid} did not exit after cancellation`);
+}
 
 describe("platform detection", () => {
   it("detects the current host as one of the supported triples", () => {
@@ -71,6 +99,37 @@ describe("subprocess adapter", () => {
     await expect(
       runCli(process.execPath, { args: [join(fixtures, "hang.mjs")], signal: controller.signal }),
     ).rejects.toThrow("Operation aborted");
+  });
+
+  it("terminates an already-started child when the signal aborts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-run-cli-"));
+    const pidPath = join(directory, "pid");
+    const controller = new AbortController();
+    const pending = runCli(process.execPath, {
+      args: [join(fixtures, "pid-hang.mjs"), pidPath],
+      signal: controller.signal,
+    });
+    let pid = 0;
+
+    try {
+      await waitForFile(pidPath);
+      pid = Number(readFileSync(pidPath, "utf8"));
+      expect(pid).toBeGreaterThan(0);
+      controller.abort();
+      await expect(pending).rejects.toThrow("Operation aborted");
+      await waitForProcessExit(pid);
+    } finally {
+      controller.abort();
+      await pending.catch(() => undefined);
+      if (pid > 0) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // The expected path is that SIGTERM from AbortSignal already exited it.
+        }
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("propagates a nonzero exit code without throwing", async () => {

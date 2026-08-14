@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { renderReadText, srcSchema, srcTool, toTruncation } from "../src/tool.js";
+import { srcSchema, srcTool } from "../src/tool.js";
 import { createTakeoverHandlers, applyReadTakeover, restoreReadTakeover } from "../src/takeover.js";
 import { resolveSourcePath } from "../src/paths.js";
 
@@ -165,38 +165,32 @@ describe("pi-src read and symbols", () => {
     );
   });
 
-  it("read renders Pi-equivalent continuation for truncated output", () => {
-    const lines = Array.from({ length: 10 }, (_, i) => "line " + i);
-    const text = renderReadText({
-      path: "f",
-      content: lines.slice(0, 3).join("\n"),
-      start_line: 1,
-      total_lines: 10,
-      total_bytes: 100,
-      truncated: true,
-      truncated_by: "lines",
-      output_lines: 3,
-      next_offset: 4,
-    });
-    expect(text).toContain(
-      "[Showing lines 1-3 of 10. Use offset=4 to continue. Full content is available at: f]",
+  it("read renders the CLI window continuation metadata", async () => {
+    const { path, cwd } = makeFile(
+      "module example.com/organon\n" +
+        "go 1.26\n" +
+        "require example.com/dependency v1.0.0\n" +
+        "replace example.com/dependency => ./dependency\n",
     );
-  });
+    const result = await call({ action: "read", path, limit: 2 }, { cwd });
+    const details = result.details as {
+      selected_lines: number;
+      output_lines: number;
+      output_end_line: number;
+      remaining_lines: number;
+      next_offset: number;
+    };
 
-  it("uses Pi counted lines for truncation details", () => {
-    const truncation = toTruncation({
-      path: "f",
-      content: "line\n".repeat(2000),
-      start_line: 1,
-      total_lines: 2001,
-      truncation_total_lines: 2000,
-      total_bytes: 10_000,
-      truncated: true,
-      truncated_by: "lines",
-      output_lines: 2000,
-      next_offset: 2001,
+    expect(details).toMatchObject({
+      selected_lines: 2,
+      output_lines: 2,
+      output_end_line: 2,
+      remaining_lines: 3,
+      next_offset: 3,
     });
-    expect(truncation?.totalLines).toBe(2000);
+    expect((result.content[0] as { text: string }).text).toContain(
+      "[3 more lines in file. Use offset=3 to continue.",
+    );
   });
 
   it("truncates and saves large symbol outlines and comments", async () => {

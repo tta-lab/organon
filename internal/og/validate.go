@@ -115,14 +115,6 @@ func ValidatePRResponse(resp Response, expectedID int64) error {
 	return nil
 }
 
-// ValidateWorktreePR requires a pull request for current-branch operations.
-func ValidateWorktreePR(resp Response) error {
-	if resp.PR == nil || resp.PR.Index <= 0 {
-		return fmt.Errorf("og daemon returned an invalid pull request")
-	}
-	return nil
-}
-
 // ValidatePRModifyResponse requires a valid pull request that reflects the
 // requested title/body changes.
 func ValidatePRModifyResponse(resp Response, expectedID int64, title, body *string) error {

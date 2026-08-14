@@ -362,7 +362,7 @@ func callWorktreePRTool(
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
-	if err := og.ValidateWorktreePR(resp); err != nil {
+	if err := og.ValidatePRResponse(resp, 0); err != nil {
 		return nil, ogPROutput{}, err
 	}
 	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil

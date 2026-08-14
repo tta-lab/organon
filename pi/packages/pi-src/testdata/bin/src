@@ -71,10 +71,6 @@ function readSymbol(source, id) {
   return null;
 }
 
-function countLines(text) {
-  return text.split("\n").length;
-}
-
 const raw = readFileSync(path);
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG_SIG = Buffer.from([0xff, 0xd8, 0xff]);
@@ -125,28 +121,39 @@ if (cmd === "read") {
     content = block;
     symbolId_ = id;
   }
-  const total_lines = countLines(content);
-  let lines = content.split("\n");
-  if (offset > 1) lines = lines.slice(offset - 1);
-  if (limit > 0 && offset + limit < lines.length + (offset > 1 ? offset - 1 : 0)) {
-    lines = lines.slice(0, limit);
-  }
-  const selected = lines.join("\n");
-  const outputLines = countLines(selected);
-  const truncated = outputLines < total_lines;
+  const sourceLines = content.split("\n");
+  const total_lines = sourceLines.length;
+  const start_line = offset > 1 ? offset : 1;
+  let selectedLines = sourceLines.slice(start_line - 1);
+  const userLimited = limit > 0 && limit < selectedLines.length;
+  if (userLimited) selectedLines = selectedLines.slice(0, limit);
+  const selected = selectedLines.join("\n");
+  // Mirror Pi truncateHead's counted lines while retaining the final empty
+  // segment in selected_lines for addressable pagination.
+  const outputLines =
+    selected === ""
+      ? 0
+      : selected.endsWith("\n")
+        ? selected.split("\n").length - 1
+        : selectedLines.length;
+  const outputEndLine = start_line + selectedLines.length - 1;
+  const nextOffset = userLimited ? outputEndLine + 1 : undefined;
   process.stdout.write(
     JSON.stringify({
       path,
       symbol_id: symbolId_,
       content: selected,
-      start_line: offset > 1 ? offset : 1,
+      start_line,
+      selected_lines: selectedLines.length,
       total_lines,
-      total_bytes: source.length,
-      truncated,
-      truncated_by: truncated ? "lines" : undefined,
+      truncation_total_lines: outputLines,
+      total_bytes: Buffer.byteLength(content),
+      truncated: false,
       output_lines: outputLines,
-      output_bytes: selected.length,
-      next_offset: truncated ? (offset > 1 ? offset : 1) + outputLines : undefined,
+      output_bytes: Buffer.byteLength(selected),
+      output_end_line: outputEndLine,
+      remaining_lines: userLimited ? total_lines - outputEndLine : undefined,
+      next_offset: nextOffset,
     }) + "\n",
   );
   process.exit(0);

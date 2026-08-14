@@ -8,7 +8,7 @@ import {
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
-  truncateForModel,
+  modelTextResult,
 } from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
@@ -251,15 +251,13 @@ async function render(
         ? "No search results."
         : `Found ${lines.length} search results (provider: ${data.provider}):\n\n` +
           lines.join("\n\n");
-    return renderText(data, raw, "Use a narrower search query to reduce results.");
+    return modelTextResult(data, raw, { hint: "Use a narrower search query to reduce results." });
   }
   if (isAction(input, "fetch")) {
     const data = parseSingleJsonDoc<FetchResult>(stdout);
-    return renderText(
-      data,
-      data.content,
-      "Use fetch with tree or section_id to navigate the document.",
-    );
+    return modelTextResult(data, data.content, {
+      hint: "Use fetch with tree or section_id to navigate the document.",
+    });
   }
   if (isAction(input, "docs_resolve")) {
     const data = parseSingleJsonDoc<DocsResolveResult>(stdout);
@@ -268,34 +266,20 @@ async function render(
       lines.length === 0
         ? `No libraries found for ${JSON.stringify(input.query)}`
         : `Found ${lines.length} libraries:\n` + lines.join("\n");
-    return renderText(data, raw, "Use a more specific library query to narrow results.");
+    return modelTextResult(data, raw, {
+      hint: "Use a more specific library query to narrow results.",
+    });
   }
   if (isAction(input, "docs_fetch")) {
     const data = parseSingleJsonDoc<DocsFetchResult>(stdout);
-    return renderText(
-      data,
-      data.content,
-      "Refetch with a narrower topic or tokens budget for the remainder.",
-    );
+    return modelTextResult(data, data.content, {
+      hint: "Refetch with a narrower topic or tokens budget for the remainder.",
+    });
   }
   const data = parseSingleJsonDoc<SGraphResult>(stdout);
-  return renderText(
-    data,
-    data.content,
-    "Use a narrower Sourcegraph query or lower count and context.",
-  );
-}
-
-async function renderText(
-  data: object,
-  raw: string,
-  hint: string,
-): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-  const model = await truncateForModel(raw, { hint });
-  const details = model.truncation
-    ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
-    : data;
-  return { content: [{ type: "text", text: model.text }], details };
+  return modelTextResult(data, data.content, {
+    hint: "Use a narrower Sourcegraph query or lower count and context.",
+  });
 }
 
 export function registerWebTool(pi: {

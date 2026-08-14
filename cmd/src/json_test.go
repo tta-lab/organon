@@ -288,6 +288,49 @@ func TestReadJSONExplicitLimitSetsContinuation(t *testing.T) {
 	// The caller-limited window must still advertise the next offset.
 	assert.Equal(t, 4, out.NextOffset)
 }
+func TestReadJSONWindowMetadataForExplicitLimit(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "go.mod")
+	content := "module example.com/organon\n" +
+		"go 1.26\n" +
+		"require example.com/dependency v1.0.0\n" +
+		"replace example.com/dependency => ./dependency\n"
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("limit", "2"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+
+	assert.Equal(t, 2, out.SelectedLines)
+	assert.Equal(t, 2, out.OutputLines)
+	assert.Equal(t, 5, out.TotalLines) // includes the terminal addressable empty line
+	assert.Equal(t, len(content), out.TotalBytes)
+	assert.Equal(t, 2, out.OutputEndLine)
+	assert.Equal(t, 3, out.NextOffset)
+	assert.Equal(t, 3, out.RemainingLines)
+}
+
+func TestReadJSONWindowKeepsBlankLimitBoundaryAddressable(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "go.mod")
+	require.NoError(t, os.WriteFile(f, []byte("module example.com/organon\n\ngo 1.26\n"), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("limit", "2"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+
+	assert.Equal(t, "module example.com/organon\n", out.Content)
+	assert.Equal(t, 2, out.SelectedLines)
+	assert.Equal(t, 1, out.OutputLines) // Pi excludes the selected terminal empty segment from its count
+	assert.Equal(t, 2, out.OutputEndLine)
+	assert.Equal(t, 3, out.NextOffset)
+	assert.Equal(t, 2, out.RemainingLines)
+}
+
 func TestReadJSONOffsetLimitPagination(t *testing.T) {
 	lines := make([]string, 0, 12)
 	for i := 1; i <= 12; i++ {
@@ -426,6 +469,26 @@ func TestReadJSONTerminalEmptyLineDoesNotTriggerTruncation(t *testing.T) {
 	assert.Equal(t, "", finalLine.Content)
 	assert.Equal(t, 2001, finalLine.StartLine)
 	assert.False(t, finalLine.Truncated)
+}
+
+func TestReadJSONByteTruncationWindow(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "byte-limit.txt")
+	lines := make([]string, 1000)
+	for i := range lines {
+		lines[i] = strings.Repeat("x", 60)
+	}
+	require.NoError(t, os.WriteFile(f, []byte(strings.Join(lines, "\n")), 0o644))
+
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
+	}))
+
+	assert.True(t, out.Truncated)
+	assert.Equal(t, "bytes", out.TruncatedBy)
+	assert.LessOrEqual(t, out.OutputBytes, 50*1024)
+	assert.Equal(t, out.OutputEndLine+1, out.NextOffset)
+	assert.Equal(t, out.TotalLines-out.OutputEndLine, out.RemainingLines)
 }
 
 func TestReadJSONFirstLineExceedsLimit(t *testing.T) {

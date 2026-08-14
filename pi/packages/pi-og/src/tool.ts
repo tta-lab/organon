@@ -8,7 +8,7 @@ import {
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
-  truncateForModel,
+  modelTextResult,
 } from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
@@ -365,47 +365,43 @@ async function render(
     const text =
       `${a.ready ? "Authenticated" : "Not authenticated"}: ${a.provider} ${a.host}/${a.owner}/${a.repo}` +
       (a.ready ? "" : ` (auth mode: ${a.auth_mode})`);
-    return renderText(
-      data,
-      text,
-      "Use og action auth_status again after resolving the reported issue.",
-    );
+    return modelTextResult(data, text, {
+      hint: "Use og action auth_status again after resolving the reported issue.",
+    });
   }
   if (isAction(input, "push") || isAction(input, "pull")) {
     const data = parseSingleJsonDoc<{ project?: string; message: string }>(stdout);
-    return renderText(
-      data,
-      data.message,
-      `Use og action ${input.action} to inspect the operation again.`,
-    );
+    return modelTextResult(data, data.message, {
+      hint: `Use og action ${input.action} to inspect the operation again.`,
+    });
   }
   if (isAction(input, "clone")) {
     const data = parseSingleJsonDoc<{ clone: CloneResult }>(stdout);
     const c = data.clone;
     const text = c.registered ? `Cloned ${c.alias} to ${c.path}` : `Cloned reference to ${c.path}`;
-    return renderText(data, text, "Use og action clone again only if another clone is needed.");
+    return modelTextResult(data, text, {
+      hint: "Use og action clone again only if another clone is needed.",
+    });
   }
   if (isAction(input, "pr_comment")) {
     const data = parseSingleJsonDoc<{ project?: string; comment: Comment }>(stdout);
     const text = `Commented on PR #${data.comment.pr_id}: ${data.comment.url}`;
-    return renderText(data, text, "Use og action pr_comment to add a follow-up comment.");
+    return modelTextResult(data, text, {
+      hint: "Use og action pr_comment to add a follow-up comment.",
+    });
   }
   if (isAction(input, "pr_log") || isAction(input, "pr_failures") || isAction(input, "pr_checks")) {
     const data = parseSingleJsonDoc<{ project?: string; pr: PullRequest; lines: string[] }>(stdout);
     const pr = formatPR(data.pr);
     const text = data.lines.length ? `${pr}\n\n${data.lines.join("\n")}` : pr;
-    return renderText(
-      data,
-      text,
-      `Use og action ${input.action} with a smaller tail to narrow logs.`,
-    );
+    return modelTextResult(data, text, {
+      hint: `Use og action ${input.action} with a smaller tail to narrow logs.`,
+    });
   }
   const data = parseSingleJsonDoc<{ project?: string; pr: PullRequest }>(stdout);
-  return renderText(
-    data,
-    formatPR(data.pr),
-    "Use og action pr_get to inspect the pull request again.",
-  );
+  return modelTextResult(data, formatPR(data.pr), {
+    hint: "Use og action pr_get to inspect the pull request again.",
+  });
 }
 
 function formatPR(pr: PullRequest): string {
@@ -414,18 +410,6 @@ function formatPR(pr: PullRequest): string {
     text += `\n\n${pr.body}`;
   }
   return text;
-}
-
-async function renderText(
-  data: object,
-  raw: string,
-  hint: string,
-): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-  const model = await truncateForModel(raw, { hint });
-  const details = model.truncation
-    ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
-    : data;
-  return { content: [{ type: "text", text: model.text }], details };
 }
 
 export function registerOgTool(pi: {

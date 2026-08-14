@@ -3,16 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/srcview"
-	"github.com/tta-lab/organon/internal/truncate"
 )
 
 // symbolOutlineJSON is the typed outline returned by `src symbols --json`.
@@ -27,21 +26,24 @@ type symbolOutlineJSON struct {
 // readJSON is the machine-readable result of `src read --json`. Line
 // positions (StartLine, TotalLines, NextOffset) are relative to the selected
 // content: the whole file, or the exact symbol/section when symbol_id is
-// present. TotalLines uses pagination's addressable-line model;
-// TruncationTotalLines uses Pi truncateHead's counted-line model. Offset and
-// limit are 1-indexed line positions in the same frame.
+// present. TotalLines and SelectedLines use pagination's addressable-line
+// model; TruncationTotalLines and OutputLines use Pi truncateHead's counted
+// line model. Offset and limit are 1-indexed line positions in the same frame.
 type readJSON struct {
 	Path                  string     `json:"path"`
 	SymbolID              string     `json:"symbol_id,omitempty"`
 	Content               string     `json:"content"`
 	StartLine             int        `json:"start_line"`
+	SelectedLines         int        `json:"selected_lines"`
 	TotalLines            int        `json:"total_lines"`
-	TruncationTotalLines  int        `json:"truncation_total_lines,omitempty"`
+	TruncationTotalLines  int        `json:"truncation_total_lines"`
 	TotalBytes            int        `json:"total_bytes"`
 	Truncated             bool       `json:"truncated"`
 	TruncatedBy           string     `json:"truncated_by,omitempty"`
 	OutputLines           int        `json:"output_lines,omitempty"`
 	OutputBytes           int        `json:"output_bytes,omitempty"`
+	OutputEndLine         int        `json:"output_end_line,omitempty"`
+	RemainingLines        int        `json:"remaining_lines,omitempty"`
 	NextOffset            int        `json:"next_offset,omitempty"`
 	FirstLineExceedsLimit bool       `json:"first_line_exceeds_limit,omitempty"`
 	Media                 *mediaJSON `json:"media,omitempty"`
@@ -319,19 +321,9 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		content = symbolContent
 	} else {
 		content = string(source)
-	}
-
-	// Pi's built-in read treats strings.Split(text, "\n") as its pagination
-	// model: an empty file is one empty line, and a trailing newline creates an
-	// addressable final empty line. truncate.Head uses its own counted-line
-	// model, which excludes that terminal empty segment.
-	lines := strings.Split(content, "\n")
-	result := readJSON{
-		Path: filename, SymbolID: symbolID, TotalLines: len(lines), TotalBytes: len(content),
-	}
-
-	if symbolID == "" {
-		mediaResult, err := wholeFileMediaResult(filename, source, result)
+		mediaResult, err := wholeFileMediaResult(filename, source, readJSON{
+			Path: filename, TotalBytes: len(content),
+		})
 		if err != nil {
 			return readJSON{}, err
 		}
@@ -340,43 +332,32 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		}
 	}
 
-	startIdx := 0
-	if offset > 0 {
-		startIdx = offset - 1
-	}
-	if startIdx >= len(lines) {
-		return readJSON{}, fmt.Errorf("offset %d is beyond end of %s (%d lines)", offset, filename, len(lines))
-	}
-
-	selected := lines[startIdx:]
-	userLimited := false
-	if limit > 0 && limit < len(selected) {
-		selected = selected[:limit]
-		userLimited = true
-	}
-	content = strings.Join(selected, "\n")
-	result.StartLine = 1 + startIdx
-
-	tr := truncate.Head(content, truncate.DefaultMaxLines, truncate.DefaultMaxBytes)
-	result.Content = tr.Content
-	result.Truncated = tr.Truncated
-	result.TruncatedBy = tr.TruncatedBy
-	result.OutputLines = tr.OutputLines
-	result.OutputBytes = tr.OutputBytes
-	result.FirstLineExceedsLimit = tr.FirstLineExceedsLimit
-	if tr.Truncated {
-		result.TruncationTotalLines = tr.TotalLines
-	}
-	// A continuation applies only when Pi's output truncation stopped early or
-	// an explicit limit selected fewer addressable lines. A terminal empty
-	// segment is addressable for pagination but does not itself cause truncation.
-	if !tr.FirstLineExceedsLimit {
-		switch {
-		case tr.Truncated:
-			result.NextOffset = result.StartLine + tr.OutputLines
-		case userLimited:
-			result.NextOffset = result.StartLine + len(selected)
+	window, err := srcview.NewReadWindow(content, offset, limit)
+	if err != nil {
+		var offsetErr *srcview.OffsetOutOfRangeError
+		if errors.As(err, &offsetErr) {
+			return readJSON{}, fmt.Errorf(
+				"offset %d is beyond end of %s (%d lines)", offsetErr.Offset, filename, offsetErr.TotalLines,
+			)
 		}
+		return readJSON{}, err
 	}
-	return result, nil
+	return readJSON{
+		Path:                  filename,
+		SymbolID:              symbolID,
+		Content:               window.Content,
+		StartLine:             window.StartLine,
+		SelectedLines:         window.SelectedLines,
+		TotalLines:            window.TotalLines,
+		TruncationTotalLines:  window.TruncationTotalLines,
+		TotalBytes:            window.TotalBytes,
+		Truncated:             window.Truncated,
+		TruncatedBy:           window.TruncatedBy,
+		OutputLines:           window.OutputLines,
+		OutputBytes:           window.OutputBytes,
+		OutputEndLine:         window.OutputEndLine,
+		RemainingLines:        window.RemainingLines,
+		NextOffset:            window.NextOffset,
+		FirstLineExceedsLimit: window.FirstLineExceedsLimit,
+	}, nil
 }

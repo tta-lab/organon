@@ -8,7 +8,7 @@ import {
   runCli,
   parseSingleJsonDoc,
   cliError,
-  truncateForModel,
+  modelTextResult,
 } from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
@@ -93,29 +93,17 @@ export function projectTool() {
         });
         const raw =
           lines.length === 0 ? "No projects found." : "Available projects:\n" + lines.join("\n");
-        const model = await truncateForModel(raw, {
+        return modelTextResult(data, raw, {
           hint: "Use project get with an exact alias to inspect one project.",
         });
-        return {
-          content: [{ type: "text", text: model.text }],
-          details: model.truncation
-            ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
-            : data,
-        };
       }
       const data = parseSingleJsonDoc<ProjectGetResult>(result.stdout);
       const p = data.project;
       const text =
         p.name && p.name !== "" ? `${p.alias}: ${p.name} (${p.path})` : `${p.alias}: ${p.path}`;
-      const model = await truncateForModel(text, {
+      return modelTextResult(data, text, {
         hint: "Use project list or get with an exact alias to narrow the result.",
       });
-      return {
-        content: [{ type: "text", text: model.text }],
-        details: model.truncation
-          ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
-          : data,
-      };
     },
   };
 }

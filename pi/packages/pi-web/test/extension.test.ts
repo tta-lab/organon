@@ -1,18 +1,28 @@
-import { rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
-
-import { truncateForModel } from "../../shared/src/truncate.js";
 import { webSchema, webTool } from "../src/tool.js";
 
 const def = webTool();
 const ctx = { cwd: "/tmp", model: undefined } as any;
 
-function call(params: unknown) {
-  return def.execute("call-1", params as any, undefined, undefined, ctx);
+function call(params: unknown, signal?: AbortSignal) {
+  return def.execute("call-1", params as any, signal, undefined, ctx);
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`child did not write ${path}`);
 }
 
 describe("pi-web extension", () => {
@@ -130,34 +140,49 @@ describe("pi-web extension", () => {
     expect((result.content[0] as { text: string }).text).toContain("matches");
   });
 
-  it("large text results are truncated with an actionable continuation notice", async () => {
-    const big = Array.from({ length: 3000 }, (_, i) => "line " + i).join("\n");
-    const truncated = await truncateForModel(big);
-    const hinted = await truncateForModel(big, {
-      hint: "Use fetch with tree or section_id to navigate the document.",
-    });
-    try {
-      expect(truncated.truncation!.truncated).toBe(true);
-      expect(truncated.truncation!.truncatedBy).toBe("lines");
-      expect(truncated.text).toContain("[Truncated: showing 2000 of 3000 lines");
+  it("fetch returns bounded model text with its complete structured content", async () => {
+    const result = await call({ action: "fetch", url: "https://large.example" });
+    const details = result.details as {
+      content: string;
+      truncation: { truncated: boolean; truncatedBy: string };
+      fullOutputPath: string;
+    };
 
-      // The fetch action passes an actionable hint; the generic helper appends it.
-      expect(hinted.text).toContain("section_id");
-      expect(hinted.text).toContain(`Full output saved to: ${hinted.fullOutputPath}`);
+    try {
+      expect(details.truncation).toMatchObject({ truncated: true, truncatedBy: "lines" });
+      expect((result.content[0] as { text: string }).text).toContain("section_id");
+      expect((result.content[0] as { text: string }).text).toContain(
+        `Full output saved to: ${details.fullOutputPath}`,
+      );
+      expect(readFileSync(details.fullOutputPath, "utf8")).toBe(details.content);
     } finally {
-      for (const path of [truncated.fullOutputPath, hinted.fullOutputPath]) {
-        if (path) {
-          rmSync(dirname(path), { recursive: true, force: true });
-        }
+      if (details.fullOutputPath) {
+        rmSync(dirname(details.fullOutputPath), { recursive: true, force: true });
       }
     }
   });
 
-  it("abort cancels the CLI child process", async () => {
+  it("forwards an abort that fires after the web child starts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-abort-"));
+    const pidPath = join(directory, "pid");
+    const priorPIDPath = process.env.PI_WEB_TEST_PID_FILE;
+    process.env.PI_WEB_TEST_PID_FILE = pidPath;
     const controller = new AbortController();
-    controller.abort();
-    await expect(
-      def.execute("call-2", { action: "search", query: "x" }, controller.signal, undefined, ctx),
-    ).rejects.toThrow("Operation aborted");
+    const pending = call({ action: "search", query: "wait-for-abort" }, controller.signal);
+
+    try {
+      await waitForFile(pidPath);
+      controller.abort();
+      await expect(pending).rejects.toThrow("Operation aborted");
+    } finally {
+      controller.abort();
+      await pending.catch(() => undefined);
+      if (priorPIDPath === undefined) {
+        delete process.env.PI_WEB_TEST_PID_FILE;
+      } else {
+        process.env.PI_WEB_TEST_PID_FILE = priorPIDPath;
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

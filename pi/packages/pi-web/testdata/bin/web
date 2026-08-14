@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Test-only fake web CLI: mirrors the documented JSON contract of the real
 // Go binary for search/fetch/docs_resolve/docs_fetch/sgraph with --json.
+import { writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 if (!args.includes("--json")) {
@@ -30,6 +31,16 @@ switch (cmd) {
       process.stderr.write("Error: search backend failed: rate limited\n");
       process.exit(1);
     }
+    if (query === "wait-for-abort") {
+      const pidPath = process.env.PI_WEB_TEST_PID_FILE;
+      if (!pidPath) {
+        process.stderr.write("Error: missing PI_WEB_TEST_PID_FILE\n");
+        process.exit(2);
+      }
+      writeFileSync(pidPath, String(process.pid));
+      setInterval(() => {}, 1000);
+      break;
+    }
     process.stdout.write(
       JSON.stringify({
         provider: "DuckDuckGo",
@@ -56,18 +67,15 @@ switch (cmd) {
         : flags.get("full") === "true"
           ? "full"
           : "auto";
-    process.stdout.write(
-      JSON.stringify({
-        url: target,
-        mode,
-        content:
-          "rendered content of " +
+    const content =
+      target === "https://large.example"
+        ? Array.from({ length: 3000 }, (_, index) => `line ${index}`).join("\n")
+        : "rendered content of " +
           target +
           " (threshold " +
           (flags.get("tree-threshold") ?? "5000") +
-          ")",
-      }) + "\n",
-    );
+          ")";
+    process.stdout.write(JSON.stringify({ url: target, mode, content }) + "\n");
     break;
   }
   case "resolve": {

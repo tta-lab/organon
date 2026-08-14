@@ -13,10 +13,10 @@ import { Type, type Static } from "typebox";
 
 import {
   cliError,
+  modelTextResult,
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
-  truncateForModel,
 } from "@tta-lab/pi-shared";
 
 import { resolveSourcePath } from "./paths.js";
@@ -151,13 +151,16 @@ export interface ReadResult {
   symbol_id?: string;
   content: string;
   start_line: number;
+  selected_lines: number;
   total_lines: number;
-  truncation_total_lines?: number;
+  truncation_total_lines: number;
   total_bytes: number;
   truncated: boolean;
   truncated_by?: string;
   output_lines?: number;
   output_bytes?: number;
+  output_end_line?: number;
+  remaining_lines?: number;
   next_offset?: number;
   first_line_exceeds_limit?: boolean;
   media?: { kind: string; mime: string; data_base64: string };
@@ -229,36 +232,38 @@ function isReadComment(input: SrcInput): input is SrcInput & { action: "comment"
 
 const MAX_READ_BYTES = 50 * 1024;
 
-/**
- * Builds the model-facing read text from the CLI's truncation fields using
- * Pi's standard continuation messages.
- */
-export function renderReadText(result: ReadResult): string {
+/** Builds action-specific src read text from CLI-supplied window metadata. */
+function renderReadText(result: ReadResult): string {
   if (result.media) {
     return `Read image file [${result.media.mime}]`;
   }
-  const { content, start_line, total_lines, truncated, truncated_by, output_lines, next_offset } =
-    result;
+  const {
+    content,
+    start_line,
+    total_lines,
+    truncated,
+    truncated_by,
+    output_end_line,
+    remaining_lines,
+    next_offset,
+  } = result;
   if (result.first_line_exceeds_limit) {
     return `[Line ${start_line} is larger than ${formatSize(MAX_READ_BYTES)}. Use bash to read it in chunks. Full content is available at: ${result.path}]`;
   }
   if (truncated && truncated_by === "lines" && next_offset) {
-    const end = start_line + (output_lines ?? 0) - 1;
-    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines}. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
+    return `${content}\n\n[Showing lines ${start_line}-${output_end_line} of ${total_lines}. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
   if (truncated && next_offset) {
-    const end = start_line + (output_lines ?? 0) - 1;
-    return `${content}\n\n[Showing lines ${start_line}-${end} of ${total_lines} (${formatSize(MAX_READ_BYTES)} limit). Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
+    return `${content}\n\n[Showing lines ${start_line}-${output_end_line} of ${total_lines} (${formatSize(MAX_READ_BYTES)} limit). Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
-  if (!truncated && output_lines !== undefined && output_lines < total_lines && next_offset) {
-    const remaining = total_lines - (start_line + output_lines - 1);
-    return `${content}\n\n[${remaining} more lines in file. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
+  if (!truncated && next_offset) {
+    return `${content}\n\n[${remaining_lines} more lines in file. Use offset=${next_offset} to continue. Full content is available at: ${result.path}]`;
   }
   return content;
 }
 
-/** Converts CLI truncation fields to the Pi TruncationResult shape. */
-export function toTruncation(result: ReadResult): TruncationResult | undefined {
+/** Converts the CLI's Pi-equivalent window into details metadata. */
+function toTruncation(result: ReadResult): TruncationResult | undefined {
   if (!result.truncated) {
     return undefined;
   }
@@ -266,7 +271,7 @@ export function toTruncation(result: ReadResult): TruncationResult | undefined {
     content: result.content,
     truncated: true,
     truncatedBy: (result.truncated_by ?? "bytes") as "lines" | "bytes" | null,
-    totalLines: result.truncation_total_lines ?? result.total_lines,
+    totalLines: result.truncation_total_lines,
     totalBytes: result.total_bytes,
     outputLines: result.output_lines ?? 0,
     outputBytes: result.output_bytes ?? 0,
@@ -275,6 +280,12 @@ export function toTruncation(result: ReadResult): TruncationResult | undefined {
     maxLines: 2000,
     maxBytes: MAX_READ_BYTES,
   };
+}
+
+function readModelText(result: ReadResult) {
+  const text = renderReadText(result);
+  const truncation = toTruncation(result);
+  return truncation ? { text, truncation, fullOutputPath: result.path } : { text };
 }
 
 export function srcTool() {
@@ -417,19 +428,16 @@ async function render(
       lines.length === 0
         ? "No symbols found."
         : `${data.path} (${data.language}):\n` + lines.join("\n");
-    return renderText(data, text, "Use src action symbols again after narrowing the source file.");
+    return modelTextResult(data, text, {
+      hint: "Use src action symbols again after narrowing the source file.",
+    });
   }
   if (isAction(input, "read")) {
     const data = parseSingleJsonDoc<ReadResult>(stdout);
     if (data.media) {
       return renderMedia(data, model);
     }
-    const text = renderReadText(data);
-    const truncation = toTruncation(data);
-    return {
-      content: [{ type: "text", text }],
-      details: truncation ? { ...data, truncation, fullOutputPath: data.path } : data,
-    };
+    return modelTextResult(data, readModelText(data));
   }
   if (isAction(input, "edit")) {
     const data = parseSingleJsonDoc<EditBatchResult>(stdout);
@@ -445,11 +453,9 @@ async function render(
   }
   if (isAction(input, "comment") && isReadComment(input)) {
     const data = parseSingleJsonDoc<CommentReadResult>(stdout);
-    return renderText(
-      data,
-      data.comment,
-      "Use src action comment with the same symbol ID to read the comment again.",
-    );
+    return modelTextResult(data, data.comment, {
+      hint: "Use src action comment with the same symbol ID to read the comment again.",
+    });
   }
   const data = parseSingleJsonDoc<MutationResult>(stdout);
   const label = data.symbol_id ? `${data.action} ${data.symbol_id}` : data.action;
@@ -457,21 +463,6 @@ async function render(
     content: [{ type: "text", text: `Applied ${label} to ${data.path}.` }],
     details: data,
   };
-}
-
-async function renderText(
-  data: object,
-  raw: string,
-  hint: string,
-): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-  details: unknown;
-}> {
-  const model = await truncateForModel(raw, { hint });
-  const details = model.truncation
-    ? { ...data, truncation: model.truncation, fullOutputPath: model.fullOutputPath }
-    : data;
-  return { content: [{ type: "text", text: model.text }], details };
 }
 
 const NON_VISION_NOTE =
