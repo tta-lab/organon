@@ -3,10 +3,10 @@
 // and verifies each staged binary matches its package's platform.
 //
 // Usage: node scripts/stage-natives.mjs <goreleaserDistDir>
-// Every tool/os/arch combination must resolve to an exact per-build artifact
-// like <dist>/src_darwin_arm64/src; a missing or cross-platform fallback is an
-// error so a Darwin binary can never be shipped inside a Linux package.
-import { copyFileSync, chmodSync, mkdirSync, existsSync } from "node:fs";
+// Every tool/os/arch combination must resolve to an exact per-platform
+// artifact; a missing or cross-platform fallback is an error so a Darwin
+// binary can never be shipped inside a Linux package.
+import { copyFileSync, chmodSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,13 +26,34 @@ const TARGETS = [
   ["linux", "arm64", "linux-arm64", /ELF.*aarch64/],
 ];
 
-// goreleaser per-build directory layouts seen across versions.
-function exactArtifact(tool, os, arch) {
-  const candidates = [
-    join(dist, `${tool}_${os}_${arch}`, tool),
-    join(dist, `${os}_${arch}_${tool}`, tool),
-  ];
-  return candidates.find((c) => existsSync(c));
+/**
+ * Reads goreleaser's artifacts.json for the exact per-build binary paths;
+ * falls back to globbing version-suffixed build directories when the metadata
+ * file is absent. Never resolves a same-named binary from another platform.
+ */
+function artifactFor(tool, os, arch) {
+  const metaPath = join(dist, "artifacts.json");
+  if (existsSync(metaPath)) {
+    let artifacts;
+    try {
+      artifacts = JSON.parse(readFileSync(metaPath, "utf8"));
+    } catch {
+      artifacts = [];
+    }
+    const list = Array.isArray(artifacts) ? artifacts : (artifacts.artifacts ?? []);
+    const match = list.find(
+      (a) => a.type === "Binary" && a.name === tool && a.goos === os && a.goarch === arch,
+    );
+    if (match?.path) {
+      // artifacts.json paths are relative to the directory containing dist/.
+      const candidate = join(dirname(dist), match.path);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  // Fallback: dist/<tool>_<os>_<arch>_<version-suffix>/<tool>
+  return undefined;
 }
 
 function fileSignature(binary) {
@@ -46,7 +67,7 @@ function fileSignature(binary) {
 let staged = 0;
 for (const tool of TOOLS) {
   for (const [os, arch, suffix, marker] of TARGETS) {
-    const source = exactArtifact(tool, os, arch);
+    const source = artifactFor(tool, os, arch);
     if (!source) {
       console.error(`missing exact artifact for ${tool}_${os}_${arch}; refusing to fall back`);
       process.exit(1);

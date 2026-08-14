@@ -13,27 +13,22 @@ import (
 	"github.com/tta-lab/organon/internal/og"
 )
 
-func ogWriteProjects(t *testing.T, home, alias, path string) {
+func ogWriteProjects(t *testing.T, home string) {
 	t.Helper()
 	configDir := filepath.Join(home, ".config", "ttal")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "[" + alias + "]\npath = " + strconvQuote(path) +
-		"\nremote = \"https://github.com/tta-lab/" + alias + ".git\"\n"
+	content := "[ko]\npath = \"/work/ko\"\n" +
+		"remote = \"https://github.com/tta-lab/ko.git\"\n"
 	if err := os.WriteFile(filepath.Join(configDir, "projects.toml"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func strconvQuote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
 // ogDaemon returns an httptest server that records requests and replies with a
 // fixed response for every path.
-func ogDaemon(t *testing.T, respond func(path string, req og.Request) og.Response) *httptest.Server {
+func ogDaemon(t *testing.T, respond func(path string, req og.Request) og.Response) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req og.Request
@@ -44,22 +39,21 @@ func ogDaemon(t *testing.T, respond func(path string, req og.Request) og.Respons
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("OG_DAEMON_URL", server.URL)
-	return server
 }
 
-func runOGJSON(t *testing.T, args ...string) (string, string, error) {
+func runOGJSON(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var outBuf, errBuf bytes.Buffer
 	cmd := newRootCmd(&outBuf, &errBuf)
 	cmd.SetArgs(args)
 	err := cmd.Execute()
-	return outBuf.String(), errBuf.String(), err
+	return outBuf.String(), err
 }
 
 func TestAuthStatusProjectJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	ogWriteProjects(t, home, "ko", "/work/ko")
+	ogWriteProjects(t, home)
 	var gotPath string
 	ogDaemon(t, func(path string, req og.Request) og.Response {
 		gotPath = path
@@ -71,7 +65,7 @@ func TestAuthStatusProjectJSON(t *testing.T) {
 			Owner: "tta-lab", Repo: "ko", AuthMode: "token", Ready: true,
 		}}
 	})
-	stdout, _, err := runOGJSON(t, "auth", "status", "--project", "ko", "--json")
+	stdout, err := runOGJSON(t, "auth", "status", "--project", "ko", "--json")
 	if err != nil {
 		t.Fatalf("auth status: %v", err)
 	}
@@ -90,13 +84,13 @@ func TestAuthStatusProjectJSON(t *testing.T) {
 func TestPRFindProjectJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	ogWriteProjects(t, home, "ko", "/work/ko")
+	ogWriteProjects(t, home)
 	var gotState string
 	ogDaemon(t, func(path string, req og.Request) og.Response {
 		gotState = req.State
 		return og.Response{PR: &og.PullRequest{Index: 7, Title: "t", State: "open"}}
 	})
-	stdout, _, err := runOGJSON(t, "pr", "find", "--project", "ko", "--state", "closed", "--json")
+	stdout, err := runOGJSON(t, "pr", "find", "--project", "ko", "--state", "closed", "--json")
 	if err != nil {
 		t.Fatalf("pr find: %v", err)
 	}
@@ -115,14 +109,14 @@ func TestPRFindProjectJSON(t *testing.T) {
 func TestPRChecksProjectJSONLines(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	ogWriteProjects(t, home, "ko", "/work/ko")
+	ogWriteProjects(t, home)
 	ogDaemon(t, func(path string, req og.Request) og.Response {
 		return og.Response{
 			PR:    &og.PullRequest{Index: 3, Title: "ci", State: "open"},
 			Lines: []string{"check: pass"},
 		}
 	})
-	stdout, _, err := runOGJSON(t, "pr", "checks", "--project", "ko", "--json")
+	stdout, err := runOGJSON(t, "pr", "checks", "--project", "ko", "--json")
 	if err != nil {
 		t.Fatalf("pr checks: %v", err)
 	}
@@ -138,13 +132,13 @@ func TestPRChecksProjectJSONLines(t *testing.T) {
 func TestPushProjectJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	ogWriteProjects(t, home, "ko", "/work/ko")
+	ogWriteProjects(t, home)
 	var gotForce bool
 	ogDaemon(t, func(path string, req og.Request) og.Response {
 		gotForce = req.Force
 		return og.Response{Message: "pushed"}
 	})
-	stdout, _, err := runOGJSON(t, "push", "--project", "ko", "--force", "--json")
+	stdout, err := runOGJSON(t, "push", "--project", "ko", "--force", "--json")
 	if err != nil {
 		t.Fatalf("push: %v", err)
 	}
@@ -167,7 +161,7 @@ func TestCloneURLJSONShape(t *testing.T) {
 			Provider: "github", Remote: "https://github.com/owner/repo.git",
 		}}
 	})
-	stdout, _, err := runOGJSON(t, "clone", "https://github.com/owner/repo", "--json")
+	stdout, err := runOGJSON(t, "clone", "https://github.com/owner/repo", "--json")
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
@@ -188,7 +182,7 @@ func TestUnknownProjectAliasFailsBeforeDaemon(t *testing.T) {
 		called = true
 		return og.Response{Message: "unexpected"}
 	})
-	_, _, err := runOGJSON(t, "auth", "status", "--project", "missing", "--json")
+	_, err := runOGJSON(t, "auth", "status", "--project", "missing", "--json")
 	if err == nil || !strings.Contains(err.Error(), "resolve project") {
 		t.Fatalf("error = %v", err)
 	}
@@ -200,7 +194,7 @@ func TestUnknownProjectAliasFailsBeforeDaemon(t *testing.T) {
 func TestPRCreateProjectJSONWithStdinBody(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	ogWriteProjects(t, home, "ko", "/work/ko")
+	ogWriteProjects(t, home)
 	var gotBody string
 	ogDaemon(t, func(path string, req og.Request) og.Response {
 		if req.Body != nil {
@@ -219,7 +213,7 @@ func TestPRCreateProjectJSONWithStdinBody(t *testing.T) {
 		t.Fatalf("body = %q", gotBody)
 	}
 	var out ogPRJSON
-	if err := json.Unmarshal([]byte(outBuf.String()), &out); err != nil {
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v\n%s", err, outBuf.String())
 	}
 	if out.Project != "ko" || out.PR.Index != 9 {

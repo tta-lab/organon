@@ -128,7 +128,9 @@ func TestSearchCLIJSONOutputMatchesStructuredResult(t *testing.T) {
 }
 
 func TestFetchCLIJSONOutputMatchesStructuredResult(t *testing.T) {
-	service := &stubWebService{fetchResult: webcore.FetchResult{URL: "https://example.com", Mode: "full", Content: "rendered"}}
+	service := &stubWebService{
+		fetchResult: webcore.FetchResult{URL: "https://example.com", Mode: "full", Content: "rendered"},
+	}
 	out := runWebJSON(t, newFetchCmdWithFactory(fixedServiceFactory(service)), "https://example.com", "--json")
 	var got webcore.FetchResult
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
@@ -147,8 +149,14 @@ func TestDocsResolveCLIJSONOutputMatchesStructuredResult(t *testing.T) {
 }
 
 func TestDocsFetchCLIJSONOutputMatchesStructuredResult(t *testing.T) {
-	service := &stubWebService{docs: webcore.DocsFetchResult{LibraryID: "/org/lib", Topic: "topic", Content: "documentation"}}
-	out := runWebJSON(t, newDocsFetchCmdWithFactory(fixedServiceFactory(service)), "org/lib", "topic", "--tokens", "500", "--json")
+	service := &stubWebService{
+		docs: webcore.DocsFetchResult{LibraryID: "/org/lib", Topic: "topic", Content: "documentation"},
+	}
+	out := runWebJSON(
+		t,
+		newDocsFetchCmdWithFactory(fixedServiceFactory(service)),
+		"org/lib", "topic", "--tokens", "500", "--json",
+	)
 	var got webcore.DocsFetchResult
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, "/org/lib", got.LibraryID)
