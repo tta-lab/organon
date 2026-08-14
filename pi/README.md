@@ -126,8 +126,10 @@ pi -e ./pi/packages/pi-src/dist/index.js
 pi install /Users/neil/code/guion-opensource/organon/pi/packages/pi-src
 ```
 
-The repository test suite stages throwaway fixture binaries into the native
-packages only during the run (vitest global setup/teardown) and removes them
-afterwards, so they are never picked up by a local session. Replace the
-host-platform binary name (`darwin-arm64`, `linux-x64`, `linux-arm64`) and the
-tool as needed.
+The pi-src/web/project/og tests resolve their binaries from the workspace native
+packages during the run; vitest's global setup stages the fixture binaries
+there and its teardown removes them immediately after, so a local session never
+resolves a leftover fixture. The offline pack smoke works entirely from
+throwaway copies and never writes into the workspace native packages. Replace
+the host-platform binary name (`darwin-arm64`, `linux-x64`, `linux-arm64`) and
+the tool as needed.
