@@ -81,13 +81,43 @@ type editBatchJSON struct {
 	EditsApplied     int    `json:"edits_applied"`
 }
 
-// isBinaryBytes reports binary content via null bytes in the first 8 KiB.
+// commonBinarySignatures identify non-text formats whose headers may otherwise
+// be valid UTF-8 and contain no NUL byte. Recognized images are handled before
+// this classifier so supported image files still become media attachments.
+var commonBinarySignatures = [][]byte{
+	[]byte("%PDF-"),
+	[]byte("PK\x03\x04"), // ZIP local file header
+	[]byte("PK\x05\x06"), // ZIP empty archive header
+	[]byte("PK\x07\x08"), // ZIP spanned archive header
+	{0x7F, 'E', 'L', 'F'},
+	{0xFE, 0xED, 0xFA, 0xCE}, // Mach-O 32-bit big-endian
+	{0xCE, 0xFA, 0xED, 0xFE}, // Mach-O 32-bit little-endian
+	{0xFE, 0xED, 0xFA, 0xCF}, // Mach-O 64-bit big-endian
+	{0xCF, 0xFA, 0xED, 0xFE}, // Mach-O 64-bit little-endian
+	{0xCA, 0xFE, 0xBA, 0xBE}, // Mach-O universal binary
+	{0xBE, 0xBA, 0xFE, 0xCA}, // Mach-O universal binary, byte-swapped
+	{0xCA, 0xFE, 0xBA, 0xBF}, // Mach-O 64-bit universal binary
+	{0xBF, 0xBA, 0xFE, 0xCA}, // Mach-O 64-bit universal binary, byte-swapped
+	{0x00, 'a', 's', 'm'},
+}
+
+// isBinaryBytes reports binary content via a NUL byte in the first 8 KiB or a
+// common binary signature at the start of the file.
 func isBinaryBytes(data []byte) bool {
 	check := data
 	if len(check) > 8192 {
 		check = check[:8192]
 	}
-	return strings.IndexByte(string(check), 0) >= 0
+	return bytes.IndexByte(check, 0) >= 0 || hasBinarySignature(data)
+}
+
+func hasBinarySignature(data []byte) bool {
+	for _, signature := range commonBinarySignatures {
+		if bytes.HasPrefix(data, signature) {
+			return true
+		}
+	}
+	return false
 }
 
 // wholeFileMediaResult validates non-symbol reads and returns a completed

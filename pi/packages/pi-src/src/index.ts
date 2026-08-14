@@ -1,4 +1,3 @@
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { createTakeoverHandlers } from "./takeover.js";
@@ -14,7 +13,3 @@ export default function (pi: ExtensionAPI): void {
     takeover.onSessionShutdown();
   });
 }
-
-// Re-exported so tests can exercise the mutation queue participation with the
-// same helper the execute path uses.
-export { withFileMutationQueue };

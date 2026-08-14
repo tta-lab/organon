@@ -461,6 +461,42 @@ func TestReadJSONRejectsInvalidUTF8WithoutNUL(t *testing.T) {
 	})
 	assert.Equal(t, "", out, "no stdout may carry replacement characters")
 }
+func TestReadJSONRejectsASCIIEncodedPDFVisibly(t *testing.T) {
+	// A PDF header and body can be entirely ASCII, so it must not be mistaken
+	// for a source or configuration file merely because it is valid UTF-8.
+	pdf := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n")
+	dir := t.TempDir()
+	f := filepath.Join(dir, "document.pdf")
+	require.NoError(t, os.WriteFile(f, pdf, 0o644))
+	out := captureStdout(t, func() {
+		err := runReadJSON(newReadCmd(), []string{f})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "binary file")
+	})
+	assert.Empty(t, out, "no PDF text may be emitted as a read result")
+}
+
+func TestIsBinaryBytesRecognizesCommonSignatures(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"PDF", []byte("%PDF-1.4\n")},
+		{"ZIP local", []byte("PK\x03\x04")},
+		{"ZIP empty", []byte("PK\x05\x06")},
+		{"ZIP spanned", []byte("PK\x07\x08")},
+		{"ELF", []byte{0x7F, 'E', 'L', 'F'}},
+		{"Mach-O", []byte{0xCF, 0xFA, 0xED, 0xFE}},
+		{"Mach-O universal", []byte{0xCA, 0xFE, 0xBA, 0xBE}},
+		{"WASM", []byte{0x00, 'a', 's', 'm'}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.True(t, isBinaryBytes(tc.data))
+		})
+	}
+}
+
 func TestReadJSONRejectsUnsupportedBinaryVisibly(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "blob.dat")
