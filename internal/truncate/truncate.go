@@ -44,7 +44,7 @@ func Head(content string, maxLines, maxBytes int) Result {
 			Truncated: true, TruncatedBy: "bytes",
 			TotalLines: totalLines, TotalBytes: totalBytes,
 			FirstLineExceedsLimit: true,
-			MaxLines: maxLines, MaxBytes: maxBytes,
+			MaxLines:              maxLines, MaxBytes: maxBytes,
 		}
 	}
 

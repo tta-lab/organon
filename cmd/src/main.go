@@ -486,7 +486,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 
 	editsJSON, _ := cmd.Flags().GetBool("edits-json")
 	if editsJSON {
-		return runEditBatch(cmd, filename, source)
+		return runEditBatch(filename, source)
 	}
 
 	beforeFile, err := cmd.Flags().GetString("before-file")
@@ -535,7 +535,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 // envelope {"edits":[{"oldText":...,"newText":...}]} and stdout carries one
 // machine-readable result. All replacements are validated against the original
 // file before any write.
-func runEditBatch(cmd *cobra.Command, filename string, source []byte) error {
+func runEditBatch(filename string, source []byte) error {
 	stdinContent, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("read stdin: %w", err)

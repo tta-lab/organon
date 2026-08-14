@@ -2,22 +2,10 @@ package main
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"strings"
 )
 
-// errUnsupportedMedia reports a recognized-but-unsupported image variant or an
-// unsupported binary input so the caller fails visibly instead of producing
-// corrupted text.
-var errUnsupportedMedia = errors.New("unsupported media input")
-
-// mediaKind identifies a recognized image for the Pi adapter.
-type mediaKind string
-
-const (
-	mediaImage = "image"
-)
+const mediaImage = "image"
 
 // detectMedia recognizes image input by content signature using the same
 // signatures as the Pi built-in read: non-animated PNG, JPEG, GIF, WebP, and
@@ -61,26 +49,24 @@ func detectMediaType(source []byte) (string, string, bool) {
 // mediaErrorFor produces a visible failure for unsupported media input.
 func mediaErrorFor(source []byte, filename string) error {
 	if looksLikeImageButUnsupported(source) {
-		return fmt.Errorf("%s is a recognized image variant that is not supported (animated PNG or similar); "+
-			"use a supported image format: non-animated PNG, JPEG, GIF, WebP, or BMP", filename)
+		return fmt.Errorf(
+			"%s is a recognized image variant that is not supported (animated PNG or similar); "+
+				"use a supported image format: non-animated PNG, JPEG, GIF, WebP, or BMP",
+			filename)
 	}
 	return fmt.Errorf("%s is a binary file and cannot be read as text", filename)
+
 }
 
 // looksLikeImageButUnsupported reports image-like signatures that detectMedia
 // deliberately rejects, chiefly animated PNGs and JPEG 2000.
 func looksLikeImageButUnsupported(source []byte) bool {
-	if isPNGHeader(source) && isAnimatedPNG(source) {
-		return true
-	}
-	if isJPEGHeader(source) && len(source) > 3 && source[3] == 0xF7 {
-		return true
-	}
-	return false
+	return (isPNGHeader(source) && isAnimatedPNG(source)) ||
+		(isJPEGHeader(source) && len(source) > 3 && source[3] == 0xF7)
 }
 
 func isJPEG(source []byte) bool {
-	return isJPEGHeader(source) && !(len(source) > 3 && source[3] == 0xF7)
+	return isJPEGHeader(source) && (len(source) <= 3 || source[3] != 0xF7)
 }
 
 func isJPEGHeader(source []byte) bool {
@@ -178,14 +164,16 @@ func readUint32BE(source []byte, offset int) uint32 {
 	if offset+4 > len(source) {
 		return 0
 	}
-	return uint32(source[offset])<<24 | uint32(source[offset+1])<<16 | uint32(source[offset+2])<<8 | uint32(source[offset+3])
+	return uint32(source[offset])<<24 | uint32(source[offset+1])<<16 |
+		uint32(source[offset+2])<<8 | uint32(source[offset+3])
 }
 
 func readUint32LE(source []byte, offset int) uint32 {
 	if offset+4 > len(source) {
 		return 0
 	}
-	return uint32(source[offset]) | uint32(source[offset+1])<<8 | uint32(source[offset+2])<<16 | uint32(source[offset+3])<<24
+	return uint32(source[offset]) | uint32(source[offset+1])<<8 |
+		uint32(source[offset+2])<<16 | uint32(source[offset+3])<<24
 }
 
 func readUint16LE(source []byte, offset int) uint16 {
@@ -194,5 +182,3 @@ func readUint16LE(source []byte, offset int) uint16 {
 	}
 	return uint16(source[offset]) | uint16(source[offset+1])<<8
 }
-
-var _ = strings.TrimSpace

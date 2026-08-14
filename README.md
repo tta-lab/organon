@@ -236,7 +236,7 @@ reactivate or reuse the exposed migration PAT.
 
 ## MCP servers
 
-`project`, `og`, `web`, `skill`, and `src` each provide a typed stdio MCP server. Configure
+`project`, `og`, `web`, and `skill` each provide a typed stdio MCP server. Configure
 them as separate processes so clients can grant only the tools a session needs:
 
 ```json

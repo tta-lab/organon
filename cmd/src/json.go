@@ -1,13 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/srcview"
@@ -46,8 +46,8 @@ type readJSON struct {
 // mediaJSON carries a recognized image so the Pi adapter can attach media
 // without ever decoding it as UTF-8 text.
 type mediaJSON struct {
-	Kind     string `json:"kind"`
-	Mime     string `json:"mime"`
+	Kind       string `json:"kind"`
+	Mime       string `json:"mime"`
 	DataBase64 string `json:"data_base64"`
 }
 
@@ -112,32 +112,20 @@ func writeMutationJSON(filename, action, symbolID string, source, result []byte)
 // diffSummary renders a unified diff between old and new content and the
 // 1-indexed line of the first change in the new file.
 func diffSummary(filename string, old, new []byte) (string, int) {
-	edits := myers.ComputeEdits(string(old), string(new))
-	u, err := udiff.ToUnifiedDiff("a/"+filename, "b/"+filename, string(old), edits, 4)
-	if err != nil {
-		return "", 0
-	}
-	return u.String(), firstChangedLine(u)
+	diffText := udiff.Unified("a/"+filename, "b/"+filename, string(old), string(new))
+	return diffText, firstChangedLineBytes(old, new)
 }
 
-// firstChangedLine returns the 1-indexed line of the first change in the new
-// file, walking the first hunk until the first Delete or Insert line. Context
-// (Equal) lines advance the new-side line counter; deletions count as a change
-// at the current new-side line, matching the Pi built-in edit's reporting.
-func firstChangedLine(u udiff.UnifiedDiff) int {
-	if len(u.Hunks) == 0 {
-		return 0
+// firstChangedLineBytes returns the 1-indexed line of the first differing byte
+// in the new content, mirroring the Pi built-in edit's reporting of the first
+// changed line in the new file.
+func firstChangedLineBytes(old, new []byte) int {
+	limit := min(len(old), len(new))
+	pos := 0
+	for pos < limit && old[pos] == new[pos] {
+		pos++
 	}
-	newLine := u.Hunks[0].ToLine
-	for _, line := range u.Hunks[0].Lines {
-		switch line.Kind {
-		case udiff.Equal:
-			newLine++
-		case udiff.Insert, udiff.Delete:
-			return newLine
-		}
-	}
-	return 0
+	return bytes.Count(new[:pos], []byte("\n")) + 1
 }
 
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
@@ -244,4 +232,3 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 	}
 	return result, nil
 }
-

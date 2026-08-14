@@ -155,7 +155,7 @@ func TestReadJSONSymbolID(t *testing.T) {
 	}))
 	assert.Equal(t, fooID, out.SymbolID)
 	assert.Contains(t, out.Content, "Foo docs")
-	assert.Equal(t, 1, out.StartLine) // symbol-relative first line
+	assert.Equal(t, 1, out.StartLine)  // symbol-relative first line
 	assert.Equal(t, 4, out.TotalLines) // doc comment + function body
 	assert.False(t, out.Truncated)
 }
@@ -261,15 +261,15 @@ func TestReadJSONMediaSignatureDetection(t *testing.T) {
 	webp := append([]byte("RIFF"), append(make([]byte, 4), []byte("WEBP")...)...)
 	bmp := make([]byte, 54)
 	copy(bmp, "BM")
-	bmp[2], bmp[3], bmp[4], bmp[5] = 100, 0, 0, 0 // file size (pixel data follows)
+	bmp[2], bmp[3], bmp[4], bmp[5] = 100, 0, 0, 0    // file size (pixel data follows)
 	bmp[10], bmp[11], bmp[12], bmp[13] = 54, 0, 0, 0 // pixel data offset
 	bmp[14], bmp[15], bmp[16], bmp[17] = 40, 0, 0, 0 // DIB header size
-	bmp[26], bmp[27] = 1, 0 // color planes
-	bmp[28], bmp[29] = 24, 0 // bits per pixel
+	bmp[26], bmp[27] = 1, 0                          // color planes
+	bmp[28], bmp[29] = 24, 0                         // bits per pixel
 	cases := []struct {
-		name   string
-		data   []byte
-		mime   string
+		name string
+		data []byte
+		mime string
 	}{
 		{"png", png, "image/png"},
 		{"jpeg", jpeg, "image/jpeg"},
@@ -298,7 +298,8 @@ func TestReadJSONMediaSignatureDetection(t *testing.T) {
 func TestReadJSONRejectsAnimatedPNGVisibly(t *testing.T) {
 	// PNG signature + IHDR chunk + acTL chunk before IDAT is an animated PNG.
 	pngChunk := func(typ string, data []byte) []byte {
-		out := []byte{0, 0, 0, byte(len(data))}
+		out := make([]byte, 0, 4+len(typ)+len(data)+4)
+		out = append(out, 0, 0, 0, byte(len(data)))
 		out = append(out, []byte(typ)...)
 		out = append(out, data...)
 		out = append(out, 0, 0, 0, 0) // CRC placeholder
@@ -331,11 +332,11 @@ func TestReadJSONMissingFile(t *testing.T) {
 func TestReadJSONCRLFAndBOM(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "crlf.go")
-	require.NoError(t, os.WriteFile(f, append([]byte("\xef\xbb\xbf"), []byte("package p\r\n\r\nfunc F() {}\r\n")...), 0o644))
+	bom := []byte("\xef\xbb\xbf")
+	require.NoError(t, os.WriteFile(f, append(bom, []byte("package p\r\n\r\nfunc F() {}\r\n")...), 0o644))
 	out := decodeRead(t, captureStdout(t, func() {
 		require.NoError(t, runReadJSON(newReadCmd(), []string{f}))
 	}))
 	assert.Equal(t, "\xef\xbb\xbfpackage p\r\n\r\nfunc F() {}\r\n", out.Content)
 	assert.Equal(t, 4, out.TotalLines)
 }
-

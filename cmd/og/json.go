@@ -21,8 +21,8 @@ type ogAuthJSON struct {
 }
 
 type ogPRJSON struct {
-	Project string          `json:"project,omitempty"`
-	PR      og.PullRequest  `json:"pr"`
+	Project string         `json:"project,omitempty"`
+	PR      og.PullRequest `json:"pr"`
 }
 
 type ogPRLinesJSON struct {

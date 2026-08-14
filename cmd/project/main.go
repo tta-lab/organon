@@ -53,6 +53,9 @@ func newListCmd() *cobra.Command {
 			}
 
 			if jsonOut {
+				if entries == nil {
+					entries = []project.Entry{}
+				}
 				return json.NewEncoder(os.Stdout).Encode(projectListOutput{Projects: entries})
 			}
 
