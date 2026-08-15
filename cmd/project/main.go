@@ -134,7 +134,7 @@ func newFindCmd() *cobra.Command {
 // --- get ---
 
 func canUseProjectReferenceFallback(target string) bool {
-	return strings.Contains(target, "/") || project.ValidateAlias(target) == nil
+	return strings.TrimSpace(target) != ""
 }
 
 func newGetCmd() *cobra.Command {

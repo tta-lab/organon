@@ -332,7 +332,7 @@ func TestOGMCPResolvesAlternateProjectReferenceAndReturnsCanonicalAlias(t *testi
 		gitClone: func(req og.Request) (og.Response, error) {
 			got = req
 			return og.Response{Clone: &og.CloneResult{
-				Alias: "caller-spelling", Path: "/work/flick-backend", Host: "example.com", Owner: "owner", Repo: "flick-backend",
+				Alias: "fb", Path: "/work/flick-backend", Host: "example.com", Owner: "owner", Repo: "flick-backend",
 				Provider: "generic", Remote: "https://example.com/owner/flick-backend.git", Registered: true,
 			}}, nil
 		},
@@ -365,8 +365,8 @@ func TestOGMCPResolvesAlternateProjectReferenceAndReturnsCanonicalAlias(t *testi
 	if err != nil || result.IsError {
 		t.Fatalf("alternate clone = %#v, err = %v", result, err)
 	}
-	if got.Project != "fb" {
-		t.Fatalf("clone request = %+v, want canonical project", got)
+	if got.Project != "flick-backend" {
+		t.Fatalf("clone request = %+v, want caller reference forwarded to the domain", got)
 	}
 	var cloneOutput ogCloneOutput
 	encoded, err = json.Marshal(result.StructuredContent)

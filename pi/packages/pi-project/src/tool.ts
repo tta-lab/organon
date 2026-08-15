@@ -43,9 +43,9 @@ export const projectSchema = Type.Union([
       }),
       limit: Type.Optional(
         Type.Integer({
-          description: "Maximum active projects; defaults to 8 and is capped at 32",
+          description:
+            "Maximum active projects; defaults to 8 and is capped at 32 by the core finder",
           minimum: 1,
-          maximum: 32,
           default: 8,
         }),
       ),

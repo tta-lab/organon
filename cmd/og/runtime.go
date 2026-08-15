@@ -58,18 +58,6 @@ func resolveOGProject(store *project.Store, reference string) (project.Entry, er
 	return entry, nil
 }
 
-func normalizeOGProjectRequest(store *project.Store, req *og.Request) (string, error) {
-	if req.Project == "" {
-		return "", nil
-	}
-	entry, err := resolveOGProject(store, req.Project)
-	if err != nil {
-		return "", err
-	}
-	req.Project = entry.Alias
-	return entry.Alias, nil
-}
-
 func resolveWorkDir(cmd *cobra.Command, runtime commandRuntime) (workDir, alias string, err error) {
 	reference, _ := cmd.Flags().GetString("project")
 	if reference == "" {

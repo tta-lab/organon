@@ -85,7 +85,7 @@ describe("pi-project extension", () => {
     expect(Value.Check(projectSchema, { action: "find", query: "runtime" })).toBe(true);
     expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 16 })).toBe(true);
     expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 0 })).toBe(false);
-    expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 33 })).toBe(false);
+    expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 33 })).toBe(true);
     expect(Value.Check(projectSchema, { action: "find", query: "" })).toBe(false);
     expect(Value.Check(projectSchema, { action: "find" })).toBe(false);
     expect(

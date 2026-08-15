@@ -185,16 +185,9 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		req := og.Request{
 			Context: ctx, Project: input.Project, URL: input.URL, Alias: input.Alias, Reference: input.Reference,
 		}
-		canonicalAlias, err := normalizeOGProjectRequest(projects, &req)
-		if err != nil {
-			return nil, ogCloneOutput{}, err
-		}
 		resp, err := executor.GitClone(req)
 		if err != nil {
 			return nil, ogCloneOutput{}, fmt.Errorf("execute clone: %w", err)
-		}
-		if canonicalAlias != "" && resp.Clone != nil {
-			resp.Clone.Alias = canonicalAlias
 		}
 		if err := og.ValidateCloneResponse(resp); err != nil {
 			return nil, ogCloneOutput{}, err

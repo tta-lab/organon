@@ -276,6 +276,37 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 	}
 }
 
+func TestProjectCommandsPreserveBareReferenceRepoFallback(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoPath := filepath.Join(tmpHome, "code", "references", "github.com", "tta-lab", "foo.bar")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("mkdir bare reference repo: %v", err)
+	}
+
+	stdout, err := runProject(t, []string{"get", "foo.bar"})
+	if err != nil || stdout != repoPath+"\n" {
+		t.Fatalf("get bare reference = %q, err = %v; want %q", stdout, err, repoPath+"\n")
+	}
+
+	stdout, err = runProject(t, []string{"resolve", "foo.bar"})
+	if err != nil {
+		t.Fatalf("resolve bare reference: %v", err)
+	}
+	var resolved map[string]any
+	if err := json.Unmarshal([]byte(stdout), &resolved); err != nil {
+		t.Fatalf("decode bare resolve: %v", err)
+	}
+	if resolved["alias"] != "foo.bar" || resolved["path"] != repoPath || resolved["archived"] != false {
+		t.Fatalf("resolve bare reference = %#v", resolved)
+	}
+
+	stdout, err = runProject(t, []string{"jump", "foo.bar"})
+	if err != nil || stdout != repoPath+"\n" {
+		t.Fatalf("jump bare reference = %q, err = %v; want %q", stdout, err, repoPath+"\n")
+	}
+}
+
 func TestProjectRegisteredBranchesResolveAlternateReferencesCanonically(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

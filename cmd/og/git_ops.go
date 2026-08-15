@@ -31,16 +31,9 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	canonicalAlias, err := normalizeOGProjectRequest(runtime.projects, &req)
-	if err != nil {
-		return err
-	}
 	resp, err := runtime.executor.GitClone(requestFor(cmd, req))
 	if err != nil {
 		return err
-	}
-	if canonicalAlias != "" && resp.Clone != nil {
-		resp.Clone.Alias = canonicalAlias
 	}
 	if err := og.ValidateCloneResponse(resp); err != nil {
 		return err
