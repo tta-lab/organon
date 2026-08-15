@@ -108,19 +108,10 @@ func TestSymbolsJSONMarkdownSections(t *testing.T) {
 	assert.Equal(t, "markdown", out.Language)
 	assert.Equal(t, "Title", out.Title)
 	require.NotEmpty(t, out.Symbols)
-	nonTargetable := 0
 	for _, s := range out.Symbols {
 		assert.Equal(t, "section", s.Kind)
-		if !s.Targetable {
-			nonTargetable++
-		}
-	}
-	// The H1 title heading is not targetable; every other section is.
-	assert.Equal(t, 1, nonTargetable)
-	for _, s := range out.Symbols {
-		if s.Level > 1 {
-			assert.True(t, s.Targetable, "section %q must be targetable", s.Name)
-		}
+		assert.True(t, s.Targetable, "section %q must be targetable", s.Name)
+		assert.NotEmpty(t, s.ID, "section %q must have an ID", s.Name)
 	}
 }
 

@@ -375,6 +375,23 @@ describe("pi-src edits", () => {
     expect(readFileSync(path, "utf8")).not.toContain("func Bar");
   });
 
+  it("reads and replaces a targetable Markdown H1 section", async () => {
+    const { path, cwd } = makeFile("# Guide\n\n## Setup\n\nInstall it.\n", "guide.md");
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const guide = initial.match(/- \[([^\]]+)\] section Guide/)![1]!;
+
+    const selected = await callRead({ path, symbol_id: guide }, cwd);
+    expect(text(selected)).toContain("# Guide");
+    expect(text(selected)).toContain("## Setup");
+
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: guide, content: "# New Guide\n\nNew body.\n" },
+      cwd,
+    );
+    expect(text(result)).toContain("section New Guide");
+    expect(readFileSync(path, "utf8")).toBe("# New Guide\n\nNew body.");
+  });
+
   it("returns a typed post-edit outline for Markdown heading sections", async () => {
     const { path, cwd } = makeFile(
       "# Guide\n\n## Setup\n\nInstall it.\n\n## Other\n\nKeep this.\n",

@@ -29,7 +29,7 @@ func TestInspectorCodeOutlineAndDocRead(t *testing.T) {
 	}
 }
 
-func TestInspectorMarkdownExposesUntargetableH1AndStableSections(t *testing.T) {
+func TestInspectorMarkdownTargetsH1AndNestedSections(t *testing.T) {
 	source := []byte("# Guide\n\n## Setup\n\nInstall.\n\n### Linux\n\nRun.\n")
 	outline, err := NewInspector("guide.md", source, 2).Outline()
 	if err != nil {
@@ -38,8 +38,16 @@ func TestInspectorMarkdownExposesUntargetableH1AndStableSections(t *testing.T) {
 	if outline.Language != "markdown" || outline.Title != "Guide" || len(outline.Symbols) != 3 {
 		t.Fatalf("outline = %#v", outline)
 	}
-	if outline.Symbols[0].Targetable || outline.Symbols[0].ID != "" {
-		t.Fatalf("H1 = %#v, want untargetable", outline.Symbols[0])
+	h1 := outline.Symbols[0]
+	if !h1.Targetable || h1.ID == "" {
+		t.Fatalf("H1 = %#v, want targetable", h1)
+	}
+	document, err := NewInspector("guide.md", source, 2).ReadContent(h1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document != string(source) {
+		t.Fatalf("H1 read = %q, want whole document", document)
 	}
 	setup := outline.Symbols[1]
 	if !setup.Targetable || setup.Kind != "section" || setup.Parent != "Guide" {

@@ -56,10 +56,9 @@ function outline(source) {
           break;
         }
       }
-      const targetable = heading.level > 1;
       return {
-        id: targetable ? symbolId(idx++) : "",
-        targetable,
+        id: symbolId(idx++),
+        targetable: true,
         name: heading.name,
         kind: "section",
         parent,

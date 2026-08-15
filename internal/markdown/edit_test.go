@@ -37,7 +37,7 @@ func sectionIDFor(t *testing.T, source []byte, headingText string) string {
 	assignIDs(headings)
 	for _, h := range headings {
 		if h.text == headingText {
-			require.NotEmpty(t, h.id, "heading %q has no ID (H1 headings cannot be targeted)", headingText)
+			require.NotEmpty(t, h.id, "heading %q has no ID", headingText)
 			return h.id
 		}
 	}
@@ -54,6 +54,24 @@ func TestHeadingTree(t *testing.T) {
 	assert.Contains(t, tree, "-s")
 	// IDs should be present
 	assert.Contains(t, tree, "[")
+}
+
+func TestReadH1Section(t *testing.T) {
+	id := sectionIDFor(t, []byte(editDoc), "My Document")
+	content, err := ReadSection([]byte(editDoc), id)
+	require.NoError(t, err)
+	assert.Equal(t, editDoc, content)
+}
+
+func TestReplaceH1Section(t *testing.T) {
+	id := sectionIDFor(t, []byte(editDoc), "My Document")
+	const replacement = `# New Document
+
+New body.
+`
+	result, err := ReplaceSection([]byte(editDoc), id, []byte(replacement))
+	require.NoError(t, err)
+	assert.Equal(t, replacement, string(result))
 }
 
 func TestReadSection(t *testing.T) {

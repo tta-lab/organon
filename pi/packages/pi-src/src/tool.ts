@@ -214,7 +214,7 @@ const SYMBOL_ID_STABILITY_GUIDANCE =
 
 const READ_PROMPT_GUIDELINES = [
   "Prefer read's symbol-aware navigation for structured source and Markdown when the exact text is not already known.",
-  "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow: get the outline first, then copy its exact returned ID; never use symbol or a display name.",
+  "Source symbols and every Markdown heading section, including H1, share the same outline → opaque symbol_id workflow: get the outline first, then copy its exact returned ID; never use symbol or a display name.",
   "A symbol-scoped read uses the returned symbol_id for either a source symbol or a Markdown heading section.",
   SYMBOL_ID_STABILITY_GUIDANCE,
   "Continue from a post-edit outline returned by edit; request read with symbols: true again only when another edit may have made IDs stale or the needed entry was omitted.",
@@ -222,7 +222,7 @@ const READ_PROMPT_GUIDELINES = [
 
 const EDIT_PROMPT_GUIDELINES = [
   "Prefer edit's symbol-aware operations for structured source and Markdown when the exact original text is not already known.",
-  "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow for symbol-scoped read, replace, insert, and delete; source comment operations use that same opaque symbol_id form for documentation.",
+  "Source symbols and every Markdown heading section, including H1, share the same outline → opaque symbol_id workflow for symbol-scoped read, replace, insert, and delete; source comment operations use that same opaque symbol_id form for documentation.",
   "Before the first symbol-scoped edit, get the outline with read's symbols form and copy its exact opaque ID into symbol_id; never use symbol or a display name.",
   SYMBOL_ID_STABILITY_GUIDANCE,
   "After a symbol mutation, continue from the post-edit outline returned in that edit result instead of making a redundant outline read; refresh only when a later edit may have made IDs stale or truncation omitted the needed entry.",

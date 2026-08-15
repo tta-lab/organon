@@ -68,8 +68,8 @@ accepts these closed object forms:
 
 The first returns the current outline. The second reads exactly one source
 symbol or Markdown heading section, with offset and limit relative to that
-selected content. Source symbols and Markdown heading sections use the same
-outline → opaque `symbol_id` workflow. Outline results do not accept pagination
+selected content. Source symbols and every Markdown heading section, including
+H1, use the same outline → opaque `symbol_id` workflow. Outline results do not accept pagination
 fields. IDs are deterministic from canonical symbol or heading labels, so body,
 content, and line-only edits normally preserve unchanged IDs; renames or
 structural changes may not. Treat the latest returned outline as authoritative,
