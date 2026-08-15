@@ -50,9 +50,7 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 func runPRView(cmd *cobra.Command, args []string) error {
 	return runPRWithOutput(
 		cmd, og.Request{State: og.PRStateAll},
-		func(executor og.Executor, req og.Request) (og.Response, error) {
-			return executor.PRView(req)
-		},
+		og.Executor.PRView,
 	)
 }
 
@@ -62,9 +60,7 @@ func runPRFind(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runPRWithOutput(cmd, og.Request{State: state}, func(executor og.Executor, req og.Request) (og.Response, error) {
-		return executor.PRFind(req)
-	})
+	return runPRWithOutput(cmd, og.Request{State: state}, og.Executor.PRFind)
 }
 
 func runPRGet(cmd *cobra.Command, args []string) error {
@@ -75,9 +71,7 @@ func runPRGet(cmd *cobra.Command, args []string) error {
 	if err := og.ValidatePositivePRID(index); err != nil {
 		return err
 	}
-	return runPRWithOutput(cmd, og.Request{Index: index}, func(executor og.Executor, req og.Request) (og.Response, error) {
-		return executor.PRGet(req)
-	})
+	return runPRWithOutput(cmd, og.Request{Index: index}, og.Executor.PRGet)
 }
 
 func runPRModify(cmd *cobra.Command, args []string) error {
@@ -171,9 +165,7 @@ func runPRChecks(cmd *cobra.Command, args []string) error {
 	}
 	return runLines(
 		cmd, og.Request{Index: index, State: og.PRStateAll},
-		func(executor og.Executor, req og.Request) (og.Response, error) {
-			return executor.PRChecks(req)
-		},
+		og.Executor.PRChecks,
 	)
 }
 
@@ -188,9 +180,7 @@ func runPRLog(cmd *cobra.Command, args []string) error {
 	}
 	return runLines(
 		cmd, og.Request{Index: index, State: og.PRStateAll, Tail: tail},
-		func(executor og.Executor, req og.Request) (og.Response, error) {
-			return executor.PRLog(req)
-		},
+		og.Executor.PRLog,
 	)
 }
 
@@ -205,9 +195,7 @@ func runPRFailures(cmd *cobra.Command, args []string) error {
 	}
 	return runLines(
 		cmd, og.Request{Index: index, State: og.PRStateAll, Tail: tail},
-		func(executor og.Executor, req og.Request) (og.Response, error) {
-			return executor.PRFailures(req)
-		},
+		og.Executor.PRFailures,
 	)
 }
 
