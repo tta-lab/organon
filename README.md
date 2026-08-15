@@ -327,8 +327,8 @@ symbol-aware operations and exact multi-edit batches; `pi-web` and
 `pi-project` each register one tool, while `pi-og` registers
 `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks`.
 All six OG tools preserve the MCP domain behavior over a local subprocess. See
-[`pi/README.md`](pi/README.md) for installation, supported platforms, the `src`
-takeover behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
+[`pi/README.md`](pi/README.md) for installation, supported platforms, the `read`
+and `edit` override behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
 and `skill` MCP servers remain for non-Pi clients; the project-scoped `src` MCP
 server is removed.
 
