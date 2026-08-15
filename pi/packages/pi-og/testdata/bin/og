@@ -23,7 +23,7 @@ const positional = args.filter((_, i) => !consumed.has(i));
 const rawProject = flags.get("project") ?? "";
 const project = rawProject === "flick-backend" ? "fb" : rawProject;
 const prId = flags.get("pr-id");
-const fail = flags.get("fail") === "true";
+const fail = flags.get("fail") === "true" || project === "failure";
 
 const bigOutput = project === "large";
 const BIG_LINES = bigOutput
@@ -85,7 +85,8 @@ if (
   cmd.startsWith("clone") &&
   flags.get("alias") &&
   positional[1] &&
-  positional[1] !== "undefined"
+  positional[1] !== "undefined" &&
+  !/^https?:\/\//.test(positional[1])
 ) {
   process.stderr.write("Error: project clone does not accept --alias or --reference\n");
   process.exit(1);
@@ -110,6 +111,7 @@ if (cmd.startsWith("auth status")) {
     JSON.stringify({
       project,
       message: bigOutput ? BIG_LINES.join("\n") : cmd.split(" ")[0] + " completed",
+      force_with_lease: flags.get("force") === "true",
     }) + "\n",
   );
 } else if (cmd.startsWith("clone")) {

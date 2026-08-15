@@ -1,14 +1,14 @@
 import { createRequire } from "node:module";
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Type, type Static } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
 
 import {
   cliError,
+  modelTextResult,
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
-  modelTextResult,
 } from "@tta-lab/pi-shared";
 
 const require = createRequire(import.meta.url);
@@ -23,45 +23,26 @@ const positivePrId = Type.Integer({
   minimum: 1,
 });
 
-export const ogSchema = Type.Union([
+export const ogAuthStatusSchema = Type.Object(
+  {
+    project: requiredProject,
+  },
+  { additionalProperties: false },
+);
+
+export const ogCloneSchema = Type.Union([
   Type.Object(
     {
-      action: StringEnum(["auth_status"] as const, { description: "Action to perform" }),
       project: requiredProject,
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
-      action: StringEnum(["pull"] as const, { description: "Action to perform" }),
-      project: requiredProject,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["push"] as const, { description: "Action to perform" }),
-      project: requiredProject,
-      force: Type.Optional(
-        Type.Boolean({
-          description: "Use force-with-lease; rejected on the default branch",
-          default: false,
-        }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["clone"] as const, { description: "Action to perform" }),
-      project: requiredProject,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["clone"] as const, { description: "Action to perform" }),
-      url: Type.String({ description: "HTTP(S) repository URL with exactly owner/repo" }),
+      url: Type.String({
+        description: "HTTP(S) repository URL with exactly owner/repo",
+        minLength: 1,
+      }),
       alias: Type.Optional(
         Type.String({ description: "Optional exact single-layer project alias" }),
       ),
@@ -74,9 +55,32 @@ export const ogSchema = Type.Union([
     },
     { additionalProperties: false },
   ),
+]);
+
+export const ogPullSchema = Type.Object(
+  {
+    project: requiredProject,
+  },
+  { additionalProperties: false },
+);
+
+export const ogPushSchema = Type.Object(
+  {
+    project: requiredProject,
+    force: Type.Optional(
+      Type.Boolean({
+        description: "Use force-with-lease; rejected on the default branch",
+        default: false,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const ogPrSchema = Type.Union([
   Type.Object(
     {
-      action: StringEnum(["pr_create"] as const, { description: "Action to perform" }),
+      action: StringEnum(["create"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       title: Type.String({ description: "Non-blank pull request title" }),
       body: Type.Optional(
@@ -87,7 +91,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_find"] as const, { description: "Action to perform" }),
+      action: StringEnum(["find"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       state: Type.Optional(
         StringEnum(["open", "closed", "all"] as const, {
@@ -100,7 +104,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_get"] as const, { description: "Action to perform" }),
+      action: StringEnum(["get"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
     },
@@ -108,15 +112,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_checks"] as const, { description: "Action to perform" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
+      action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       title: Type.String({ description: "Replacement pull request title" }),
@@ -128,7 +124,7 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_modify"] as const, { description: "Action to perform" }),
+      action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
@@ -140,16 +136,27 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_comment"] as const, { description: "Action to perform" }),
+      action: StringEnum(["comment"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       body: Type.String({ description: "Non-blank pull request comment body (may be multiline)" }),
     },
     { additionalProperties: false },
   ),
+]);
+
+export const ogChecksSchema = Type.Union([
   Type.Object(
     {
-      action: StringEnum(["pr_log"] as const, { description: "Action to perform" }),
+      action: StringEnum(["status"] as const, { description: "CI inspection operation" }),
+      project: requiredProject,
+      pr_id: Type.Optional(positivePrId),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      action: StringEnum(["log"] as const, { description: "CI inspection operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(
@@ -165,12 +172,12 @@ export const ogSchema = Type.Union([
   ),
   Type.Object(
     {
-      action: StringEnum(["pr_failures"] as const, { description: "Action to perform" }),
+      action: StringEnum(["failures"] as const, { description: "CI inspection operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
       tail: Type.Optional(
         Type.Integer({
-          description: "Number of log tail lines; defaults to 50",
+          description: "Number of failure-log tail lines; defaults to 50",
           minimum: 0,
           maximum: 1000,
           default: 50,
@@ -181,7 +188,33 @@ export const ogSchema = Type.Union([
   ),
 ]);
 
-export type OgInput = Static<typeof ogSchema>;
+export type OgAuthStatusInput = Static<typeof ogAuthStatusSchema>;
+export type OgCloneInput = Static<typeof ogCloneSchema>;
+export type OgPullInput = Static<typeof ogPullSchema>;
+export type OgPushInput = Static<typeof ogPushSchema>;
+export type OgPrInput = Static<typeof ogPrSchema>;
+export type OgChecksInput = Static<typeof ogChecksSchema>;
+
+type OgOperation =
+  | { action: "auth_status"; project: string }
+  | { action: "pull"; project: string }
+  | { action: "push"; project: string; force?: boolean }
+  | { action: "clone"; project: string }
+  | { action: "clone"; url: string; alias?: string; reference?: boolean }
+  | { action: "pr_create"; project: string; title: string; body?: string }
+  | { action: "pr_find"; project: string; state?: "open" | "closed" | "all" }
+  | { action: "pr_get"; project: string; pr_id?: number }
+  | { action: "pr_checks"; project: string; pr_id?: number }
+  | {
+      action: "pr_modify";
+      project: string;
+      pr_id?: number;
+      title?: string;
+      body?: string;
+    }
+  | { action: "pr_comment"; project: string; pr_id?: number; body: string }
+  | { action: "pr_log"; project: string; pr_id?: number; tail?: number }
+  | { action: "pr_failures"; project: string; pr_id?: number; tail?: number };
 
 interface AuthStatus {
   project: string;
@@ -229,55 +262,220 @@ interface CloneResult {
   already_existed?: boolean;
 }
 
-const OG_PROMPT_GUIDELINES = [
-  "Use og with a project reference (canonical alias, checkout basename, or remote repository basename); every Git and forge mutation runs through the configured OG process, so never pass paths, tokens, or credential environment names to og.",
-  "Use og action auth_status to check forge authentication before retrying failed push or PR operations.",
-  "Use og action clone with either a registered project reference or an HTTP(S) URL; project clones never accept alias or reference.",
-  "Use og action pr_get without pr_id to inspect the registered checkout's current-branch pull request, or with a positive pr_id for a branch-free remote operation.",
-  "Use og action pr_log and pr_failures to inspect CI logs with an optional tail between 0 and 1000 lines.",
-  "Use og action pr_modify with at least one of title or body; an empty body explicitly clears it. Use og action pr_comment with a non-blank body.",
-  "Use og action push with force only for force-with-lease; OG always rejects force on the default branch.",
+const AUTH_PROMPT_GUIDELINES = [
+  "Use og_auth_status with a project reference (canonical alias, checkout basename, or remote repository basename); never pass paths, tokens, or credential environment names.",
 ];
 
-type Action = OgInput;
+const CLONE_PROMPT_GUIDELINES = [
+  "Use og_clone with either a registered project reference or an HTTP(S) URL; project clones never accept alias or reference selectors.",
+];
 
-function isAction<T extends Action["action"]>(
-  input: OgInput,
-  action: T,
-): input is Extract<OgInput, { action: T }> {
-  return input.action === action;
+const PULL_PROMPT_GUIDELINES = [
+  "Use og_pull with a project reference (canonical alias, checkout basename, or remote repository basename); never pass paths, tokens, or credential environment names.",
+];
+
+const PUSH_PROMPT_GUIDELINES = [
+  "Use og_push with a project reference; force means force-with-lease and OG rejects it on the default branch. Never pass paths, tokens, or credential environment names.",
+  "Use og_auth_status to check forge authentication before retrying a failed og_push operation.",
+];
+
+const PR_PROMPT_GUIDELINES = [
+  "Use og_pr with a project reference and one of create, find, get, modify, or comment; never pass paths, tokens, or credential environment names.",
+  "Use og_auth_status to check forge authentication before retrying failed og_pr operations.",
+  "Use og_pr with action get without pr_id for the registered checkout's current-branch pull request, or with a positive pr_id for a branch-free remote operation.",
+  "Use og_pr with action modify with at least one of title or body; an empty body explicitly clears it. Use action comment with a non-blank body.",
+];
+
+const CHECKS_PROMPT_GUIDELINES = [
+  "Use og_checks with a project reference and one of status, log, or failures; never pass paths, tokens, or credential environment names.",
+  "Use og_checks with action log or failures and an optional tail between 0 and 1000 lines to inspect CI output.",
+];
+
+export function ogAuthStatusTool() {
+  return makeOgTool({
+    name: "og_auth_status",
+    description:
+      "Check guarded forge authentication for a registered project reference. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Check guarded forge authentication with og_auth_status",
+    promptGuidelines: AUTH_PROMPT_GUIDELINES,
+    parameters: ogAuthStatusSchema,
+    normalize: (input) => normalizeAuthStatus(input as OgAuthStatusInput),
+  });
 }
 
-export function ogTool() {
+export function ogCloneTool() {
+  return makeOgTool({
+    name: "og_clone",
+    description:
+      "Clone a registered project or an HTTP(S) repository URL with optional alias and reference modes. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Clone through the guarded package-local og binary with og_clone",
+    promptGuidelines: CLONE_PROMPT_GUIDELINES,
+    parameters: ogCloneSchema,
+    normalize: (input) => normalizeClone(input as OgCloneInput),
+  });
+}
+
+export function ogPullTool() {
+  return makeOgTool({
+    name: "og_pull",
+    description:
+      "Pull a registered project with guarded Git synchronization. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Pull a registered project through guarded OG with og_pull",
+    promptGuidelines: PULL_PROMPT_GUIDELINES,
+    parameters: ogPullSchema,
+    normalize: (input) => normalizePull(input as OgPullInput),
+  });
+}
+
+export function ogPushTool() {
+  return makeOgTool({
+    name: "og_push",
+    description:
+      "Push a registered project with guarded Git synchronization and optional force-with-lease. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Push a registered project through guarded OG with og_push",
+    promptGuidelines: PUSH_PROMPT_GUIDELINES,
+    parameters: ogPushSchema,
+    normalize: (input) => normalizePush(input as OgPushInput),
+  });
+}
+
+export function ogPrTool() {
+  return makeOgTool({
+    name: "og_pr",
+    description:
+      "Manage pull requests: create, find, get, modify, and comment through guarded OG operations. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Manage pull requests through guarded OG with og_pr",
+    promptGuidelines: PR_PROMPT_GUIDELINES,
+    parameters: ogPrSchema,
+    normalize: (input) => normalizePr(input as OgPrInput),
+  });
+}
+
+export function ogChecksTool() {
+  return makeOgTool({
+    name: "og_checks",
+    description:
+      "Inspect pull-request status, logs, and failures through guarded OG operations. All calls use the package-local og binary, which owns credentials and policy.",
+    promptSnippet: "Inspect pull-request status and CI output through guarded OG with og_checks",
+    promptGuidelines: CHECKS_PROMPT_GUIDELINES,
+    parameters: ogChecksSchema,
+    normalize: (input) => normalizeChecks(input as OgChecksInput),
+  });
+}
+
+function normalizeAuthStatus(input: OgAuthStatusInput): OgOperation {
+  return { action: "auth_status", project: input.project };
+}
+
+function normalizeClone(input: OgCloneInput): OgOperation {
+  if ("project" in input) {
+    return { action: "clone", project: input.project };
+  }
+  return {
+    action: "clone",
+    url: input.url,
+    alias: input.alias,
+    reference: input.reference,
+  };
+}
+
+function normalizePull(input: OgPullInput): OgOperation {
+  return { action: "pull", project: input.project };
+}
+
+function normalizePush(input: OgPushInput): OgOperation {
+  return { action: "push", project: input.project, force: input.force };
+}
+
+function normalizePr(input: OgPrInput): OgOperation {
+  switch (input.action) {
+    case "create":
+      return { action: "pr_create", project: input.project, title: input.title, body: input.body };
+    case "find":
+      return { action: "pr_find", project: input.project, state: input.state };
+    case "get":
+      return { action: "pr_get", project: input.project, pr_id: input.pr_id };
+    case "modify":
+      return {
+        action: "pr_modify",
+        project: input.project,
+        pr_id: input.pr_id,
+        title: input.title,
+        body: input.body,
+      };
+    case "comment":
+      return {
+        action: "pr_comment",
+        project: input.project,
+        pr_id: input.pr_id,
+        body: input.body,
+      };
+  }
+}
+
+function normalizeChecks(input: OgChecksInput): OgOperation {
+  switch (input.action) {
+    case "status":
+      return { action: "pr_checks", project: input.project, pr_id: input.pr_id };
+    case "log":
+      return {
+        action: "pr_log",
+        project: input.project,
+        pr_id: input.pr_id,
+        tail: input.tail,
+      };
+    case "failures":
+      return {
+        action: "pr_failures",
+        project: input.project,
+        pr_id: input.pr_id,
+        tail: input.tail,
+      };
+  }
+}
+
+function makeOgTool(options: {
+  name: string;
+  description: string;
+  promptSnippet: string;
+  promptGuidelines: string[];
+  parameters: TSchema;
+  normalize(input: unknown): OgOperation;
+}) {
   const binary = resolveBinaryPath("og", { require });
   return {
-    name: "og",
-    label: "og",
-    description:
-      "Guarded repository and forge operations for registered projects selected by project reference: clone, push, pull, PR lifecycle, " +
-      "comments, and CI status. All calls use the package-local og binary, which owns credentials and policy. " +
-      "Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
-    promptSnippet: "Run guarded Git and forge operations through the package-local og binary",
-    promptGuidelines: OG_PROMPT_GUIDELINES,
-    parameters: ogSchema,
+    name: options.name,
+    label: options.name,
+    description: options.description,
+    promptSnippet: options.promptSnippet,
+    promptGuidelines: options.promptGuidelines,
+    parameters: options.parameters,
     async execute(
       _toolCallId: string,
-      params: OgInput,
+      params: unknown,
       signal: AbortSignal | undefined,
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-      const { args, stdin } = buildArgs(params);
+      const operation = options.normalize(params);
+      const { args, stdin } = buildArgs(operation);
       const result = await runCli(binary, { args, stdin, signal });
       if (result.exitCode !== 0) {
         throw await cliError(result.stderr, result.exitCode);
       }
-      return await render(params, result.stdout);
+      return await render(operation, result.stdout);
     },
   };
 }
 
-function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
+function isAction<T extends OgOperation["action"]>(
+  input: OgOperation,
+  action: T,
+): input is Extract<OgOperation, { action: T }> {
+  return input.action === action;
+}
+
+function buildArgs(input: OgOperation): { args: string[]; stdin?: string } {
   const project = projectArgs(input);
   if (isAction(input, "auth_status")) {
     return { args: ["auth", "status", ...project, "--json"] };
@@ -351,7 +549,7 @@ function buildArgs(input: OgInput): { args: string[]; stdin?: string } {
   return { args };
 }
 
-function projectArgs(input: OgInput): string[] {
+function projectArgs(input: OgOperation): string[] {
   if (!("project" in input)) {
     return [];
   }
@@ -366,7 +564,7 @@ function prIdArgs(input: { pr_id?: number }): string[] {
 }
 
 async function render(
-  input: OgInput,
+  input: OgOperation,
   stdout: string,
 ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
   if (isAction(input, "auth_status")) {
@@ -377,13 +575,13 @@ async function render(
       `${project}: ${a.ready ? "Authenticated" : "Not authenticated"}: ${a.provider} ${a.host}/${a.owner}/${a.repo}` +
       (a.ready ? "" : ` (auth mode: ${a.auth_mode})`);
     return modelTextResult(data, text, {
-      hint: "Use og action auth_status again after resolving the reported issue.",
+      hint: useHint(input, "again after resolving the reported issue."),
     });
   }
   if (isAction(input, "push") || isAction(input, "pull")) {
     const data = parseSingleJsonDoc<{ project?: string; message: string }>(stdout);
     return modelTextResult(data, `${data.project ?? ""}: ${data.message}`.replace(/^: /, ""), {
-      hint: `Use og action ${input.action} to inspect the operation again.`,
+      hint: useHint(input, "to inspect the operation again."),
     });
   }
   if (isAction(input, "clone")) {
@@ -391,14 +589,14 @@ async function render(
     const c = data.clone;
     const text = c.registered ? `Cloned ${c.alias} to ${c.path}` : `Cloned reference to ${c.path}`;
     return modelTextResult(data, text, {
-      hint: "Use og action clone again only if another clone is needed.",
+      hint: useHint(input, "again only if another clone is needed."),
     });
   }
   if (isAction(input, "pr_comment")) {
     const data = parseSingleJsonDoc<{ project?: string; comment: Comment }>(stdout);
     const text = `${data.project ? `${data.project}: ` : ""}Commented on PR #${data.comment.pr_id}: ${data.comment.url}`;
     return modelTextResult(data, text, {
-      hint: "Use og action pr_comment to add a follow-up comment.",
+      hint: useHint(input, "to add a follow-up comment."),
     });
   }
   if (isAction(input, "pr_log") || isAction(input, "pr_failures") || isAction(input, "pr_checks")) {
@@ -406,14 +604,35 @@ async function render(
     const pr = formatPR(data.pr);
     const rendered = `${data.project ? `${data.project}: ` : ""}${pr}`;
     const text = data.lines.length ? `${rendered}\n\n${data.lines.join("\n")}` : rendered;
-    return modelTextResult(data, text, {
-      hint: `Use og action ${input.action} with a smaller tail to narrow logs.`,
-    });
+    const hint = isAction(input, "pr_checks")
+      ? useHint(input, "to inspect checks again.")
+      : useHint(input, "with a smaller tail to narrow logs.");
+    return modelTextResult(data, text, { hint });
   }
   const data = parseSingleJsonDoc<{ project?: string; pr: PullRequest }>(stdout);
   return modelTextResult(data, `${data.project ? `${data.project}: ` : ""}${formatPR(data.pr)}`, {
-    hint: "Use og action pr_get to inspect the pull request again.",
+    hint: useHint(input, "to inspect the pull request again."),
   });
+}
+
+const PUBLIC_OPERATION_TARGETS: Record<OgOperation["action"], { tool: string; action?: string }> = {
+  auth_status: { tool: "og_auth_status" },
+  clone: { tool: "og_clone" },
+  pull: { tool: "og_pull" },
+  push: { tool: "og_push" },
+  pr_create: { tool: "og_pr", action: "create" },
+  pr_find: { tool: "og_pr", action: "find" },
+  pr_get: { tool: "og_pr", action: "get" },
+  pr_modify: { tool: "og_pr", action: "modify" },
+  pr_comment: { tool: "og_pr", action: "comment" },
+  pr_checks: { tool: "og_checks", action: "status" },
+  pr_log: { tool: "og_checks", action: "log" },
+  pr_failures: { tool: "og_checks", action: "failures" },
+};
+
+function useHint(input: OgOperation, suffix: string): string {
+  const target = PUBLIC_OPERATION_TARGETS[input.action];
+  return `Use ${target.tool}${target.action ? ` with action ${target.action}` : ""} ${suffix}`;
 }
 
 function formatPR(pr: PullRequest): string {
@@ -424,8 +643,13 @@ function formatPR(pr: PullRequest): string {
   return text;
 }
 
-export function registerOgTool(pi: {
-  registerTool(definition: ReturnType<typeof ogTool>): void;
-}): void {
-  pi.registerTool(ogTool());
+type OgToolDefinition = ReturnType<typeof makeOgTool>;
+
+export function registerOgTools(pi: { registerTool(definition: OgToolDefinition): void }): void {
+  pi.registerTool(ogAuthStatusTool());
+  pi.registerTool(ogCloneTool());
+  pi.registerTool(ogPullTool());
+  pi.registerTool(ogPushTool());
+  pi.registerTool(ogPrTool());
+  pi.registerTool(ogChecksTool());
 }
