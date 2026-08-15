@@ -8,9 +8,9 @@ import (
 	"os"
 	"unicode/utf8"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/srcop"
 	"github.com/tta-lab/organon/internal/srcview"
 )
 
@@ -60,13 +60,19 @@ func printJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
 
-// mutationJSON is the machine-readable result of a symbol mutation.
+// mutationJSON is the machine-readable result of a mutation. Symbol
+// mutations include the resulting outline; exact-text mutations leave it
+// omitted so their existing result contract is unchanged. Change fields
+// intentionally match the batch edit result so both mutation families have the
+// same Pi-facing contract.
 type mutationJSON struct {
-	Path             string `json:"path"`
-	Action           string `json:"action"`
-	SymbolID         string `json:"symbol_id,omitempty"`
-	Diff             string `json:"diff"`
-	FirstChangedLine int    `json:"first_changed_line,omitempty"`
+	Path             string             `json:"path"`
+	Action           string             `json:"action"`
+	SymbolID         string             `json:"symbol_id,omitempty"`
+	Diff             string             `json:"diff"`
+	Patch            string             `json:"patch"`
+	FirstChangedLine int                `json:"first_changed_line,omitempty"`
+	Outline          *symbolOutlineJSON `json:"outline,omitempty"`
 }
 
 // commentJSON is the machine-readable result of a comment read.
@@ -164,36 +170,46 @@ func targetID(afterID, beforeID string) string {
 	return beforeID
 }
 
-// writeMutationJSON writes the mutation result to disk and prints the
-// machine-readable result, keeping diagnostics off stdout.
+// writeMutationJSON writes a symbol mutation result to disk and prints the
+// same display diff, unified patch, and first-changed-line description used by
+// batch edits, plus the typed outline of the resulting content.
 func writeMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	return writeMutationJSONWithOutline(filename, action, symbolID, source, result, true)
+}
+
+// writeExactMutationJSON preserves the existing JSON result for exact-text
+// edits, which intentionally do not report a symbol outline.
+func writeExactMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	return writeMutationJSONWithOutline(filename, action, symbolID, source, result, false)
+}
+
+func writeMutationJSONWithOutline(
+	filename, action, symbolID string, source, result []byte, includeOutline bool,
+) error {
+	description, err := srcop.DescribeChange(filename, source, result)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
 	}
-	diffText, first := diffSummary(filename, source, result)
-	return printJSON(mutationJSON{
+
+	output := mutationJSON{
 		Path: filename, Action: action, SymbolID: symbolID,
-		Diff: diffText, FirstChangedLine: first,
-	})
-}
-
-// diffSummary renders a unified diff between old and new content and the
-// 1-indexed line of the first change in the new file.
-func diffSummary(filename string, old, new []byte) (string, int) {
-	diffText := udiff.Unified("a/"+filename, "b/"+filename, string(old), string(new))
-	return diffText, firstChangedLineBytes(old, new)
-}
-
-// firstChangedLineBytes returns the 1-indexed line of the first differing byte
-// in the new content, mirroring the Pi built-in edit's reporting of the first
-// changed line in the new file.
-func firstChangedLineBytes(old, new []byte) int {
-	limit := min(len(old), len(new))
-	pos := 0
-	for pos < limit && old[pos] == new[pos] {
-		pos++
+		Diff: description.Diff, Patch: description.Patch,
+		FirstChangedLine: description.FirstChangedLine,
 	}
-	return bytes.Count(new[:pos], []byte("\n")) + 1
+	if includeOutline {
+		outline, err := buildSymbolOutlineJSON(filename, result, true)
+		if err != nil {
+			return fmt.Errorf("edit applied to %s, but post-edit outline reporting failed: %w", filename, err)
+		}
+		output.Outline = &outline
+	}
+	if err := printJSON(output); err != nil {
+		return fmt.Errorf("edit applied to %s, but mutation result reporting failed: %w", filename, err)
+	}
+	return nil
 }
 
 // runSymbols dispatches between the human outline and the JSON outline; human
@@ -219,6 +235,33 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// buildSymbolOutlineJSON constructs the typed outline payload shared by the
+// symbols command and post-mutation results. Post-edit reporting allows an
+// empty supported-source outline; the standalone symbols command preserves its
+// existing no-structure error.
+func buildSymbolOutlineJSON(filename string, source []byte, allowEmpty bool) (symbolOutlineJSON, error) {
+	inspector := srcview.NewInspector(filename, source, 2)
+	var (
+		outline srcview.Outline
+		err     error
+	)
+	if allowEmpty {
+		outline, err = inspector.OutlineAllowEmpty()
+	} else {
+		outline, err = inspector.Outline()
+	}
+	if err != nil {
+		return symbolOutlineJSON{}, err
+	}
+	if outline.Symbols == nil {
+		outline.Symbols = make([]srcview.Symbol, 0)
+	}
+	return symbolOutlineJSON{
+		Path: filename, Language: outline.Language, Title: outline.Title,
+		TotalBytes: len(source), Symbols: outline.Symbols,
+	}, nil
+}
+
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
 // fixed depth of 2 so every later symbol operation resolves IDs from the same
 // outline shape.
@@ -231,21 +274,15 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 	if err := validateTextSource(filename, source); err != nil {
 		return err
 	}
-	outline, err := srcview.NewInspector(filename, source, 2).Outline()
+	outline, err := buildSymbolOutlineJSON(filename, source, false)
 	if err != nil {
 		return err
 	}
-	return printJSON(symbolOutlineJSON{
-		Path:       filename,
-		Language:   outline.Language,
-		Title:      outline.Title,
-		TotalBytes: len(source),
-		Symbols:    outline.Symbols,
-	})
+	return printJSON(outline)
 }
 
 // runRead dispatches between the human read and the JSON read; human output
-// remains the default, --json opts into the machine-readable form.
+// remains the default, --json opts into the machine-readable read result.
 func runRead(cmd *cobra.Command, args []string) error {
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
@@ -261,11 +298,12 @@ func runRead(cmd *cobra.Command, args []string) error {
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
+	limitSet := cmd.Flags().Changed("limit")
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	result, err := buildReadJSON(filename, source, symbolID, offset, limit)
+	result, err := buildReadJSON(filename, source, symbolID, offset, limit, limitSet)
 	if err != nil {
 		return err
 	}
@@ -291,23 +329,29 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	limit, _ := cmd.Flags().GetInt("limit")
-
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
+	limitSet := cmd.Flags().Changed("limit")
 
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	result, err := buildReadJSON(filename, source, symbolID, offset, limit)
+	result, err := buildReadJSON(filename, source, symbolID, offset, limit, limitSet)
 	if err != nil {
 		return err
 	}
 	return printJSON(result)
 }
 
-func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
+func buildReadJSON(
+	filename string,
+	source []byte,
+	symbolID string,
+	offset, limit int,
+	limitSet bool,
+) (readJSON, error) {
 	var content string
 	if symbolID != "" {
 		if err := validateTextSource(filename, source); err != nil {
@@ -331,7 +375,7 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		}
 	}
 
-	window, err := srcview.NewReadWindow(content, offset, limit)
+	window, err := srcview.NewReadWindow(content, offset, limit, limitSet)
 	if err != nil {
 		var offsetErr *srcview.OffsetOutOfRangeError
 		if errors.As(err, &offsetErr) {
@@ -342,20 +386,12 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		return readJSON{}, err
 	}
 	return readJSON{
-		Path:                  filename,
-		SymbolID:              symbolID,
-		Content:               window.Content,
-		StartLine:             window.StartLine,
-		TotalLines:            window.TotalLines,
-		TruncationTotalLines:  window.TruncationTotalLines,
-		TotalBytes:            window.TotalBytes,
-		Truncated:             window.Truncated,
-		TruncatedBy:           window.TruncatedBy,
-		OutputLines:           window.OutputLines,
-		OutputBytes:           window.OutputBytes,
-		OutputEndLine:         window.OutputEndLine,
-		RemainingLines:        window.RemainingLines,
-		NextOffset:            window.NextOffset,
-		FirstLineExceedsLimit: window.FirstLineExceedsLimit,
+		Path: filename, SymbolID: symbolID, Content: window.Content,
+		StartLine: window.StartLine, TotalLines: window.TotalLines,
+		TruncationTotalLines: window.TruncationTotalLines, TotalBytes: window.TotalBytes,
+		Truncated: window.Truncated, TruncatedBy: window.TruncatedBy,
+		OutputLines: window.OutputLines, OutputBytes: window.OutputBytes,
+		OutputEndLine: window.OutputEndLine, RemainingLines: window.RemainingLines,
+		NextOffset: window.NextOffset, FirstLineExceedsLimit: window.FirstLineExceedsLimit,
 	}, nil
 }

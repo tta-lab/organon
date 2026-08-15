@@ -28,8 +28,52 @@ function symbolId(i) {
   return out;
 }
 
+function isMarkdownPath() {
+  return /\.(md|markdown|mdx|tpl)$/i.test(path);
+}
+
 function outline(source) {
   const lines = source.split("\n");
+  if (isMarkdownPath()) {
+    const headings = [];
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^(#{1,6})\s+(.+)$/);
+      if (match) headings.push({ level: match[1].length, name: match[2].trim(), line: i });
+    }
+    let idx = 0;
+    return headings.map((heading, index) => {
+      let end = lines.length - 1;
+      for (const next of headings.slice(index + 1)) {
+        if (next.level <= heading.level) {
+          end = next.line - 1;
+          break;
+        }
+      }
+      let parent = "";
+      for (let previous = index - 1; previous >= 0; previous--) {
+        if (headings[previous].level < heading.level) {
+          parent = headings[previous].name;
+          break;
+        }
+      }
+      return {
+        id: symbolId(idx++),
+        targetable: true,
+        name: heading.name,
+        kind: "section",
+        parent,
+        level: heading.level,
+        start_byte: 0,
+        end_byte: 0,
+        start_line: heading.line + 1,
+        end_line: end + 1,
+        has_doc: false,
+        _docStart: heading.line,
+        _end: end,
+      };
+    });
+  }
+
   const symbols = [];
   let idx = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -59,6 +103,20 @@ function outline(source) {
     }
   }
   return symbols;
+}
+
+function typedOutline(source) {
+  const symbols = outline(source).map(({ _docStart, _end, ...symbol }) => symbol);
+  const result = {
+    path,
+    language: isMarkdownPath() ? "markdown" : "go",
+    total_bytes: Buffer.byteLength(source),
+    symbols,
+  };
+  if (isMarkdownPath()) {
+    result.title = source.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  }
+  return result;
 }
 
 function readSymbol(source, id) {
@@ -96,8 +154,7 @@ async function writeJSON(value) {
 }
 
 if (cmd === "symbols") {
-  const syms = outline(source).map(({ _docStart, _end, ...s }) => s);
-  await writeJSON({ path, language: "go", total_bytes: source.length, symbols: syms });
+  await writeJSON(typedOutline(source));
   process.exit(0);
 }
 
@@ -110,6 +167,7 @@ if (cmd === "read") {
   const id = flag("symbol-id");
   const offset = parseInt(flag("offset") || "0", 10);
   const limit = parseInt(flag("limit") || "0", 10);
+  const hasLimit = hasFlag("limit");
   let content = source;
   let symbolId_ = undefined;
   if (id && id !== "true") {
@@ -125,7 +183,7 @@ if (cmd === "read") {
   const total_lines = sourceLines.length;
   const start_line = offset > 1 ? offset : 1;
   let selectedLines = sourceLines.slice(start_line - 1);
-  const userLimited = limit > 0 && limit < selectedLines.length;
+  const userLimited = hasLimit && limit < selectedLines.length;
   if (userLimited) selectedLines = selectedLines.slice(0, limit);
   const selected = selectedLines.join("\n");
   // Mirror Pi truncateHead's counted-line behavior; selectedLines remains
@@ -158,21 +216,28 @@ if (cmd === "read") {
   process.exit(0);
 }
 
-function writeAndReport(action, symbolId_, newSource, oldSource) {
+async function writeAndReport(action, symbolId_, newSource, oldSource) {
   writeFileSync(path, newSource);
+  const oldLines = oldSource.split("\n");
+  const newLines = newSource.split("\n");
   const diff =
-    oldSource
-      .split("\n")
-      .map((l) => "-" + l)
-      .join("\n") +
+    oldLines.map((line) => "-" + line).join("\n") +
     "\n" +
-    newSource
-      .split("\n")
-      .map((l) => "+" + l)
-      .join("\n");
-  process.stdout.write(
-    JSON.stringify({ path, action, symbol_id: symbolId_, diff, first_changed_line: 1 }) + "\n",
-  );
+    newLines.map((line) => "+" + line).join("\n");
+  const patch =
+    `--- a/${path}\n+++ b/${path}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n` +
+    oldLines.map((line) => `-${line}`).join("\n") +
+    "\n" +
+    newLines.map((line) => `+${line}`).join("\n");
+  await writeJSON({
+    path,
+    action,
+    symbol_id: symbolId_,
+    diff,
+    patch,
+    first_changed_line: 1,
+    outline: typedOutline(newSource),
+  });
 }
 
 function symbolBounds(sourceText, id) {
@@ -195,7 +260,7 @@ if (cmd === "replace") {
     ...content.replace(/\n$/, "").split("\n"),
     ...lines.slice(end),
   ].join("\n");
-  writeAndReport("replace", id, next, source);
+  await writeAndReport("replace", id, next, source);
   process.exit(0);
 }
 
@@ -203,7 +268,7 @@ if (cmd === "delete") {
   const id = flag("symbol-id");
   const { start, end, lines } = symbolBounds(source, id);
   const next = [...lines.slice(0, start), ...lines.slice(end)].join("\n");
-  writeAndReport("delete", id, next, source);
+  await writeAndReport("delete", id, next, source);
   process.exit(0);
 }
 
@@ -214,7 +279,7 @@ if (cmd === "insert") {
   const { start, end, lines } = symbolBounds(source, id);
   const at = position === "after" ? end : start;
   const next = [...lines.slice(0, at), ...content, ...lines.slice(at)].join("\n");
-  writeAndReport("insert", id, next, source);
+  await writeAndReport("insert", id, next, source);
   process.exit(0);
 }
 
@@ -233,8 +298,12 @@ if (cmd === "comment") {
   }
   const content = readFileSync(0, "utf8").replace(/\n$/, "");
   const lines = source.split("\n");
-  lines[s._docStart] = content;
-  writeAndReport("comment", id, lines.join("\n"), source);
+  if (lines[s._docStart]?.startsWith("//")) {
+    lines[s._docStart] = content;
+  } else {
+    lines.splice(s._docStart, 0, content);
+  }
+  await writeAndReport("comment", id, lines.join("\n"), source);
   process.exit(0);
 }
 

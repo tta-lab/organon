@@ -43,12 +43,13 @@ func TestParseHeadings_Levels(t *testing.T) {
 	assert.Equal(t, "Requirements", headings[2].text)
 }
 
-func TestAssignIDs_H1HasNoID(t *testing.T) {
+func TestAssignIDs_AllHeadingsHaveIDs(t *testing.T) {
 	headings, err := parseHeadings([]byte(testDoc))
 	require.NoError(t, err)
 	assignIDs(headings)
-	assert.Empty(t, headings[0].id, "H1 should have no ID")
-	assert.NotEmpty(t, headings[1].id, "H2 should have ID")
+	for _, heading := range headings {
+		assert.NotEmpty(t, heading.id, "%s heading should have an ID", heading.text)
+	}
 }
 
 func TestAssignIDs_Unique(t *testing.T) {

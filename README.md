@@ -327,14 +327,14 @@ symbol-aware operations and exact multi-edit batches; `pi-web` and
 `pi-project` each register one tool, while `pi-og` registers
 `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks`.
 All six OG tools preserve the MCP domain behavior over a local subprocess. See
-[`pi/README.md`](pi/README.md) for installation, supported platforms, the `src`
-takeover behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
+[`pi/README.md`](pi/README.md) for installation, supported platforms, the `read`
+and `edit` override behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
 and `skill` MCP servers remain for non-Pi clients; the project-scoped `src` MCP
 server is removed.
 
 ## Why
 
-AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"old_text": "...", "new_text": "..."}` — which requires a tool-calling protocol, not shell.
+AI agents that work via shell commands (like logos) can't do multiline file edits. Every existing edit tool uses structured JSON parameters — `{"path":"file","edits":[{"oldText":"...","newText":"..."}]}` — which requires a tool-calling protocol, not shell.
 
 Organon solves this by replacing text matching with **symbol targeting**. The LLM doesn't need to reproduce the old code — it asks for the symbol tree, picks an ID, and pipes the new code via a single heredoc. One stdin arg instead of two JSON fields.
 

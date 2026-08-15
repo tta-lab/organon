@@ -134,7 +134,7 @@ func newRootCmd() *cobra.Command {
 	readCmd.SilenceUsage = true
 	readCmd.Flags().StringP("symbol-id", "s", "", "Symbol or Markdown section ID to read")
 	readCmd.Flags().Int("offset", 0, "1-indexed line offset within the selected content")
-	readCmd.Flags().Int("limit", 0, "Maximum number of lines to read (0 = all)")
+	readCmd.Flags().Int("limit", 0, "Maximum number of lines to read (omit for all)")
 	readCmd.Flags().Bool("json", false, "Output the machine-readable read result as JSON")
 
 	root.AddCommand(replaceCmd, insertCmd, deleteCmd, commentCmd, editCmd, symbolsCmd, readCmd)
@@ -527,7 +527,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if jsonOut {
-		return writeMutationJSON(filename, "edit", "", source, result.Content)
+		return writeExactMutationJSON(filename, "edit", "", source, result.Content)
 	}
 
 	printDisclosure(os.Stderr, result)
@@ -591,7 +591,7 @@ func runEditScopedJSON(cmd *cobra.Command, filename string, source, input []byte
 	final = append(final, source[:start]...)
 	final = append(final, result.Content...)
 	final = append(final, source[end:]...)
-	return writeMutationJSON(filename, "edit", sectionID, source, final)
+	return writeExactMutationJSON(filename, "edit", sectionID, source, final)
 }
 
 // runEditWithFiles handles the --before-file/--after-file edit path.

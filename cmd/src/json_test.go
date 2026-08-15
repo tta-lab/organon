@@ -108,19 +108,10 @@ func TestSymbolsJSONMarkdownSections(t *testing.T) {
 	assert.Equal(t, "markdown", out.Language)
 	assert.Equal(t, "Title", out.Title)
 	require.NotEmpty(t, out.Symbols)
-	nonTargetable := 0
 	for _, s := range out.Symbols {
 		assert.Equal(t, "section", s.Kind)
-		if !s.Targetable {
-			nonTargetable++
-		}
-	}
-	// The H1 title heading is not targetable; every other section is.
-	assert.Equal(t, 1, nonTargetable)
-	for _, s := range out.Symbols {
-		if s.Level > 1 {
-			assert.True(t, s.Targetable, "section %q must be targetable", s.Name)
-		}
+		assert.True(t, s.Targetable, "section %q must be targetable", s.Name)
+		assert.NotEmpty(t, s.ID, "section %q must have an ID", s.Name)
 	}
 }
 
@@ -288,6 +279,28 @@ func TestReadJSONExplicitLimitSetsContinuation(t *testing.T) {
 	// The caller-limited window must still advertise the next offset.
 	assert.Equal(t, 4, out.NextOffset)
 }
+
+func TestReadJSONExplicitZeroLimitSetsEmptyContinuation(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "window.txt")
+	require.NoError(t, os.WriteFile(f, []byte("one\ntwo\nthree\n"), 0o644))
+
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("offset", "2"))
+	require.NoError(t, cmd.Flags().Set("limit", "0"))
+	out := decodeRead(t, captureStdout(t, func() {
+		require.NoError(t, runReadJSON(cmd, []string{f}))
+	}))
+
+	assert.Empty(t, out.Content)
+	assert.Equal(t, 2, out.StartLine)
+	assert.Equal(t, 4, out.TotalLines)
+	assert.False(t, out.Truncated)
+	assert.Zero(t, out.OutputLines)
+	assert.Equal(t, 2, out.NextOffset)
+	assert.Equal(t, 3, out.RemainingLines)
+}
+
 func TestReadJSONWindowMetadataForExplicitLimit(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "go.mod")

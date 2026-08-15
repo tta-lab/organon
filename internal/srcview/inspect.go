@@ -58,8 +58,21 @@ func IsMarkdown(filename string) bool {
 	return ext == ".md" || ext == ".markdown" || ext == ".mdx" || ext == ".tpl"
 }
 
-// Outline extracts the file's typed symbol or heading structure.
+// Outline extracts the file's typed symbol or heading structure. It preserves
+// ErrNoStructure for supported code files with no targetable symbols so the
+// outline command can keep its existing user-facing behavior.
 func (i *Inspector) Outline() (Outline, error) {
+	return i.outline(false)
+}
+
+// OutlineAllowEmpty extracts a typed outline for a post-mutation result. A
+// supported source file with no remaining symbols is represented by an empty
+// Symbols slice instead of ErrNoStructure; unsupported file types still fail.
+func (i *Inspector) OutlineAllowEmpty() (Outline, error) {
+	return i.outline(true)
+}
+
+func (i *Inspector) outline(allowEmpty bool) (Outline, error) {
 	if IsMarkdown(i.filename) {
 		title, headings, err := markdown.Outline(i.source)
 		if err != nil {
@@ -86,7 +99,7 @@ func (i *Inspector) Outline() (Outline, error) {
 		return Outline{}, err
 	}
 	nodes := treesitter.SymbolTree(extracted)
-	if len(nodes) == 0 {
+	if len(nodes) == 0 && !allowEmpty {
 		return Outline{}, fmt.Errorf("%w: %s", ErrNoStructure, i.filename)
 	}
 	symbols := make([]Symbol, 0, len(extracted))

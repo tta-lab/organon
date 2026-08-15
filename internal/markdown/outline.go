@@ -15,9 +15,9 @@ type Heading struct {
 	Targetable bool
 }
 
-// Outline returns an optional first-H1 title and every heading in document order.
-// H1 headings are represented but are not targetable; non-H1 IDs are the same IDs
-// used by the existing section read and edit operations.
+// Outline returns an optional first-H1 title and every targetable heading in
+// document order. The title is display metadata; its H1 remains an addressable
+// section with the same stable ID used by section read and edit operations.
 func Outline(source []byte) (string, []Heading, error) {
 	headings, err := parseHeadings(source)
 	if err != nil {

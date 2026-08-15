@@ -1,495 +1,454 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
+import {
+  createEditToolDefinition,
+  createReadToolDefinition,
+  type EditToolDetails,
+  type ReadToolDetails,
+} from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 
-import { srcSchema, srcTool } from "../src/tool.js";
-import { createTakeoverHandlers, applyReadTakeover, restoreReadTakeover } from "../src/takeover.js";
+import extension from "../src/index.js";
+import { editSchema, editTool, readSchema, readTool, registerReadEditTools } from "../src/tool.js";
 import { resolveSourcePath } from "../src/paths.js";
 
-const def = srcTool();
+const readDefinition = readTool();
+const editDefinition = editTool();
 
-function makeFile(content: string): { path: string; cwd: string } {
+function makeFile(content: string, filename = "sample.go"): { path: string; cwd: string } {
   const dir = mkdtempSync(join(tmpdir(), "pi-src-"));
-  const path = join(dir, "sample.go");
+  const path = join(dir, filename);
   writeFileSync(path, content);
   return { path, cwd: dir };
 }
 
-function onePixelBMP(): Buffer {
-  const bmp = Buffer.alloc(58);
-  bmp.write("BM");
-  bmp.writeUInt32LE(58, 2);
-  bmp.writeUInt32LE(54, 10);
-  bmp.writeUInt32LE(40, 14);
-  bmp.writeInt32LE(1, 18);
-  bmp.writeInt32LE(1, 22);
-  bmp.writeUInt16LE(1, 26);
-  bmp.writeUInt16LE(24, 28);
-  bmp.writeUInt32LE(4, 34);
-  bmp.set([0, 0, 255, 0], 54);
-  return bmp;
+function text(result: { content: Array<{ type: string; text?: string }> }): string {
+  const block = result.content.find((item) => item.type === "text");
+  return block?.text ?? "";
+}
+
+function detailsKeys(details: unknown): string[] {
+  return Object.keys(details as Record<string, unknown>).sort();
 }
 
 const SAMPLE =
   "package sample\n\n// Foo docs.\nfunc Foo() {\n\treturn 1\n}\n\nfunc Bar() {\n\treturn 2\n}\n";
 
-async function call(params: unknown, ctx: { cwd: string }) {
-  return def.execute("call-1", params as any, undefined, undefined, ctx);
+async function callRead(params: unknown, cwd: string) {
+  return readDefinition.execute("read-call", params as any, undefined, undefined, { cwd } as any);
 }
 
-describe("pi-src schema", () => {
-  it("exposes a closed action union with action-specific required fields", () => {
-    expect(Value.Check(srcSchema, { action: "symbols", path: "a.go" })).toBe(true);
+async function callEdit(params: unknown, cwd: string) {
+  return editDefinition.execute("edit-call", params as any, undefined, undefined, { cwd } as any);
+}
+
+describe("pi-src override schemas", () => {
+  it("accepts the live built-in branches and the closed Organon forms", () => {
+    const builtInRead = createReadToolDefinition(process.cwd());
+    const builtInEdit = createEditToolDefinition(process.cwd());
+
+    for (const input of [
+      { path: "a.go" },
+      { path: "a.go", offset: 2, limit: 10 },
+      { path: "a.go", limit: 0 },
+    ]) {
+      expect(Value.Check(builtInRead.parameters, input)).toBe(true);
+      expect(Value.Check(readSchema, input)).toBe(true);
+    }
+    const exactEdit = { path: "a.go", edits: [{ oldText: "a", newText: "b" }] };
+    expect(Value.Check(builtInEdit.parameters, exactEdit)).toBe(true);
+    expect(Value.Check(editSchema, exactEdit)).toBe(true);
+
+    expect(Value.Check(readSchema, { path: "a.go", symbols: true })).toBe(true);
+    expect(Value.Check(readSchema, { path: "a.go", symbol_id: "bK", offset: 1, limit: 10 })).toBe(
+      true,
+    );
     expect(
-      Value.Check(srcSchema, {
-        action: "read",
+      Value.Check(editSchema, {
         path: "a.go",
+        operation: "replace",
         symbol_id: "bK",
-        offset: 1,
-        limit: 10,
+        content: "x",
       }),
     ).toBe(true);
-    expect(Value.Check(srcSchema, { action: "read", path: "a.go", offset: 0 })).toBe(false);
-    expect(Value.Check(srcSchema, { action: "read", path: "a.go", offset: 1.5 })).toBe(false);
-    expect(Value.Check(srcSchema, { action: "read", path: "a.go", limit: -1 })).toBe(false);
     expect(
-      Value.Check(srcSchema, { action: "replace", path: "a.go", symbol_id: "bK", content: "x" }),
-    ).toBe(true);
-    expect(
-      Value.Check(srcSchema, {
-        action: "insert",
+      Value.Check(editSchema, {
         path: "a.go",
+        operation: "insert",
         symbol_id: "bK",
         position: "before",
         content: "x",
       }),
     ).toBe(true);
-    expect(Value.Check(srcSchema, { action: "delete", path: "a.go", symbol_id: "bK" })).toBe(true);
+    expect(Value.Check(editSchema, { path: "a.go", operation: "delete", symbol_id: "bK" })).toBe(
+      true,
+    );
     expect(
-      Value.Check(srcSchema, { action: "comment", path: "a.go", symbol_id: "bK", read: true }),
-    ).toBe(true);
-    expect(
-      Value.Check(srcSchema, { action: "comment", path: "a.go", symbol_id: "bK", read: false }),
-    ).toBe(false);
-    expect(
-      Value.Check(srcSchema, {
-        action: "comment",
+      Value.Check(editSchema, {
         path: "a.go",
+        operation: "comment",
         symbol_id: "bK",
-        content: "// new",
+        content: "docs",
       }),
     ).toBe(true);
-    expect(
-      Value.Check(srcSchema, {
-        action: "edit",
-        path: "a.go",
-        edits: [{ oldText: "a", newText: "b" }],
-      }),
-    ).toBe(true);
-    expect(Value.Check(srcSchema, { action: "edit", path: "a.go", edits: [] })).toBe(false);
-    expect(
-      Value.Check(srcSchema, {
-        action: "edit",
-        path: "a.go",
-        edits: [{ oldText: "a", newText: "b", unexpected: true }],
-      }),
-    ).toBe(false);
-    expect(Value.Check(srcSchema, { action: "symbols" })).toBe(false);
-    expect(Value.Check(srcSchema, { action: "replace", path: "a.go" })).toBe(false);
-    expect(Value.Check(srcSchema, { action: "read", path: "a.go", bogus: 1 })).toBe(false);
+  });
+
+  it("rejects incomplete, mixed, empty-ID, and unknown Organon forms", () => {
     for (const input of [
-      { action: "read", path: "a.go", symbol_id: "" },
-      { action: "replace", path: "a.go", symbol_id: "", content: "x" },
-      { action: "insert", path: "a.go", symbol_id: "", position: "before", content: "x" },
-      { action: "delete", path: "a.go", symbol_id: "" },
-      { action: "comment", path: "a.go", symbol_id: "", read: true },
-      { action: "comment", path: "a.go", symbol_id: "", content: "// new" },
+      { path: "a.go", symbols: false },
+      { path: "a.go", symbols: true, offset: 1 },
+      { path: "a.go", symbol_id: "" },
+      { path: "a.go", symbol_id: "bK", symbols: true },
+      { path: "a.go", symbols: true, bogus: true },
     ]) {
-      expect(Value.Check(srcSchema, input)).toBe(false);
+      expect(Value.Check(readSchema, input)).toBe(false);
     }
-    expect(Value.Check(srcSchema, { action: "nope", path: "a.go" })).toBe(false);
+    for (const input of [
+      { path: "a.go", operation: "replace", symbol_id: "bK" },
+      { path: "a.go", operation: "insert", symbol_id: "bK", content: "x" },
+      { path: "a.go", operation: "delete", symbol_id: "", bogus: true },
+      { path: "a.go", operation: "comment", symbol_id: "bK", content: "x", edits: [] },
+      { path: "a.go", operation: "replace", symbol_id: "bK", content: "x", extra: true },
+      { path: "a.go", operation: "nope", symbol_id: "bK" },
+      { path: "a.go", edits: [{ oldText: "a", newText: "b" }], operation: "delete" },
+    ]) {
+      expect(Value.Check(editSchema, input)).toBe(false);
+    }
+  });
+
+  it("keeps built-in edit argument preparation before validation", () => {
+    const prepared = editDefinition.prepareArguments?.({
+      path: "a.go",
+      oldText: "old",
+      newText: "new",
+    });
+    expect(prepared).toEqual({ path: "a.go", edits: [{ oldText: "old", newText: "new" }] });
+    expect(Value.Check(editSchema, prepared)).toBe(true);
+
+    const operation = { path: "a.go", operation: "delete", symbol_id: "bK" };
+    expect(editDefinition.prepareArguments?.(operation)).toBe(operation);
   });
 });
 
-describe("pi-src read and symbols", () => {
-  it("resolves relative paths against ctx.cwd and strips a leading @", () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const relative = join(cwd, "sample.go");
-    expect(resolveSourcePath("@" + relative, cwd)).toBe(path);
-    expect(resolveSourcePath(relative, cwd)).toBe(path);
-    expect(resolveSourcePath(path, cwd)).toBe(path);
-  });
+describe("pi-src registration", () => {
+  it("registers exactly read and edit without changing active tools", () => {
+    const registered: Array<{ name: string }> = [];
+    const lifecycleEvents: string[] = [];
+    registerReadEditTools({
+      registerTool: (definition: any) => registered.push(definition),
+    });
+    expect(registered.map((definition) => definition.name)).toEqual(["read", "edit"]);
 
-  it("preserves whitespace in source paths", async () => {
-    const { cwd } = makeFile(SAMPLE);
+    extension({
+      registerTool: () => undefined,
+      on: (event: string) => lifecycleEvents.push(event),
+    } as any);
+    expect(lifecycleEvents).toEqual([]);
+  });
+});
+
+describe("pi-src reads", () => {
+  it("resolves relative, absolute, leading-at, and whitespace-containing paths", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    expect(resolveSourcePath("@" + path, cwd)).toBe(path);
+    expect(resolveSourcePath(path, cwd)).toBe(path);
+    expect(resolveSourcePath("sample.go", cwd)).toBe(path);
+
     for (const relative of [" leading.go", "trailing.go "]) {
-      const path = join(cwd, relative);
-      writeFileSync(path, SAMPLE);
-      expect(resolveSourcePath(relative, cwd)).toBe(path);
-      const result = await call({ action: "read", path: relative }, { cwd });
-      expect((result.content[0] as { text: string }).text).toContain("func Foo");
+      const whitespacePath = join(cwd, relative);
+      writeFileSync(whitespacePath, SAMPLE);
+      expect(text(await callRead({ path: relative }, cwd))).toContain("func Foo");
     }
   });
 
-  it("symbols action returns the typed outline with opaque IDs", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const result = await call({ action: "symbols", path }, { cwd });
-    const details = result.details as {
-      language: string;
-      symbols: Array<{ id: string; name: string; has_doc: boolean }>;
-    };
-    expect(details.language).toBe("go");
-    expect(details.symbols.map((s) => s.name)).toEqual(["Foo", "Bar"]);
-    expect(details.symbols[0]!.has_doc).toBe(true);
-    expect(details.symbols[0]!.id).not.toBe("Foo");
-  });
-
-  it("read whole file returns content with truncation details", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const result = await call({ action: "read", path }, { cwd });
-    expect((result.content[0] as { text: string }).text).toContain("func Foo");
-    expect((result.details as { truncation?: unknown }).truncation).toBeUndefined();
-  });
-
-  it("read by exact symbol ID returns that symbol only", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const symbols = await call({ action: "symbols", path }, { cwd });
-    const foo = (symbols.details as { symbols: Array<{ id: string; name: string }> }).symbols.find(
-      (s) => s.name === "Foo",
-    )!;
-    const result = await call({ action: "read", path, symbol_id: foo.id }, { cwd });
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("Foo docs");
-    expect(text).toContain("return 1");
-    expect(text).not.toContain("func Bar");
-  });
-
-  it("read by display name fails with a concise error", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    await expect(call({ action: "read", path, symbol_id: "Foo" }, { cwd })).rejects.toThrow(
-      /not found/,
-    );
-  });
-
-  it("rejects an explicitly empty symbol ID instead of reading the whole file", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    await expect(call({ action: "read", path, symbol_id: "" }, { cwd })).rejects.toThrow(
-      "symbol_id must not be empty",
-    );
-  });
-
-  it("read renders the CLI window continuation metadata", async () => {
+  it("keeps ordinary whole-file and offset/limit reads on the built-in result shape", async () => {
     const { path, cwd } = makeFile(
       "module example.com/organon\n" +
         "go 1.26\n" +
         "require example.com/dependency v1.0.0\n" +
         "replace example.com/dependency => ./dependency\n",
+      "go.mod",
     );
-    const result = await call({ action: "read", path, limit: 2 }, { cwd });
-    const details = result.details as {
-      output_lines: number;
-      output_end_line: number;
-      remaining_lines: number;
-      next_offset: number;
-    };
+    const whole = await callRead({ path }, cwd);
+    expect(text(whole)).toContain("module example.com/organon");
+    expect(whole.details).toBeUndefined();
 
-    expect(details).not.toHaveProperty("selected_lines");
-    expect(details).toMatchObject({
-      output_lines: 2,
-      output_end_line: 2,
-      remaining_lines: 3,
-      next_offset: 3,
-    });
-    expect((result.content[0] as { text: string }).text).toContain(
-      "[3 more lines in file. Use offset=3 to continue.",
+    const window = await callRead({ path, offset: 2, limit: 2 }, cwd);
+    expect(text(window)).toContain("go 1.26");
+    expect(text(window)).toContain("require example.com/dependency");
+    expect(text(window)).not.toContain("module example.com/organon");
+    expect(text(window)).toContain("more lines in file");
+    expect(window.details).toBeUndefined();
+  });
+
+  it("preserves an explicit zero limit as an empty selection with continuation", async () => {
+    const { path, cwd } = makeFile("one\ntwo\nthree\n", "window.txt");
+    const result = await callRead({ path, offset: 2, limit: 0 }, cwd);
+
+    expect(text(result)).not.toContain("two");
+    expect(text(result)).not.toContain("three");
+    expect(text(result)).toContain("[3 more lines in file. Use offset=2 to continue.");
+    expect(result.details).toBeUndefined();
+  });
+
+  it("returns an outline with display names and opaque IDs, then reads one exact symbol", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    const outline = await callRead({ path, symbols: true }, cwd);
+    const outlineText = text(outline);
+    expect(outlineText).toContain("Foo");
+    expect(outlineText).toContain("Bar");
+    expect(outlineText).toMatch(/\[[^\]]+\] function Foo/);
+    expect(outline.details).toBeUndefined();
+
+    const id = outlineText.match(/- \[([^\]]+)\] function Foo/)?.[1];
+    expect(id).toBeTruthy();
+    const selected = await callRead({ path, symbol_id: id }, cwd);
+    expect(text(selected)).toContain("Foo docs");
+    expect(text(selected)).toContain("return 1");
+    expect(text(selected)).not.toContain("func Bar");
+    expect(selected.details).toBeUndefined();
+  });
+
+  it("rejects display names and explicit empty symbol IDs", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    await expect(callRead({ path, symbol_id: "Foo" }, cwd)).rejects.toThrow(/not found/);
+    await expect(callRead({ path, symbol_id: "" }, cwd)).rejects.toThrow(
+      "symbol_id must not be empty",
     );
   });
 
-  it("truncates and saves large symbol outlines and comments", async () => {
-    const symbolsSource =
+  it("paginates relative to a selected symbol", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    const outline = await callRead({ path, symbols: true }, cwd);
+    const id = text(outline).match(/- \[([^\]]+)\] function Foo/)?.[1];
+    const selected = await callRead({ path, symbol_id: id, offset: 3, limit: 1 }, cwd);
+    expect(text(selected)).toContain("return 1");
+    expect(text(selected)).not.toContain("Foo docs");
+    expect(selected.details).toBeUndefined();
+  });
+
+  it("keeps outline truncation metadata compatible with ReadToolDetails", async () => {
+    const { path, cwd } = makeFile(
       "package sample\n\n" +
-      Array.from({ length: 2200 }, (_, index) => `func F${index}() {\n}`).join("\n") +
-      "\n}";
-    const symbolsFile = makeFile(symbolsSource);
-    const symbols = await call(
-      { action: "symbols", path: symbolsFile.path },
-      { cwd: symbolsFile.cwd },
+        Array.from({ length: 2200 }, (_, index) => `func F${index}() {\n}`).join("\n"),
     );
-
-    const commentFile = makeFile("// " + "x".repeat(60 * 1024) + "\nfunc Foo() {\n}\n");
-    const outline = await call(
-      { action: "symbols", path: commentFile.path },
-      { cwd: commentFile.cwd },
-    );
-    const symbolID = (outline.details as { symbols: Array<{ id: string }> }).symbols[0]!.id;
-    const comment = await call(
-      { action: "comment", path: commentFile.path, symbol_id: symbolID, read: true },
-      { cwd: commentFile.cwd },
-    );
-
-    const paths = [symbols, comment].map(
-      (result) => (result.details as { fullOutputPath?: string }).fullOutputPath,
-    );
-    try {
-      for (const result of [symbols, comment]) {
-        const text = (result.content[0] as { text: string }).text;
-        const details = result.details as { fullOutputPath?: string };
-        expect(text).toContain("Full output saved to:");
-        expect(readFileSync(details.fullOutputPath!, "utf8").length).toBeGreaterThan(50 * 1024);
-      }
-    } finally {
-      for (const path of paths) {
-        if (path) {
-          rmSync(dirname(path), { recursive: true, force: true });
-        }
-      }
-    }
+    const result = await callRead({ path, symbols: true }, cwd);
+    const details = result.details as ReadToolDetails;
+    expect(details.truncation?.truncated).toBe(true);
+    expect(details).not.toHaveProperty("fullOutputPath");
+    const fullOutputPath = text(result).match(/Full output saved to: (.+)\]/)?.[1];
+    expect(fullOutputPath).toBeTruthy();
+    rmSync(dirname(fullOutputPath!), { recursive: true, force: true });
   });
 });
 
 describe("pi-src media reads", () => {
-  it("returns an image note (and never decoded UTF-8 text) for a PNG file", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-src-media-"));
-    const path = join(dir, "img.png");
-    // Minimal valid PNG header.
-    const png = Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]),
-    ]);
-    writeFileSync(path, png);
-    const result = await def.execute(
-      "call-media",
-      { action: "read", path } as any,
-      undefined,
-      undefined,
-      { cwd: dir } as any,
+  function onePixelBMP(): Buffer {
+    const bmp = Buffer.alloc(58);
+    bmp.write("BM");
+    bmp.writeUInt32LE(58, 2);
+    bmp.writeUInt32LE(54, 10);
+    bmp.writeUInt32LE(40, 14);
+    bmp.writeInt32LE(1, 18);
+    bmp.writeInt32LE(1, 22);
+    bmp.writeUInt16LE(1, 26);
+    bmp.writeUInt16LE(24, 28);
+    bmp.writeUInt32LE(4, 34);
+    bmp.set([0, 0, 255, 0], 54);
+    return bmp;
+  }
+
+  it("returns image content without custom details and adds the model note", async () => {
+    const { cwd } = makeFile("", "img.png");
+    const path = join(cwd, "img.png");
+    writeFileSync(
+      path,
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]),
+      ]),
     );
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("Read image file");
+    const result = await readDefinition.execute("media", { path } as any, undefined, undefined, {
+      cwd,
+      model: { input: ["text"] },
+    } as any);
+    expect(text(result)).toContain("Read image file");
+    expect(text(result)).toContain("Current model does not support images");
+    expect(result.details).toBeUndefined();
   });
 
-  it("normalizes BMP to PNG before attaching it to the model", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-src-media-"));
-    const path = join(dir, "img.bmp");
+  it("normalizes BMP to an inline PNG", async () => {
+    const { cwd } = makeFile("", "img.bmp");
+    const path = join(cwd, "img.bmp");
     writeFileSync(path, onePixelBMP());
-
-    const result = await def.execute(
-      "call-media",
-      { action: "read", path } as any,
-      undefined,
-      undefined,
-      { cwd: dir } as any,
-    );
+    const result = await readDefinition.execute("media", { path } as any, undefined, undefined, {
+      cwd,
+    } as any);
     const image = result.content.find(
       (block): block is { type: "image"; data: string; mimeType: string } => block.type === "image",
     );
-    const text = (result.content[0] as { text: string }).text;
-
-    expect(image).toMatchObject({ mimeType: "image/png" });
+    expect(image?.mimeType).toBe("image/png");
     expect(Buffer.from(image!.data, "base64").subarray(0, 8)).toEqual(
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
-    expect(text).toContain("[Image converted from image/bmp to image/png.]");
-  });
-
-  it("adds a non-vision-model note when the current model cannot see images", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-src-media-"));
-    const path = join(dir, "img.png");
-    const png = Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]),
-    ]);
-    writeFileSync(path, png);
-    const result = await def.execute(
-      "call-media",
-      { action: "read", path } as any,
-      undefined,
-      undefined,
-      { cwd: dir, model: { input: ["text"] } } as any,
-    );
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("[Current model does not support images.");
   });
 });
 
-describe("pi-src mutations", () => {
-  it("replace rewrites the file and reports the diff", async () => {
+describe("pi-src edits", () => {
+  it("applies exact multi-edit batches without symbol discovery", async () => {
     const { path, cwd } = makeFile(SAMPLE);
-    const symbols = await call({ action: "symbols", path }, { cwd });
-    const foo = (symbols.details as { symbols: Array<{ id: string; name: string }> }).symbols.find(
-      (s) => s.name === "Foo",
-    )!;
-    const result = await call(
-      { action: "replace", path, symbol_id: foo.id, content: "func Foo() {\n\treturn 99\n}" },
-      { cwd },
-    );
-    const details = result.details as { action: string; symbol_id: string; diff: string };
-    expect(details.action).toBe("replace");
-    expect(details.symbol_id).toBe(foo.id);
-    expect(details.diff).toContain("return 99");
-    expect(readFileSync(path, "utf8")).toContain("return 99");
-  });
-
-  it("insert before/after uses the position flag", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const symbols = await call({ action: "symbols", path }, { cwd });
-    const foo = (symbols.details as { symbols: Array<{ id: string; name: string }> }).symbols.find(
-      (s) => s.name === "Foo",
-    )!;
-    await call(
-      { action: "insert", path, symbol_id: foo.id, position: "after", content: "// after marker" },
-      { cwd },
-    );
-    expect(readFileSync(path, "utf8")).toContain("// after marker");
-  });
-
-  it("delete removes the symbol", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const symbols = await call({ action: "symbols", path }, { cwd });
-    const foo = (symbols.details as { symbols: Array<{ id: string; name: string }> }).symbols.find(
-      (s) => s.name === "Foo",
-    )!;
-    await call({ action: "delete", path, symbol_id: foo.id }, { cwd });
-    const after = readFileSync(path, "utf8");
-    expect(after).not.toContain("func Foo");
-    expect(after).toContain("func Bar");
-  });
-
-  it("rejects a false comment read flag", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    await expect(
-      call({ action: "comment", path, symbol_id: "any-id", read: false }, { cwd }),
-    ).rejects.toThrow("comment read must be true");
-  });
-
-  it("comment read returns the doc comment; write replaces it", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const symbols = await call({ action: "symbols", path }, { cwd });
-    const foo = (symbols.details as { symbols: Array<{ id: string; name: string }> }).symbols.find(
-      (s) => s.name === "Foo",
-    )!;
-    const readResult = await call(
-      { action: "comment", path, symbol_id: foo.id, read: true },
-      { cwd },
-    );
-    expect((readResult.content[0] as { text: string }).text).toContain("Foo docs");
-    await call({ action: "comment", path, symbol_id: foo.id, content: "// New docs." }, { cwd });
-    expect(readFileSync(path, "utf8")).toContain("New docs.");
-  });
-
-  it("edit applies multiple disjoint replacements atomically", async () => {
-    const { path, cwd } = makeFile(SAMPLE);
-    const result = await call(
+    const result = await callEdit(
       {
-        action: "edit",
         path,
         edits: [
           { oldText: "return 1", newText: "return 11" },
           { oldText: "return 2", newText: "return 22" },
         ],
       },
-      { cwd },
+      cwd,
     );
-    const details = result.details as { edits_applied: number; diff: string; patch: string };
-    expect(details.edits_applied).toBe(2);
-    expect((result.content[0] as { text: string }).text).toBe(
-      `Successfully replaced 2 block(s) in ${path}.`,
-    );
-    expect((result.content[0] as { text: string }).text).not.toContain("return 11");
-    expect(details.diff).toContain("-1");
-    expect(details.diff).not.toContain("--- ");
+    const details = result.details as EditToolDetails;
+    expect(detailsKeys(details)).toEqual(["diff", "firstChangedLine", "patch"]);
+    expect(details.diff).toContain("return 11");
     expect(details.patch).toContain("--- a/");
     expect(details.patch).toContain("@@");
-    expect(details.diff).not.toBe(details.patch);
-    const after = readFileSync(path, "utf8");
-    expect(after).toContain("return 11");
-    expect(after).toContain("return 22");
+    expect(text(result)).toBe(`Successfully replaced 2 block(s) in ${path}.`);
+    expect(readFileSync(path, "utf8")).toContain("return 22");
   });
 
-  it("edit failure surfaces as a concise error", async () => {
+  it("surfaces exact edit failures without writing the file", async () => {
     const { path, cwd } = makeFile(SAMPLE);
     await expect(
-      call({ action: "edit", path, edits: [{ oldText: "missing text", newText: "x" }] }, { cwd }),
+      callEdit({ path, edits: [{ oldText: "missing text", newText: "x" }] }, cwd),
     ).rejects.toThrow(/not found/);
+    expect(readFileSync(path, "utf8")).toBe(SAMPLE);
   });
-});
 
-describe("pi-src registration", () => {
-  it("registers exactly one global tool named src", async () => {
-    const { registerSrcTool } = await import("../src/tool.js");
-    const registered: Array<{ name: string }> = [];
-    registerSrcTool({ registerTool: (d: any) => registered.push(d) } as any);
-    expect(registered).toHaveLength(1);
-    expect(registered[0]!.name).toBe("src");
-  });
-});
-describe("pi-src takeover policy", () => {
-  const builtinRead = {
-    name: "read",
-    description: "builtin read",
-    parameters: {} as any,
-    sourceInfo: { source: "builtin" } as any,
-  };
-  const builtinEdit = {
-    name: "edit",
-    description: "builtin edit",
-    parameters: {} as any,
-    sourceInfo: { source: "builtin" } as any,
-  };
-  const customTool = {
-    name: "other",
-    description: "extension tool",
-    parameters: {} as any,
-    sourceInfo: { source: "extension", path: "x" } as any,
-  };
+  it("continues all symbol operations from each returned post-edit outline", async () => {
+    const { path, cwd } = makeFile(SAMPLE);
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const foo = initial.match(/- \[([^\]]+)\] function Foo/)![1]!;
+    let result = await callEdit(
+      { path, operation: "replace", symbol_id: foo, content: "func Foo() {\n\treturn 99\n}" },
+      cwd,
+    );
+    expect(text(result)).toContain(`Applied replace ${foo} to ${path}.`);
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("function Foo");
+    expect(detailsKeys(result.details)).toEqual(["diff", "firstChangedLine", "patch"]);
+    expect((result.details as EditToolDetails).patch).toContain("--- a/");
+    expect(readFileSync(path, "utf8")).toContain("return 99");
 
-  function fakePi(active: string[], all: any[]) {
-    let current = [...active];
-    return {
-      get current() {
-        return [...current];
+    let current = text(result);
+    const bar = current.match(/- \[([^\]]+)\] function Bar/)![1]!;
+    result = await callEdit(
+      {
+        path,
+        operation: "insert",
+        symbol_id: bar,
+        position: "before",
+        content: "func Before() {}",
       },
-      getActiveTools: () => [...current],
-      getAllTools: () => all,
-      setActiveTools: (names: string[]) => {
-        current = [...names];
-      },
-    };
-  }
+      cwd,
+    );
+    expect(text(result)).toContain("function Before");
+    expect((result.details as EditToolDetails).diff).toContain("Before");
 
-  it("removes only active builtin read/edit, keeps other tools, activates src", () => {
-    const pi = fakePi(["read", "edit", "bash", "other"], [builtinRead, builtinEdit, customTool]);
-    const displaced = applyReadTakeover(pi);
-    expect(displaced).toEqual(["read", "edit"]);
-    expect(pi.current.sort()).toEqual(["bash", "other", "src"].sort());
+    current = text(result);
+    const before = current.match(/- \[([^\]]+)\] function Before/)![1]!;
+    result = await callEdit(
+      { path, operation: "comment", symbol_id: before, content: "Before docs." },
+      cwd,
+    );
+    expect(text(result)).toContain("function Before");
+    expect((result.details as EditToolDetails).firstChangedLine).toBe(1);
+    expect(readFileSync(path, "utf8")).toContain("Before docs.");
+
+    current = text(result);
+    const barAfterInsert = current.match(/- \[([^\]]+)\] function Bar/)![1]!;
+    result = await callEdit({ path, operation: "delete", symbol_id: barAfterInsert }, cwd);
+    expect(text(result)).not.toContain("function Bar");
+    expect((result.details as EditToolDetails).patch).toContain("--- a/");
+    expect(readFileSync(path, "utf8")).not.toContain("func Bar");
   });
 
-  it("always activates src even when no builtins are displaced", () => {
-    const pi = fakePi(["bash"], [builtinRead, builtinEdit]);
-    const displaced = applyReadTakeover(pi);
-    expect(displaced).toEqual([]);
-    expect(pi.current).toEqual(["bash", "src"]);
+  it("reads and replaces a targetable Markdown H1 section", async () => {
+    const { path, cwd } = makeFile("# Guide\n\n## Setup\n\nInstall it.\n", "guide.md");
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const guide = initial.match(/- \[([^\]]+)\] section Guide/)![1]!;
+
+    const selected = await callRead({ path, symbol_id: guide }, cwd);
+    expect(text(selected)).toContain("# Guide");
+    expect(text(selected)).toContain("## Setup");
+
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: guide, content: "# New Guide\n\nNew body.\n" },
+      cwd,
+    );
+    expect(text(result)).toContain("section New Guide");
+    expect(readFileSync(path, "utf8")).toBe("# New Guide\n\nNew body.");
   });
 
-  it("restores only the remembered subset at shutdown", () => {
-    const pi = fakePi(["read", "edit", "bash"], [builtinRead, builtinEdit]);
-    const displaced = applyReadTakeover(pi);
-    // Another extension toggled a tool while active.
-    pi.setActiveTools([...pi.current, "extra"]);
-    restoreReadTakeover(pi, displaced);
-    expect(pi.current.sort()).toEqual(["read", "edit", "bash", "extra", "src"].sort());
+  it("returns a typed post-edit outline for Markdown heading sections", async () => {
+    const { path, cwd } = makeFile(
+      "# Guide\n\n## Setup\n\nInstall it.\n\n## Other\n\nKeep this.\n",
+      "guide.md",
+    );
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const setup = initial.match(/- \[([^\]]+)\] section Setup/)![1]!;
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: setup, content: "## Setup\n\nUse it." },
+      cwd,
+    );
+
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("(markdown)");
+    expect(text(result)).toContain("section Setup");
+    expect((result.details as EditToolDetails).diff).toContain("Use it.");
   });
 
-  it("createTakeoverHandlers carries displaced state across events", () => {
-    const pi = fakePi(["read", "edit"], [builtinRead, builtinEdit]);
-    const handlers = createTakeoverHandlers(pi as any);
-    handlers.onSessionStart();
-    expect(pi.current).not.toContain("read");
-    handlers.onSessionShutdown();
-    expect(pi.current).toContain("read");
+  it("reports an empty post-edit outline when the last symbol is deleted", async () => {
+    const { path, cwd } = makeFile("package sample\n\nfunc Foo() {\n}\n");
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const foo = initial.match(/- \[([^\]]+)\] function Foo/)![1]!;
+    const result = await callEdit({ path, operation: "delete", symbol_id: foo }, cwd);
+
+    expect(text(result)).toContain("Applied delete");
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("No symbols found.");
+    expect((result.details as EditToolDetails).patch).toContain("--- a/");
+  });
+
+  it("keeps mutation confirmation visible when the returned outline is truncated", async () => {
+    const { path, cwd } = makeFile(
+      "package sample\n\n" +
+        Array.from({ length: 2200 }, (_, index) => `func F${index}() {\n}\n`).join("\n"),
+    );
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: "0", content: "func F0() {\n}\n" },
+      cwd,
+    );
+    const output = text(result);
+    const fullOutputPath = output.match(/Full output saved to: (.+)\]/)?.[1];
+
+    try {
+      expect(output).toContain("Applied replace 0");
+      expect(output).toContain("Post-edit outline:");
+      expect(output).toContain("Truncated");
+      expect(output).toContain("needed entry was omitted");
+      expect(fullOutputPath).toBeTruthy();
+      expect(detailsKeys(result.details)).toEqual(["diff", "firstChangedLine", "patch"]);
+    } finally {
+      if (fullOutputPath) rmSync(dirname(fullOutputPath), { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the removed comment-read form", () => {
+    expect(
+      Value.Check(editSchema, { path: "a.go", operation: "comment", symbol_id: "bK", read: true }),
+    ).toBe(false);
   });
 });

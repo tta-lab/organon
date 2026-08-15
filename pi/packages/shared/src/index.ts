@@ -8,4 +8,4 @@ export {
   type ModelTextToolResult,
   type TextContentBlock,
 } from "./model-text.js";
-export { type ModelText } from "./truncate.js";
+export { truncateForModel, type ModelText, type TruncateForModelOptions } from "./truncate.js";

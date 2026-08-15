@@ -83,36 +83,15 @@ func parseHeadings(source []byte) ([]mdHeading, error) { //nolint:gocyclo
 	return headings, nil
 }
 
-// assignIDs generates stable 2-char base62 IDs for each heading.
-// H1 headings get no ID (they can't be targeted with --section).
-// On collision, extends to 3 chars with positional disambiguator.
+// assignIDs generates stable base62 IDs for every heading. On collision,
+// AssignIDs extends IDs with a positional disambiguator.
 func assignIDs(headings []mdHeading) {
-	// Collect labels for non-H1 headings
-	type entry struct {
-		idx   int
-		label string
+	labels := make([]string, len(headings))
+	for i, heading := range headings {
+		labels[i] = fmt.Sprintf("%s %s", strings.Repeat("#", heading.level), heading.text)
 	}
-	var entries []entry
-	for i, h := range headings {
-		if h.level == 1 {
-			continue
-		}
-		label := fmt.Sprintf("%s %s", strings.Repeat("#", h.level), h.text)
-		entries = append(entries, entry{idx: i, label: label})
-	}
-
-	if len(entries) == 0 {
-		return
-	}
-
-	labels := make([]string, len(entries))
-	for i, e := range entries {
-		labels[i] = e.label
-	}
-
-	ids := id.AssignIDs(labels)
-	for i, e := range entries {
-		headings[e.idx].id = ids[i]
+	for i, assigned := range id.AssignIDs(labels) {
+		headings[i].id = assigned
 	}
 }
 

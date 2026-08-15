@@ -123,7 +123,7 @@ describe("all sixteen package manifests", () => {
     }
   });
 
-  it("installs packed main and native tarballs offline and discovers the extension through Pi's loader", async () => {
+  it("installs packed main and native tarballs offline and executes the src read/edit overrides", async () => {
     const { platform, arch } = process;
     const osName = platform === "darwin" ? "darwin" : "linux";
     const archName = arch === "arm64" ? "arm64" : "x64";
@@ -132,46 +132,53 @@ describe("all sixteen package manifests", () => {
       tool: string;
       publicTool?: string;
       action: unknown;
-      assert: (details: any) => void;
+      assert: (result: any) => void;
     }> = [
       {
         tool: "src",
-        action: { action: "symbols", path: join(tmp, "smoke.go") },
-        assert: (details: any) => expect(details.symbols[0]!.name).toBe("Foo"),
+        publicTool: "read",
+        action: { path: join(tmp, "smoke.go") },
+        assert: (result: any) => expect(result.content[0].text).toContain("func Foo"),
+      },
+      {
+        tool: "src",
+        publicTool: "edit",
+        action: {
+          path: join(tmp, "smoke.go"),
+          edits: [{ oldText: "func Foo() {}", newText: "func Foo() { return 1 }" }],
+        },
+        assert: (result: any) => {
+          expect(result.details.diff).toContain("return 1");
+          expect(result.details.patch).toContain("--- a/");
+        },
       },
       {
         tool: "web",
         action: { action: "search", query: "tree-sitter" },
-        assert: (details: any) => expect(details.provider).toBe("DuckDuckGo"),
+        assert: (result: any) => expect(result.details.provider).toBe("DuckDuckGo"),
       },
       {
         tool: "project",
         action: { action: "list" },
-        assert: (details: any) => expect(details.projects.length).toBeGreaterThan(0),
+        assert: (result: any) => expect(result.details.projects.length).toBeGreaterThan(0),
       },
       {
         tool: "og",
         publicTool: "og_auth_status",
         action: { project: "ko" },
-        assert: (details: any) => expect(details.auth.ready).toBe(true),
+        assert: (result: any) => expect(result.details.auth.ready).toBe(true),
       },
     ];
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
     for (const { tool, publicTool = tool, action, assert } of smoke) {
-      // Pack the host native package from Vitest's disposable fixture
-      // workspace; repository native package directories remain untouched.
       const hostSuffix = `${osName}-${archName}`;
       const nativePkgName = `@tta-lab/pi-${tool}-${hostSuffix}`;
       const nativePkgDir = nativePackageDir(tool, hostSuffix);
       const nativeTgz = pack(nativePkgDir, nativePkgName);
       const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
 
-      // Real package-manager install: npm resolves the main tarball's optional
-      // dependencies (pinned to the packed native tarballs via overrides) and
-      // applies os/cpu selection. Peer dependencies are skipped because pi
-      // bundles them; the offline flag keeps the registry out of the test.
-      const installRoot = join(tmp, `install-${tool}`);
+      const installRoot = join(tmp, `install-${tool}-${publicTool}`);
       rmSync(installRoot, { recursive: true, force: true });
       mkdirSync(installRoot, { recursive: true });
       const overrides: Record<string, string> = {};
@@ -184,8 +191,6 @@ describe("all sixteen package manifests", () => {
         join(installRoot, "package.json"),
         JSON.stringify({ name: "smoke", private: true, overrides }),
       );
-      // Run npm from the project dir so the overrides in its package.json
-      // apply; the main tarball is referenced by its absolute path.
       execFileSync(
         "npm",
         [
@@ -202,11 +207,8 @@ describe("all sixteen package manifests", () => {
 
       const pkg = join(installRoot, "node_modules", `@tta-lab/pi-${tool}`);
       expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
-      // The host platform's native optional dependency was selected and
-      // installed with its binary; the other platforms were skipped.
       const installedNative = join(installRoot, "node_modules", nativePkgName);
       expect(existsSync(join(installedNative, "bin", tool))).toBe(true);
-      console.log("TOOL", tool, "bin ok");
       for (const [, , suffix] of TARGETS) {
         if (suffix !== hostSuffix) {
           expect(
@@ -215,13 +217,12 @@ describe("all sixteen package manifests", () => {
         }
       }
 
-      // Real Pi discovery: the package manager resolve path feeds the loader.
       const { discoverAndLoadExtensions } = await import("@earendil-works/pi-coding-agent");
-      const agentDir = join(tmp, `agent-${tool}`);
+      const agentDir = join(tmp, `agent-${tool}-${publicTool}`);
       mkdirSync(agentDir, { recursive: true });
       const loaded = await discoverAndLoadExtensions([pkg], tmp, agentDir);
       expect(loaded.errors).toEqual([]);
-      const extension = loaded.extensions.find((e) => e.tools.has(publicTool));
+      const extension = loaded.extensions.find((entry) => entry.tools.has(publicTool));
       expect(extension).toBeDefined();
       const registered = extension!.tools.get(publicTool)!;
       expect(registered.definition.name).toBe(publicTool);
@@ -229,7 +230,7 @@ describe("all sixteen package manifests", () => {
       const result = await registered.definition.execute("id", action, undefined, undefined, {
         cwd: tmp,
       } as any);
-      assert(result.details);
+      assert(result);
     }
   }, 180000);
 });
