@@ -92,13 +92,18 @@ describe("pi-og extension", () => {
     expect(Value.Check(ogCloneSchema, { url: "https://github.com/a/b", bogus: 1 })).toBe(false);
 
     expect(Value.Check(ogPrSchema, { action: "create", project: "ko", title: "t" })).toBe(true);
+    expect(Value.Check(ogPrSchema, { action: "create", project: "ko", title: "" })).toBe(false);
+    expect(Value.Check(ogPrSchema, { action: "create", project: "ko", title: "  " })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "find", project: "ko", state: "closed" })).toBe(true);
     expect(Value.Check(ogPrSchema, { action: "get", project: "ko", pr_id: 3 })).toBe(true);
     expect(Value.Check(ogPrSchema, { action: "get", project: "ko", pr_id: 0 })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "modify", project: "ko", title: "t" })).toBe(true);
+    expect(Value.Check(ogPrSchema, { action: "modify", project: "ko", title: "" })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "modify", project: "ko", body: "" })).toBe(true);
     expect(Value.Check(ogPrSchema, { action: "modify", project: "ko" })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "comment", project: "ko", body: "note" })).toBe(true);
+    expect(Value.Check(ogPrSchema, { action: "comment", project: "ko", body: "" })).toBe(false);
+    expect(Value.Check(ogPrSchema, { action: "comment", project: "ko", body: "  \t" })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "status", project: "ko" })).toBe(false);
     expect(Value.Check(ogPrSchema, { action: "get", project: "ko", bogus: 1 })).toBe(false);
 
@@ -187,7 +192,7 @@ describe("pi-og extension", () => {
 
   it("pr_find validates state and passes it through", async () => {
     const result = await call("pr", { action: "find", project: "ko", state: "closed" });
-    expect((result.details as { pr: { state: string } }).pr.state).toBe("open");
+    expect((result.details as { pr: { state: string } }).pr.state).toBe("closed");
   });
 
   it("pr_get without pr_id uses the current-branch view; with pr_id uses the index", async () => {
@@ -219,12 +224,12 @@ describe("pi-og extension", () => {
   });
 
   it("og_checks maps status, log, and failures to the existing CLI operations", async () => {
-    const status = await call("checks", { action: "status", project: "ko" });
-    expect((status.details as { pr: { index: number } }).pr.index).toBe(7);
+    const status = await call("checks", { action: "status", project: "ko", pr_id: 41 });
+    expect((status.details as { pr: { index: number } }).pr.index).toBe(41);
     expect((status.content[0] as { text: string }).text).toContain("check: pass");
-    const log = await call("checks", { action: "log", project: "ko", tail: 12 });
+    const log = await call("checks", { action: "log", project: "ko", tail: 1 });
     const details = log.details as { lines: string[] };
-    expect(details.lines.length).toBe(2);
+    expect(details.lines.length).toBe(1);
     const failures = await call("checks", { action: "failures", project: "ko" });
     expect((failures.content[0] as { text: string }).text).toContain("check: pass");
   });

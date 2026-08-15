@@ -23,6 +23,17 @@ const positivePrId = Type.Integer({
   minimum: 1,
 });
 
+const nonBlankPrTitle = Type.String({
+  description: "Non-blank pull request title",
+  minLength: 1,
+  pattern: "\\S",
+});
+const nonBlankCommentBody = Type.String({
+  description: "Non-blank pull request comment body (may be multiline)",
+  minLength: 1,
+  pattern: "\\S",
+});
+
 export const ogAuthStatusSchema = Type.Object(
   {
     project: requiredProject,
@@ -82,7 +93,7 @@ export const ogPrSchema = Type.Union([
     {
       action: StringEnum(["create"] as const, { description: "Pull request operation" }),
       project: requiredProject,
-      title: Type.String({ description: "Non-blank pull request title" }),
+      title: nonBlankPrTitle,
       body: Type.Optional(
         Type.String({ description: "Optional pull request body (may be multiline)" }),
       ),
@@ -115,7 +126,7 @@ export const ogPrSchema = Type.Union([
       action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
-      title: Type.String({ description: "Replacement pull request title" }),
+      title: nonBlankPrTitle,
       body: Type.Optional(
         Type.String({ description: "Replacement pull request body; an empty string clears it" }),
       ),
@@ -127,7 +138,7 @@ export const ogPrSchema = Type.Union([
       action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
-      title: Type.Optional(Type.String({ description: "Replacement pull request title" })),
+      title: Type.Optional(nonBlankPrTitle),
       body: Type.String({
         description: "Replacement pull request body; an empty string clears it",
       }),
@@ -139,7 +150,7 @@ export const ogPrSchema = Type.Union([
       action: StringEnum(["comment"] as const, { description: "Pull request operation" }),
       project: requiredProject,
       pr_id: Type.Optional(positivePrId),
-      body: Type.String({ description: "Non-blank pull request comment body (may be multiline)" }),
+      body: nonBlankCommentBody,
     },
     { additionalProperties: false },
   ),
@@ -267,7 +278,8 @@ const AUTH_PROMPT_GUIDELINES = [
 ];
 
 const CLONE_PROMPT_GUIDELINES = [
-  "Use og_clone with either a registered project reference or an HTTP(S) URL; project clones never accept alias or reference selectors.",
+  "Use og_clone with either a registered project reference or an HTTP(S) repository URL without embedded credentials; project clones never accept alias or reference selectors.",
+  "Never pass paths, tokens, credential environment names, or credential-bearing URLs to og_clone.",
 ];
 
 const PULL_PROMPT_GUIDELINES = [
