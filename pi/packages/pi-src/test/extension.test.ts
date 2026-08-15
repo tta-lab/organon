@@ -50,7 +50,11 @@ describe("pi-src override schemas", () => {
     const builtInRead = createReadToolDefinition(process.cwd());
     const builtInEdit = createEditToolDefinition(process.cwd());
 
-    for (const input of [{ path: "a.go" }, { path: "a.go", offset: 2, limit: 10 }]) {
+    for (const input of [
+      { path: "a.go" },
+      { path: "a.go", offset: 2, limit: 10 },
+      { path: "a.go", limit: 0 },
+    ]) {
       expect(Value.Check(builtInRead.parameters, input)).toBe(true);
       expect(Value.Check(readSchema, input)).toBe(true);
     }
@@ -178,6 +182,16 @@ describe("pi-src reads", () => {
     expect(text(window)).not.toContain("module example.com/organon");
     expect(text(window)).toContain("more lines in file");
     expect(window.details).toBeUndefined();
+  });
+
+  it("preserves an explicit zero limit as an empty selection with continuation", async () => {
+    const { path, cwd } = makeFile("one\ntwo\nthree\n", "window.txt");
+    const result = await callRead({ path, offset: 2, limit: 0 }, cwd);
+
+    expect(text(result)).not.toContain("two");
+    expect(text(result)).not.toContain("three");
+    expect(text(result)).toContain("[3 more lines in file. Use offset=2 to continue.");
+    expect(result.details).toBeUndefined();
   });
 
   it("returns an outline with display names and opaque IDs, then reads one exact symbol", async () => {

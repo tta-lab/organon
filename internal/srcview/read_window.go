@@ -40,8 +40,8 @@ type ReadWindow struct {
 
 // NewReadWindow applies one-indexed pagination and Pi's standard head
 // truncation to content. An offset of zero is the caller's omitted-offset
-// sentinel; callers validate explicit offsets before invoking this function.
-func NewReadWindow(content string, offset, limit int) (ReadWindow, error) {
+// sentinel; limitSet distinguishes an omitted limit from an explicit zero.
+func NewReadWindow(content string, offset, limit int, limitSet bool) (ReadWindow, error) {
 	lines := strings.Split(content, "\n")
 	startIndex := 0
 	if offset > 0 {
@@ -53,7 +53,7 @@ func NewReadWindow(content string, offset, limit int) (ReadWindow, error) {
 
 	selected := lines[startIndex:]
 	userLimited := false
-	if limit > 0 && limit < len(selected) {
+	if limitSet && limit < len(selected) {
 		selected = selected[:limit]
 		userLimited = true
 	}

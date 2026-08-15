@@ -110,6 +110,7 @@ if (cmd === "read") {
   const id = flag("symbol-id");
   const offset = parseInt(flag("offset") || "0", 10);
   const limit = parseInt(flag("limit") || "0", 10);
+  const hasLimit = hasFlag("limit");
   let content = source;
   let symbolId_ = undefined;
   if (id && id !== "true") {
@@ -125,7 +126,7 @@ if (cmd === "read") {
   const total_lines = sourceLines.length;
   const start_line = offset > 1 ? offset : 1;
   let selectedLines = sourceLines.slice(start_line - 1);
-  const userLimited = limit > 0 && limit < selectedLines.length;
+  const userLimited = hasLimit && limit < selectedLines.length;
   if (userLimited) selectedLines = selectedLines.slice(0, limit);
   const selected = selectedLines.join("\n");
   // Mirror Pi truncateHead's counted-line behavior; selectedLines remains

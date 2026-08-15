@@ -283,17 +283,18 @@ function assertSymbolID(input: unknown): void {
 }
 
 function appendReadWindow(args: string[], offset?: number, limit?: number): void {
+  // Pi treats zero and negative offsets as the start of the file, so omitting
+  // those values is behaviorally equivalent and keeps the CLI's one-indexed
+  // offset validation intact. A present limit is different: limit=0 selects
+  // no lines and must not be treated as an omitted limit.
   if (offset !== undefined && offset > 0) {
     const value = Math.trunc(offset);
     if (value > 0) {
       args.push("--offset", String(value));
     }
   }
-  if (limit !== undefined && limit > 0) {
-    const value = Math.trunc(limit);
-    if (value > 0) {
-      args.push("--limit", String(value));
-    }
+  if (limit !== undefined) {
+    args.push("--limit", String(Math.trunc(limit)));
   }
 }
 

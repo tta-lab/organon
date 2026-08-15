@@ -246,11 +246,12 @@ func runRead(cmd *cobra.Command, args []string) error {
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
+	limitSet := cmd.Flags().Changed("limit")
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	result, err := buildReadJSON(filename, source, symbolID, offset, limit)
+	result, err := buildReadJSON(filename, source, symbolID, offset, limit, limitSet)
 	if err != nil {
 		return err
 	}
@@ -279,19 +280,26 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
+	limitSet := cmd.Flags().Changed("limit")
 
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	result, err := buildReadJSON(filename, source, symbolID, offset, limit)
+	result, err := buildReadJSON(filename, source, symbolID, offset, limit, limitSet)
 	if err != nil {
 		return err
 	}
 	return printJSON(result)
 }
 
-func buildReadJSON(filename string, source []byte, symbolID string, offset, limit int) (readJSON, error) {
+func buildReadJSON(
+	filename string,
+	source []byte,
+	symbolID string,
+	offset, limit int,
+	limitSet bool,
+) (readJSON, error) {
 	var content string
 	if symbolID != "" {
 		if err := validateTextSource(filename, source); err != nil {
@@ -315,7 +323,7 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		}
 	}
 
-	window, err := srcview.NewReadWindow(content, offset, limit)
+	window, err := srcview.NewReadWindow(content, offset, limit, limitSet)
 	if err != nil {
 		var offsetErr *srcview.OffsetOutOfRangeError
 		if errors.As(err, &offsetErr) {
