@@ -44,14 +44,14 @@ const builtInEditParameters = { ...builtInEdit.parameters, additionalProperties:
 
 const pathDescription = "Path to the file (absolute, or relative to the current working directory)";
 const symbolIdDescription =
-  "Exact opaque symbol or Markdown section ID returned by read with symbols: true; never a display name.";
+  "Exact opaque symbol or Markdown section ID returned by read with symbols: true; use symbol_id, not symbol or a display name.";
 const symbolId = Type.String({ description: symbolIdDescription, minLength: 1 });
 
 const symbolsReadSchema = Type.Object(
   {
     path: Type.String({ description: pathDescription }),
     symbols: Type.Boolean({
-      description: "Return the current symbol or Markdown section outline",
+      description: "Return the file's current symbol or Markdown section outline",
       enum: [true],
     }),
   },
@@ -203,17 +203,22 @@ interface EditBatchResult {
   edits_applied: number;
 }
 
+const READ_PROMPT_SNIPPET =
+  "For symbol navigation, use read({ path, symbols: true }) first, then read({ path, symbol_id: id })";
+const EDIT_PROMPT_SNIPPET =
+  "Use edit({ path, operation: 'replace', symbol_id: id, content }) for symbol replacement or edit({ path, edits: [{ oldText, newText }] }) for exact text";
+
 const READ_PROMPT_GUIDELINES = [
   "Prefer read's symbol-aware navigation for structured source and Markdown when the exact text is not already known.",
-  "Use read with symbols: true to obtain the current outline, then copy the exact opaque symbol_id; never use a display name or guess an ID.",
+  "For symbol navigation, get the outline first, then use its returned opaque ID as symbol_id; never use symbol or a display name.",
   "Refresh read's symbol outline after a structural edit before another symbol-scoped read because IDs may have changed.",
 ];
 
 const EDIT_PROMPT_GUIDELINES = [
   "Prefer edit's symbol-aware operations for structured source and Markdown when the exact original text is not already known.",
-  "Before a symbol-scoped edit, call read with symbols: true and copy the exact opaque symbol_id; never use a display name or guess an ID.",
+  "Before a symbol-scoped edit, get the outline with read's symbols form and copy its returned opaque ID into symbol_id; never use symbol or a display name.",
   "Refresh read's symbol outline after a structural edit before another symbol-scoped operation because IDs may have changed.",
-  "Use edit's normal exact edits form directly when the original text is already known; it does not require symbol discovery.",
+  "Keep symbol replacement and exact-text replacement distinct: the former uses operation, symbol_id, and content; the latter uses edits[] with oldText and newText.",
   "For multiple disjoint exact replacements in one file, use one edit call with multiple entries in edits[].",
 ];
 
@@ -502,8 +507,8 @@ export function readTool() {
     label: builtInRead.label,
     description:
       `${builtInRead.description} ` +
-      "It also supports symbols: true for an outline and symbol_id for one exact symbol or Markdown section.",
-    promptSnippet: builtInRead.promptSnippet,
+      "It also supports an outline-first symbol workflow: use symbols: true, then the returned opaque ID as symbol_id (not symbol) to read one exact symbol or Markdown section.",
+    promptSnippet: [builtInRead.promptSnippet, READ_PROMPT_SNIPPET].filter(Boolean).join("; "),
     promptGuidelines: [...(builtInRead.promptGuidelines ?? []), ...READ_PROMPT_GUIDELINES],
     parameters: readSchema,
     async execute(
@@ -530,8 +535,8 @@ export function editTool() {
     label: builtInEdit.label,
     description:
       `${builtInEdit.description} ` +
-      "It also supports replace, insert, delete, and comment operations against exact opaque symbol or Markdown section IDs.",
-    promptSnippet: builtInEdit.promptSnippet,
+      "It also supports replace, insert, delete, and comment operations against exact opaque symbol or Markdown section IDs. Symbol replacement uses operation, symbol_id, and content; exact text uses edits[] entries with oldText and newText.",
+    promptSnippet: [builtInEdit.promptSnippet, EDIT_PROMPT_SNIPPET].filter(Boolean).join("; "),
     promptGuidelines: [...(builtInEdit.promptGuidelines ?? []), ...EDIT_PROMPT_GUIDELINES],
     parameters: editSchema,
     // Let Pi's installed edit compatibility shim normalize familiar exact forms
