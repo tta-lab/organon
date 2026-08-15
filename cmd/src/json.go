@@ -60,16 +60,19 @@ func printJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
 
-// mutationJSON is the machine-readable result of a symbol mutation. Its
-// change fields intentionally match the batch edit result so both mutation
-// families have the same Pi-facing contract.
+// mutationJSON is the machine-readable result of a mutation. Symbol
+// mutations include the resulting outline; exact-text mutations leave it
+// omitted so their existing result contract is unchanged. Change fields
+// intentionally match the batch edit result so both mutation families have the
+// same Pi-facing contract.
 type mutationJSON struct {
-	Path             string `json:"path"`
-	Action           string `json:"action"`
-	SymbolID         string `json:"symbol_id,omitempty"`
-	Diff             string `json:"diff"`
-	Patch            string `json:"patch"`
-	FirstChangedLine int    `json:"first_changed_line,omitempty"`
+	Path             string             `json:"path"`
+	Action           string             `json:"action"`
+	SymbolID         string             `json:"symbol_id,omitempty"`
+	Diff             string             `json:"diff"`
+	Patch            string             `json:"patch"`
+	FirstChangedLine int                `json:"first_changed_line,omitempty"`
+	Outline          *symbolOutlineJSON `json:"outline,omitempty"`
 }
 
 // commentJSON is the machine-readable result of a comment read.
@@ -167,9 +170,22 @@ func targetID(afterID, beforeID string) string {
 	return beforeID
 }
 
-// writeMutationJSON writes the result to disk and prints the same display diff,
-// unified patch, and first-changed-line description used by batch edits.
+// writeMutationJSON writes a symbol mutation result to disk and prints the
+// same display diff, unified patch, and first-changed-line description used by
+// batch edits, plus the typed outline of the resulting content.
 func writeMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	return writeMutationJSONWithOutline(filename, action, symbolID, source, result, true)
+}
+
+// writeExactMutationJSON preserves the existing JSON result for exact-text
+// edits, which intentionally do not report a symbol outline.
+func writeExactMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	return writeMutationJSONWithOutline(filename, action, symbolID, source, result, false)
+}
+
+func writeMutationJSONWithOutline(
+	filename, action, symbolID string, source, result []byte, includeOutline bool,
+) error {
 	description, err := srcop.DescribeChange(filename, source, result)
 	if err != nil {
 		return err
@@ -177,11 +193,23 @@ func writeMutationJSON(filename, action, symbolID string, source, result []byte)
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
 	}
-	return printJSON(mutationJSON{
+
+	output := mutationJSON{
 		Path: filename, Action: action, SymbolID: symbolID,
 		Diff: description.Diff, Patch: description.Patch,
 		FirstChangedLine: description.FirstChangedLine,
-	})
+	}
+	if includeOutline {
+		outline, err := buildSymbolOutlineJSON(filename, result, true)
+		if err != nil {
+			return fmt.Errorf("edit applied to %s, but post-edit outline reporting failed: %w", filename, err)
+		}
+		output.Outline = &outline
+	}
+	if err := printJSON(output); err != nil {
+		return fmt.Errorf("edit applied to %s, but mutation result reporting failed: %w", filename, err)
+	}
+	return nil
 }
 
 // runSymbols dispatches between the human outline and the JSON outline; human
@@ -207,6 +235,33 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// buildSymbolOutlineJSON constructs the typed outline payload shared by the
+// symbols command and post-mutation results. Post-edit reporting allows an
+// empty supported-source outline; the standalone symbols command preserves its
+// existing no-structure error.
+func buildSymbolOutlineJSON(filename string, source []byte, allowEmpty bool) (symbolOutlineJSON, error) {
+	inspector := srcview.NewInspector(filename, source, 2)
+	var (
+		outline srcview.Outline
+		err     error
+	)
+	if allowEmpty {
+		outline, err = inspector.OutlineAllowEmpty()
+	} else {
+		outline, err = inspector.Outline()
+	}
+	if err != nil {
+		return symbolOutlineJSON{}, err
+	}
+	if outline.Symbols == nil {
+		outline.Symbols = make([]srcview.Symbol, 0)
+	}
+	return symbolOutlineJSON{
+		Path: filename, Language: outline.Language, Title: outline.Title,
+		TotalBytes: len(source), Symbols: outline.Symbols,
+	}, nil
+}
+
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
 // fixed depth of 2 so every later symbol operation resolves IDs from the same
 // outline shape.
@@ -219,14 +274,11 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 	if err := validateTextSource(filename, source); err != nil {
 		return err
 	}
-	outline, err := srcview.NewInspector(filename, source, 2).Outline()
+	outline, err := buildSymbolOutlineJSON(filename, source, false)
 	if err != nil {
 		return err
 	}
-	return printJSON(symbolOutlineJSON{
-		Path: filename, Language: outline.Language, Title: outline.Title,
-		TotalBytes: len(source), Symbols: outline.Symbols,
-	})
+	return printJSON(outline)
 }
 
 // runRead dispatches between the human read and the JSON read; human output

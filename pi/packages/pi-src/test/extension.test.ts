@@ -327,23 +327,22 @@ describe("pi-src edits", () => {
     expect(readFileSync(path, "utf8")).toBe(SAMPLE);
   });
 
-  it("maps all symbol operations through edit and returns built-in edit details", async () => {
+  it("continues all symbol operations from each returned post-edit outline", async () => {
     const { path, cwd } = makeFile(SAMPLE);
-    const outline = async () => {
-      const result = await callRead({ path, symbols: true }, cwd);
-      return text(result);
-    };
-
-    let current = await outline();
-    const foo = current.match(/- \[([^\]]+)\] function Foo/)![1]!;
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const foo = initial.match(/- \[([^\]]+)\] function Foo/)![1]!;
     let result = await callEdit(
       { path, operation: "replace", symbol_id: foo, content: "func Foo() {\n\treturn 99\n}" },
       cwd,
     );
+    expect(text(result)).toContain(`Applied replace ${foo} to ${path}.`);
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("function Foo");
+    expect(detailsKeys(result.details)).toEqual(["diff", "firstChangedLine", "patch"]);
     expect((result.details as EditToolDetails).patch).toContain("--- a/");
     expect(readFileSync(path, "utf8")).toContain("return 99");
 
-    current = await outline();
+    let current = text(result);
     const bar = current.match(/- \[([^\]]+)\] function Bar/)![1]!;
     result = await callEdit(
       {
@@ -355,22 +354,79 @@ describe("pi-src edits", () => {
       },
       cwd,
     );
+    expect(text(result)).toContain("function Before");
     expect((result.details as EditToolDetails).diff).toContain("Before");
 
-    current = await outline();
+    current = text(result);
     const before = current.match(/- \[([^\]]+)\] function Before/)![1]!;
     result = await callEdit(
       { path, operation: "comment", symbol_id: before, content: "Before docs." },
       cwd,
     );
+    expect(text(result)).toContain("function Before");
     expect((result.details as EditToolDetails).firstChangedLine).toBe(1);
     expect(readFileSync(path, "utf8")).toContain("Before docs.");
 
-    current = await outline();
+    current = text(result);
     const barAfterInsert = current.match(/- \[([^\]]+)\] function Bar/)![1]!;
     result = await callEdit({ path, operation: "delete", symbol_id: barAfterInsert }, cwd);
+    expect(text(result)).not.toContain("function Bar");
     expect((result.details as EditToolDetails).patch).toContain("--- a/");
     expect(readFileSync(path, "utf8")).not.toContain("func Bar");
+  });
+
+  it("returns a typed post-edit outline for Markdown heading sections", async () => {
+    const { path, cwd } = makeFile(
+      "# Guide\n\n## Setup\n\nInstall it.\n\n## Other\n\nKeep this.\n",
+      "guide.md",
+    );
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const setup = initial.match(/- \[([^\]]+)\] section Setup/)![1]!;
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: setup, content: "## Setup\n\nUse it." },
+      cwd,
+    );
+
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("(markdown)");
+    expect(text(result)).toContain("section Setup");
+    expect((result.details as EditToolDetails).diff).toContain("Use it.");
+  });
+
+  it("reports an empty post-edit outline when the last symbol is deleted", async () => {
+    const { path, cwd } = makeFile("package sample\n\nfunc Foo() {\n}\n");
+    const initial = text(await callRead({ path, symbols: true }, cwd));
+    const foo = initial.match(/- \[([^\]]+)\] function Foo/)![1]!;
+    const result = await callEdit({ path, operation: "delete", symbol_id: foo }, cwd);
+
+    expect(text(result)).toContain("Applied delete");
+    expect(text(result)).toContain("Post-edit outline:");
+    expect(text(result)).toContain("No symbols found.");
+    expect((result.details as EditToolDetails).patch).toContain("--- a/");
+  });
+
+  it("keeps mutation confirmation visible when the returned outline is truncated", async () => {
+    const { path, cwd } = makeFile(
+      "package sample\n\n" +
+        Array.from({ length: 2200 }, (_, index) => `func F${index}() {\n}\n`).join("\n"),
+    );
+    const result = await callEdit(
+      { path, operation: "replace", symbol_id: "0", content: "func F0() {\n}\n" },
+      cwd,
+    );
+    const output = text(result);
+    const fullOutputPath = output.match(/Full output saved to: (.+)\]/)?.[1];
+
+    try {
+      expect(output).toContain("Applied replace 0");
+      expect(output).toContain("Post-edit outline:");
+      expect(output).toContain("Truncated");
+      expect(output).toContain("needed entry was omitted");
+      expect(fullOutputPath).toBeTruthy();
+      expect(detailsKeys(result.details)).toEqual(["diff", "firstChangedLine", "patch"]);
+    } finally {
+      if (fullOutputPath) rmSync(dirname(fullOutputPath), { recursive: true, force: true });
+    }
   });
 
   it("rejects the removed comment-read form", () => {

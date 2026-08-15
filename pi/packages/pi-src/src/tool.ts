@@ -193,6 +193,7 @@ interface MutationResult {
   diff: string;
   patch: string;
   first_changed_line?: number;
+  outline: SymbolsResult;
 }
 
 interface EditBatchResult {
@@ -204,22 +205,25 @@ interface EditBatchResult {
 }
 
 const READ_PROMPT_SNIPPET =
-  "For symbol navigation, use read({ path, symbols: true }) first, then read({ path, symbol_id: id })";
+  "For source symbols and Markdown heading sections, use read({ path, symbols: true }) first, then read({ path, symbol_id: id })";
 const EDIT_PROMPT_SNIPPET =
-  "Use edit({ path, operation: 'replace', symbol_id: id, content }) for symbol replacement or edit({ path, edits: [{ oldText, newText }] }) for exact text";
+  "Use edit({ path, operation: 'replace', symbol_id: id, content }) for source symbols or Markdown sections, or edit({ path, edits: [{ oldText, newText }] }) for exact text";
 
 const READ_PROMPT_GUIDELINES = [
   "Prefer read's symbol-aware navigation for structured source and Markdown when the exact text is not already known.",
-  "For symbol navigation, get the outline first, then use its returned opaque ID as symbol_id; never use symbol or a display name.",
-  "Refresh read's symbol outline after a structural edit before another symbol-scoped read because IDs may have changed.",
+  "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow: get the outline first, then copy its exact returned ID; never use symbol or a display name.",
+  "A symbol-scoped read uses the returned symbol_id for either a source symbol or a Markdown heading section.",
+  "Continue from a post-edit outline returned by edit; request read with symbols: true again only when another edit may have made IDs stale or the needed entry was omitted.",
 ];
 
 const EDIT_PROMPT_GUIDELINES = [
   "Prefer edit's symbol-aware operations for structured source and Markdown when the exact original text is not already known.",
-  "Before a symbol-scoped edit, get the outline with read's symbols form and copy its returned opaque ID into symbol_id; never use symbol or a display name.",
-  "Refresh read's symbol outline after a structural edit before another symbol-scoped operation because IDs may have changed.",
+  "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow for symbol-scoped read, replace, insert, and delete; source comment operations use that same opaque symbol_id form for documentation.",
+  "Before the first symbol-scoped edit, get the outline with read's symbols form and copy its exact opaque ID into symbol_id; never use symbol or a display name.",
+  "After a symbol mutation, continue from the post-edit outline returned in that edit result instead of making a redundant outline read; refresh only when a later edit may have made IDs stale or truncation omitted the needed entry.",
   "Keep symbol replacement and exact-text replacement distinct: the former uses operation, symbol_id, and content; the latter uses edits[] with oldText and newText.",
-  "For multiple disjoint exact replacements in one file, use one edit call with multiple entries in edits[].",
+  "Use normal exact edit directly when the original text is already known; a later exact edit may make previously returned symbol IDs stale.",
+  "For multiple disjoint exact replacements, use one edit call with multiple entries in edits[].",
 ];
 
 const MAX_READ_BYTES = 50 * 1024;
@@ -413,18 +417,25 @@ function readTextResult(text: string, truncation?: TruncationResult): ReadExecut
   };
 }
 
-async function renderSymbols(data: SymbolsResult): Promise<ReadExecutionResult> {
+const OUTLINE_TRUNCATION_HINT =
+  "Continue from this outline; use read with symbols: true again only when another edit may have made IDs stale or a needed entry was omitted.";
+
+function renderOutlineText(data: SymbolsResult): string {
   const lines = data.symbols.map(
     (symbol) =>
       `- [${symbol.id}] ${symbol.kind} ${symbol.name}${symbol.parent ? ` (parent: ${symbol.parent})` : ""} [L${symbol.start_line}-L${symbol.end_line}]${symbol.has_doc ? " (doc)" : ""}`,
   );
-  const text =
-    lines.length === 0
-      ? "No symbols found."
-      : `${data.path} (${data.language}):\n` + lines.join("\n");
-  const model = await truncateForModel(text, {
-    hint: "Use read with symbols: true again only when you need the current outline.",
-  });
+  return lines.length === 0
+    ? "No symbols found."
+    : `${data.path} (${data.language}):\n` + lines.join("\n");
+}
+
+async function renderOutline(data: SymbolsResult) {
+  return truncateForModel(renderOutlineText(data), { hint: OUTLINE_TRUNCATION_HINT });
+}
+
+async function renderSymbols(data: SymbolsResult): Promise<ReadExecutionResult> {
+  const model = await renderOutline(data);
   return readTextResult(model.text, model.truncation);
 }
 
@@ -445,7 +456,7 @@ function editDetails(
   return details;
 }
 
-function renderEdit(input: EditInput, stdout: string): EditExecutionResult {
+async function renderEdit(input: EditInput, stdout: string): Promise<EditExecutionResult> {
   if (!isSymbolEdit(input)) {
     const data = parseSingleJsonDoc<EditBatchResult>(stdout);
     return {
@@ -461,8 +472,16 @@ function renderEdit(input: EditInput, stdout: string): EditExecutionResult {
 
   const data = parseSingleJsonDoc<MutationResult>(stdout);
   const label = data.symbol_id ? `${data.action} ${data.symbol_id}` : data.action;
+  const outline = await renderOutline(data.outline);
   return {
-    content: [{ type: "text", text: `Applied ${label} to ${data.path}.` }],
+    // Truncate only the outline portion so the success confirmation is always
+    // visible; diff and patch remain in the built-in-compatible details.
+    content: [
+      {
+        type: "text",
+        text: `Applied ${label} to ${data.path}.\n\nPost-edit outline:\n${outline.text}`,
+      },
+    ],
     details: editDetails(data),
   };
 }

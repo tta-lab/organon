@@ -28,6 +28,15 @@ func newDeleteCmd() *cobra.Command {
 	return cmd
 }
 
+func newInsertCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "insert", Args: cobra.ExactArgs(1), RunE: runInsert}
+	cmd.Flags().String("after", "", "")
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().Bool("json", false, "")
+	cmd.PersistentFlags().Int("depth", 2, "")
+	return cmd
+}
+
 func newCommentCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "comment", Args: cobra.ExactArgs(1), RunE: runComment}
 	cmd.Flags().String("symbol-id", "", "")
@@ -79,10 +88,36 @@ func TestReplaceJSONReturnsDiffAndWrites(t *testing.T) {
 		assert.Contains(t, out.Diff, "-4 \treturn 1")
 		assert.Contains(t, out.Diff, "+4 \treturn 2")
 		assert.Equal(t, 4, out.FirstChangedLine)
+		require.NotNil(t, out.Outline)
+		assert.Equal(t, f, out.Outline.Path)
+		assert.Equal(t, "go", out.Outline.Language)
+		assert.Contains(t, outlineNames(out.Outline), "Foo")
 	})
 	result, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "return 2")
+}
+
+func TestInsertJSONReturnsPostEditOutline(t *testing.T) {
+	f := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	outline := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{f}))
+	}))
+	require.Len(t, outline.Symbols, 1)
+
+	cmd := newInsertCmd()
+	require.NoError(t, cmd.Flags().Set("after", outline.Symbols[0].ID))
+	require.NoError(t, cmd.Flags().Set("json", "true"))
+	pipeStdin(t, []byte("func Bar() {}\n"), func() {
+		var out mutationJSON
+		require.NoError(t, json.Unmarshal([]byte(captureJSON(t, func() {
+			require.NoError(t, runInsert(cmd, []string{f}))
+		})), &out))
+		assert.Equal(t, "insert", out.Action)
+		require.NotNil(t, out.Outline)
+		assert.Contains(t, outlineNames(out.Outline), "Foo")
+		assert.Contains(t, outlineNames(out.Outline), "Bar")
+	})
 }
 
 func TestDeleteJSONReturnsDiff(t *testing.T) {
@@ -105,6 +140,9 @@ func TestDeleteJSONReturnsDiff(t *testing.T) {
 	})), &out))
 	assert.Equal(t, "delete", out.Action)
 	assert.Contains(t, out.Diff, "-3 func Foo()")
+	require.NotNil(t, out.Outline)
+	assert.NotContains(t, outlineNames(out.Outline), "Foo")
+	assert.Contains(t, outlineNames(out.Outline), "Bar")
 	result, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.NotContains(t, string(result), "func Foo()")
@@ -141,11 +179,103 @@ func TestCommentJSONReadAndWrite(t *testing.T) {
 			require.NoError(t, runComment(writeCmd, []string{f}))
 		})), &out))
 		assert.Equal(t, "comment", out.Action)
+		require.NotNil(t, out.Outline)
+		assert.Contains(t, outlineNames(out.Outline), "Foo")
 	})
 	result, err := os.ReadFile(f)
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "New docs.")
 	assert.NotContains(t, string(result), "Old docs.")
+}
+
+func outlineNames(outline *symbolOutlineJSON) []string {
+	names := make([]string, 0, len(outline.Symbols))
+	for _, symbol := range outline.Symbols {
+		names = append(names, symbol.Name)
+	}
+	return names
+}
+
+func TestMarkdownSymbolMutationJSONReturnsPostEditOutline(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "guide.md")
+	original := []byte("# Guide\n\n## Setup\n\nInstall it.\n\n## Other\n\nKeep this.\n")
+	require.NoError(t, os.WriteFile(filename, original, 0o644))
+	sectionID := resolveID(t, original, "Setup")
+
+	cmd := newReplaceCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", sectionID))
+	require.NoError(t, cmd.Flags().Set("json", "true"))
+	pipeStdin(t, []byte("## Setup\n\nInstall the tool.\n"), func() {
+		var out mutationJSON
+		require.NoError(t, json.Unmarshal([]byte(captureJSON(t, func() {
+			require.NoError(t, runReplace(cmd, []string{filename}))
+		})), &out))
+		require.NotNil(t, out.Outline)
+		assert.Equal(t, "markdown", out.Outline.Language)
+		assert.Equal(t, "Guide", out.Outline.Title)
+		assert.Contains(t, outlineNames(out.Outline), "Setup")
+		assert.Contains(t, outlineNames(out.Outline), "Other")
+	})
+}
+
+func TestDeleteLastSymbolJSONReturnsEmptyPostEditOutline(t *testing.T) {
+	filename := writeGoFile(t, "package sample\n\nfunc Foo() {}\n")
+	outline := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{filename}))
+	}))
+	require.Len(t, outline.Symbols, 1)
+
+	cmd := newDeleteCmd()
+	require.NoError(t, cmd.Flags().Set("symbol-id", outline.Symbols[0].ID))
+	require.NoError(t, cmd.Flags().Set("json", "true"))
+	var raw map[string]any
+	stdout := captureJSON(t, func() {
+		require.NoError(t, runDelete(cmd, []string{filename}))
+	})
+	require.NoError(t, json.Unmarshal([]byte(stdout), &raw))
+	outlineRaw, ok := raw["outline"].(map[string]any)
+	require.True(t, ok)
+	assert.NotNil(t, outlineRaw["symbols"], "empty outlines must encode symbols as []")
+
+	var out mutationJSON
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	require.NotNil(t, out.Outline)
+	assert.Equal(t, "go", out.Outline.Language)
+	assert.Empty(t, out.Outline.Symbols)
+}
+
+func TestSymbolMutationReportingErrorStatesApplied(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "notes.env")
+	old := []byte("old\n")
+	updated := []byte("new\n")
+	require.NoError(t, os.WriteFile(filename, old, 0o644))
+
+	err := writeMutationJSON(filename, "replace", "bK", old, updated)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "edit applied")
+	result, readErr := os.ReadFile(filename)
+	require.NoError(t, readErr)
+	assert.Equal(t, updated, result)
+}
+
+func TestExactMutationJSONOmitsPostEditOutline(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "notes.txt")
+	old := []byte("old\n")
+	updated := []byte("new\n")
+	require.NoError(t, os.WriteFile(filename, old, 0o644))
+
+	var fields map[string]any
+	stdout := captureJSON(t, func() {
+		require.NoError(t, writeExactMutationJSON(filename, "edit", "", old, updated))
+	})
+	require.NoError(t, json.Unmarshal([]byte(stdout), &fields))
+	assert.NotContains(t, fields, "outline")
+	result, err := os.ReadFile(filename)
+	require.NoError(t, err)
+	assert.Equal(t, updated, result)
 }
 
 func TestEditBatchJSONAppliesAtomically(t *testing.T) {

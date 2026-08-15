@@ -527,7 +527,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if jsonOut {
-		return writeMutationJSON(filename, "edit", "", source, result.Content)
+		return writeExactMutationJSON(filename, "edit", "", source, result.Content)
 	}
 
 	printDisclosure(os.Stderr, result)
@@ -591,7 +591,7 @@ func runEditScopedJSON(cmd *cobra.Command, filename string, source, input []byte
 	final = append(final, source[:start]...)
 	final = append(final, result.Content...)
 	final = append(final, source[end:]...)
-	return writeMutationJSON(filename, "edit", sectionID, source, final)
+	return writeExactMutationJSON(filename, "edit", sectionID, source, final)
 }
 
 // runEditWithFiles handles the --before-file/--after-file edit path.

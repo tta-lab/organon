@@ -66,10 +66,12 @@ accepts these closed object forms:
 {"path":"main.go","symbol_id":"bK","offset":1,"limit":40}
 ```
 
-The first returns the current outline. The second reads exactly one symbol or
-Markdown section, with offset and limit relative to that selected content.
-Outline results do not accept pagination fields. Symbol IDs are opaque and must
-come from the latest outline; a display name is never a valid ID.
+The first returns the current outline. The second reads exactly one source
+symbol or Markdown heading section, with offset and limit relative to that
+selected content. Source symbols and Markdown heading sections use the same
+outline → opaque `symbol_id` workflow. Outline results do not accept pagination
+fields. IDs are opaque and must come from the latest outline; a display name is
+never a valid ID.
 
 ### `edit` capability forms
 
@@ -97,12 +99,18 @@ discovery is not required. For structure-aware edits, first call `read` with
 {"path":"main.go","operation":"comment","symbol_id":"bK","content":"Handles requests."}
 ```
 
-Structural edits refresh the file's outline before another symbol operation;
-IDs can change after a mutation. Combine disjoint exact replacements in one
-`edit` call. Symbol mutation results use Pi's built-in-compatible edit details:
-display diff, unified patch, and optional first changed line. Added symbol forms
-may not have a pre-execution exact-text preview, but the inherited edit renderer
-can render their returned diff normally.
+Source symbols and Markdown heading sections use the same opaque-ID workflow
+for symbol-scoped `read`, `replace`, `insert`, and `delete`; source comment
+operations use that same `symbol_id` form for documentation. Each
+successful symbol mutation returns the typed current post-edit outline in the
+same result, including an empty outline when no symbols remain. Continue from
+that returned outline instead of making a redundant outline read; refresh only
+when a later edit may have made IDs stale or truncation omitted the needed
+entry. Combine disjoint exact replacements in one `edit` call. Symbol mutation
+results use Pi's built-in-compatible edit details: display diff, unified patch,
+and optional first changed line. Added symbol forms may not have a
+pre-execution exact-text preview, but the inherited edit renderer can render
+their returned diff normally.
 
 All paths are absolute or relative to Pi's invocation working directory and
 retain leading-`@` normalization. The `src` CLI remains available as the public
