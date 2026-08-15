@@ -23,7 +23,9 @@ const positional = args.filter((_, i) => !consumed.has(i));
 const rawProject = flags.get("project") ?? "";
 const project = rawProject === "flick-backend" ? "fb" : rawProject;
 const prId = flags.get("pr-id");
-const fail = flags.get("fail") === "true";
+const requestedState = flags.get("state") ?? "open";
+const requestedTail = flags.get("tail") === undefined ? undefined : parseInt(flags.get("tail"), 10);
+const fail = flags.get("fail") === "true" || project === "failure";
 
 const bigOutput = project === "large";
 const BIG_LINES = bigOutput
@@ -32,7 +34,7 @@ const BIG_LINES = bigOutput
 const PR = {
   index: prId ? parseInt(prId, 10) : 7,
   title: "feat: guarded change",
-  state: "open",
+  state: requestedState,
   merged: false,
   url: "https://github.com/tta-lab/repo/pull/7",
   head: "feature/x",
@@ -85,7 +87,8 @@ if (
   cmd.startsWith("clone") &&
   flags.get("alias") &&
   positional[1] &&
-  positional[1] !== "undefined"
+  positional[1] !== "undefined" &&
+  !/^https?:\/\//.test(positional[1])
 ) {
   process.stderr.write("Error: project clone does not accept --alias or --reference\n");
   process.exit(1);
@@ -110,6 +113,7 @@ if (cmd.startsWith("auth status")) {
     JSON.stringify({
       project,
       message: bigOutput ? BIG_LINES.join("\n") : cmd.split(" ")[0] + " completed",
+      force_with_lease: flags.get("force") === "true",
     }) + "\n",
   );
 } else if (cmd.startsWith("clone")) {
@@ -165,7 +169,13 @@ if (cmd.startsWith("auth status")) {
   cmd.startsWith("pr log") ||
   cmd.startsWith("pr failures")
 ) {
-  process.stdout.write(JSON.stringify({ project, pr: PR, lines: BIG_LINES }) + "\n");
+  const lines =
+    requestedTail === undefined
+      ? BIG_LINES
+      : requestedTail === 0
+        ? []
+        : BIG_LINES.slice(-requestedTail);
+  process.stdout.write(JSON.stringify({ project, pr: PR, lines }) + "\n");
 } else {
   process.stderr.write("Error: unknown command " + cmd + "\n");
   process.exit(2);

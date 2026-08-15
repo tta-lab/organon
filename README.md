@@ -321,14 +321,16 @@ changing `og.toml`; restart web MCP after changing web configuration. Run
 
 Pi reaches Organon through four independently installable extension packages
 (`@tta-lab/pi-src`, `@tta-lab/pi-web`, `@tta-lab/pi-project`, `@tta-lab/pi-og`)
-instead of MCP configuration. Each registers one global tool backed by a
-platform-matched native binary and carries its own npm release. `pi-src`
-replaces Pi's built-in `read` and `edit` with symbol-aware operations and exact
-multi-edit batches; the `web`, `project`, and `og` tools preserve the MCP domain
-behavior over a local subprocess. See [`pi/README.md`](pi/README.md) for
-installation, supported platforms, the `src` takeover behavior, and the opaque
-symbol-ID rules. The `web`, `project`, `og`, and `skill` MCP servers remain for
-non-Pi clients; the project-scoped `src` MCP server is removed.
+instead of MCP configuration. Each carries a platform-matched native binary
+and its own npm release. `pi-src` replaces Pi's built-in `read` and `edit` with
+symbol-aware operations and exact multi-edit batches; `pi-web` and
+`pi-project` each register one tool, while `pi-og` registers
+`og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks`.
+All six OG tools preserve the MCP domain behavior over a local subprocess. See
+[`pi/README.md`](pi/README.md) for installation, supported platforms, the `src`
+takeover behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
+and `skill` MCP servers remain for non-Pi clients; the project-scoped `src` MCP
+server is removed.
 
 ## Why
 

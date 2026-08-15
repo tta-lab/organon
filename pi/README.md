@@ -2,16 +2,16 @@
 
 Four independently installable [Pi](https://pi.dev) extension packages give Pi
 native access to Organon capabilities without MCP configuration. Each package
-registers exactly one global tool and carries a matching native Go binary for
-your platform, so installing the npm package is sufficient on a supported
-host.
+carries a matching native Go binary for your platform, so installing the npm
+package is sufficient on a supported host. `pi-src`, `pi-web`, and `pi-project`
+each register one global tool; `pi-og` registers six capability-oriented tools.
 
-| Package               | Tool      | Capability                                                                                       |
-| --------------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| `@tta-lab/pi-src`     | `src`     | Structure-aware file reading and editing (replaces Pi's built-in `read` and `edit` while active) |
-| `@tta-lab/pi-web`     | `web`     | Web search, page fetch, library documentation, Sourcegraph code search                           |
-| `@tta-lab/pi-project` | `project` | List, find, and get registered projects                                                          |
-| `@tta-lab/pi-og`      | `og`      | Guarded Git and forge operations through the package-local og binary                             |
+| Package               | Tool                                                                     | Capability                                                                                       |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `@tta-lab/pi-src`     | `src`                                                                    | Structure-aware file reading and editing (replaces Pi's built-in `read` and `edit` while active) |
+| `@tta-lab/pi-web`     | `web`                                                                    | Web search, page fetch, library documentation, Sourcegraph code search                           |
+| `@tta-lab/pi-project` | `project`                                                                | List, find, and get registered projects                                                          |
+| `@tta-lab/pi-og`      | `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary                             |
 
 ## Install
 
@@ -70,8 +70,9 @@ single write (BOM and line endings preserved).
 
 The `web`, `project`, `og`, and `skill` MCP servers continue to serve non-Pi
 clients and are unchanged. Pi users who install the matching `web`, `project`,
-`og`, or `src` extension should remove that capability's duplicate MCP server
-configuration from Pi, so it exposes one native tool per capability. The old
+`pi-og`, or `src` extension should remove that capability's duplicate MCP
+server configuration from Pi, so it exposes native capability tools without
+transport duplicates. The old
 project-scoped `src` MCP server has been removed: Pi uses the local-path `src`
 extension instead, and CLI users use the normal `src` command. If you previously
 configured `organon-src` in an MCP client, remove that server entry.

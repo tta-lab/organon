@@ -130,6 +130,7 @@ describe("all sixteen package manifests", () => {
 
     const smoke: Array<{
       tool: string;
+      publicTool?: string;
       action: unknown;
       assert: (details: any) => void;
     }> = [
@@ -150,13 +151,14 @@ describe("all sixteen package manifests", () => {
       },
       {
         tool: "og",
-        action: { action: "auth_status", project: "ko" },
+        publicTool: "og_auth_status",
+        action: { project: "ko" },
         assert: (details: any) => expect(details.auth.ready).toBe(true),
       },
     ];
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
-    for (const { tool, action, assert } of smoke) {
+    for (const { tool, publicTool = tool, action, assert } of smoke) {
       // Pack the host native package from Vitest's disposable fixture
       // workspace; repository native package directories remain untouched.
       const hostSuffix = `${osName}-${archName}`;
@@ -219,10 +221,10 @@ describe("all sixteen package manifests", () => {
       mkdirSync(agentDir, { recursive: true });
       const loaded = await discoverAndLoadExtensions([pkg], tmp, agentDir);
       expect(loaded.errors).toEqual([]);
-      const extension = loaded.extensions.find((e) => e.tools.has(tool));
+      const extension = loaded.extensions.find((e) => e.tools.has(publicTool));
       expect(extension).toBeDefined();
-      const registered = extension!.tools.get(tool)!;
-      expect(registered.definition.name).toBe(tool);
+      const registered = extension!.tools.get(publicTool)!;
+      expect(registered.definition.name).toBe(publicTool);
 
       const result = await registered.definition.execute("id", action, undefined, undefined, {
         cwd: tmp,

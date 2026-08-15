@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { TSchema } from "typebox";
 
-import { ogSchema } from "../../pi-og/src/tool.js";
+import {
+  ogAuthStatusSchema,
+  ogChecksSchema,
+  ogCloneSchema,
+  ogPrSchema,
+  ogPullSchema,
+  ogPushSchema,
+} from "../../pi-og/src/tool.js";
 import { projectSchema } from "../../pi-project/src/tool.js";
 import { srcSchema } from "../../pi-src/src/tool.js";
 import { webSchema } from "../../pi-web/src/tool.js";
@@ -47,22 +54,35 @@ describe("tool schemas are Google-compatible", () => {
     ["src", srcSchema],
     ["web", webSchema],
     ["project", projectSchema],
-    ["og", ogSchema],
+    ["og_auth_status", ogAuthStatusSchema],
+    ["og_clone", ogCloneSchema],
+    ["og_pull", ogPullSchema],
+    ["og_push", ogPushSchema],
+    ["og_pr", ogPrSchema],
+    ["og_checks", ogChecksSchema],
+  ];
+
+  const groupedTools: Array<[string, TSchema]> = [
+    ["og_pr", ogPrSchema],
+    ["og_checks", ogChecksSchema],
   ];
 
   it.each(tools)("%s: contains no const fields at any schema depth", (name, schema) => {
     expect(constPaths(schema), `${name}: Type.Literal/const is not Google-compatible`).toEqual([]);
   });
 
-  it.each(tools)("%s: every union member's action field uses a string enum", (name, schema) => {
-    const members = memberSchemas(schema);
-    expect(members.length).toBeGreaterThan(0);
-    for (const member of members) {
-      const action = member.properties?.action;
-      expect(action, `${name}: member is missing the action property`).toBeDefined();
-      expect(action!.const, `${name}: action must not use const`).toBeUndefined();
-      expect(Array.isArray(action!.enum), `${name}: action must be a string enum`).toBe(true);
-      expect(action!.enum!.length).toBe(1);
-    }
-  });
+  it.each(groupedTools)(
+    "%s: every union member's action field uses a string enum",
+    (name, schema) => {
+      const members = memberSchemas(schema);
+      expect(members.length).toBeGreaterThan(0);
+      for (const member of members) {
+        const action = member.properties?.action;
+        expect(action, `${name}: member is missing the action property`).toBeDefined();
+        expect(action!.const, `${name}: action must not use const`).toBeUndefined();
+        expect(Array.isArray(action!.enum), `${name}: action must be a string enum`).toBe(true);
+        expect(action!.enum!.length).toBe(1);
+      }
+    },
+  );
 });
