@@ -13,7 +13,8 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const projectDesc = "Exact registered single-layer project alias";
+const projectDesc =
+  "Project reference: canonical alias, checkout basename, or remote repository basename";
 const requiredProject = Type.String({ description: projectDesc, minLength: 1 });
 const prIdDesc = "Optional positive PR ID; omitted uses the registered checkout's current branch";
 
@@ -229,9 +230,9 @@ interface CloneResult {
 }
 
 const OG_PROMPT_GUIDELINES = [
-  "Use og with a registered project alias; every Git and forge mutation runs through the configured OG process, so never pass paths, tokens, or credential environment names to og.",
+  "Use og with a project reference (canonical alias, checkout basename, or remote repository basename); every Git and forge mutation runs through the configured OG process, so never pass paths, tokens, or credential environment names to og.",
   "Use og action auth_status to check forge authentication before retrying failed push or PR operations.",
-  "Use og action clone with either a registered project or an HTTP(S) URL; project clones never accept alias or reference.",
+  "Use og action clone with either a registered project reference or an HTTP(S) URL; project clones never accept alias or reference.",
   "Use og action pr_get without pr_id to inspect the registered checkout's current-branch pull request, or with a positive pr_id for a branch-free remote operation.",
   "Use og action pr_log and pr_failures to inspect CI logs with an optional tail between 0 and 1000 lines.",
   "Use og action pr_modify with at least one of title or body; an empty body explicitly clears it. Use og action pr_comment with a non-blank body.",
@@ -253,7 +254,7 @@ export function ogTool() {
     name: "og",
     label: "og",
     description:
-      "Guarded repository and forge operations for registered projects: clone, push, pull, PR lifecycle, " +
+      "Guarded repository and forge operations for registered projects selected by project reference: clone, push, pull, PR lifecycle, " +
       "comments, and CI status. All calls use the package-local og binary, which owns credentials and policy. " +
       "Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
     promptSnippet: "Run guarded Git and forge operations through the package-local og binary",
@@ -355,7 +356,7 @@ function projectArgs(input: OgInput): string[] {
     return [];
   }
   if (input.project === "") {
-    throw new Error("project alias must not be empty");
+    throw new Error("project reference must not be empty");
   }
   return ["--project", input.project];
 }
@@ -371,8 +372,9 @@ async function render(
   if (isAction(input, "auth_status")) {
     const data = parseSingleJsonDoc<{ project?: string; auth: AuthStatus }>(stdout);
     const a = data.auth;
+    const project = data.project ?? a.project;
     const text =
-      `${a.ready ? "Authenticated" : "Not authenticated"}: ${a.provider} ${a.host}/${a.owner}/${a.repo}` +
+      `${project}: ${a.ready ? "Authenticated" : "Not authenticated"}: ${a.provider} ${a.host}/${a.owner}/${a.repo}` +
       (a.ready ? "" : ` (auth mode: ${a.auth_mode})`);
     return modelTextResult(data, text, {
       hint: "Use og action auth_status again after resolving the reported issue.",
@@ -380,7 +382,7 @@ async function render(
   }
   if (isAction(input, "push") || isAction(input, "pull")) {
     const data = parseSingleJsonDoc<{ project?: string; message: string }>(stdout);
-    return modelTextResult(data, data.message, {
+    return modelTextResult(data, `${data.project ?? ""}: ${data.message}`.replace(/^: /, ""), {
       hint: `Use og action ${input.action} to inspect the operation again.`,
     });
   }
@@ -394,7 +396,7 @@ async function render(
   }
   if (isAction(input, "pr_comment")) {
     const data = parseSingleJsonDoc<{ project?: string; comment: Comment }>(stdout);
-    const text = `Commented on PR #${data.comment.pr_id}: ${data.comment.url}`;
+    const text = `${data.project ? `${data.project}: ` : ""}Commented on PR #${data.comment.pr_id}: ${data.comment.url}`;
     return modelTextResult(data, text, {
       hint: "Use og action pr_comment to add a follow-up comment.",
     });
@@ -402,13 +404,14 @@ async function render(
   if (isAction(input, "pr_log") || isAction(input, "pr_failures") || isAction(input, "pr_checks")) {
     const data = parseSingleJsonDoc<{ project?: string; pr: PullRequest; lines: string[] }>(stdout);
     const pr = formatPR(data.pr);
-    const text = data.lines.length ? `${pr}\n\n${data.lines.join("\n")}` : pr;
+    const rendered = `${data.project ? `${data.project}: ` : ""}${pr}`;
+    const text = data.lines.length ? `${rendered}\n\n${data.lines.join("\n")}` : rendered;
     return modelTextResult(data, text, {
       hint: `Use og action ${input.action} with a smaller tail to narrow logs.`,
     });
   }
   const data = parseSingleJsonDoc<{ project?: string; pr: PullRequest }>(stdout);
-  return modelTextResult(data, formatPR(data.pr), {
+  return modelTextResult(data, `${data.project ? `${data.project}: ` : ""}${formatPR(data.pr)}`, {
     hint: "Use og action pr_get to inspect the pull request again.",
   });
 }

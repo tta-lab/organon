@@ -1,5 +1,13 @@
-Get a project by exact, single-layer alias. Active aliases cannot contain dots.
-Falls back to reference repos only for a valid alias not found in projects.toml.
+Get a project by an exact case-insensitive project reference. A reference is
+a canonical alias, checkout basename, or remote repository basename; the result
+always contains the canonical alias. Display names, paths, URLs, and owner/repo
+strings are not general project references.
 
-  project get <alias>          # print filesystem path
-  project get <alias> --json   # JSON with alias, name, path, remote, archived
+Human mode retains the local reference-repository fallback for explicit reference
+selectors that are not registered.
+
+  project get <project-reference>          # print checkout path
+  project get <project-reference> --json   # JSON with alias, name, path, remote, archived
+
+Ambiguous and unknown references are never guessed. Use `project find` or
+`project list` when the error provides recovery guidance.

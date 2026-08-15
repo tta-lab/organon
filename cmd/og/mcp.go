@@ -17,52 +17,52 @@ import (
 )
 
 type ogProjectInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 }
 
 type ogPushInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	Force   bool   `json:"force,omitempty" jsonschema:"use force-with-lease; rejected on the default branch"`
 }
 
 type ogCloneInput struct {
-	Project   string `json:"project,omitempty" jsonschema:"exact registered single-layer project alias"`
+	Project   string `json:"project,omitempty" jsonschema:"project reference: alias, checkout, or repository basename"`
 	URL       string `json:"url,omitempty" jsonschema:"HTTP(S) repository URL with exactly owner/repo"`
 	Alias     string `json:"alias,omitempty" jsonschema:"optional exact single-layer project alias"`
 	Reference bool   `json:"reference,omitempty" jsonschema:"clone under the references tree without registration"`
 }
 
 type ogPRCreateInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	Title   string `json:"title" jsonschema:"non-blank pull request title"`
 	Body    string `json:"body,omitempty" jsonschema:"optional pull request body"`
 }
 
 type ogPRFindInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	State   string `json:"state,omitempty" jsonschema:"pull request state: open, closed, or all"`
 }
 
 type ogPRInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
 }
 
 type ogPRModifyInput struct {
-	Project string  `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string  `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID    *int64  `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
 	Title   *string `json:"title,omitempty" jsonschema:"optional replacement pull request title"`
 	Body    *string `json:"body,omitempty" jsonschema:"optional replacement pull request body; an empty string clears it"`
 }
 
 type ogPRCommentInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
 	Body    string `json:"body" jsonschema:"non-blank pull request comment body"`
 }
 
 type ogPRTailInput struct {
-	Project string `json:"project" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
 	Tail    *int   `json:"tail,omitempty" jsonschema:"optional number of log tail lines; defaults to 50"`
 }
@@ -182,9 +182,10 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		if err := validateCloneSelector(input.Project, input.URL, input.Alias, input.Reference); err != nil {
 			return nil, ogCloneOutput{}, err
 		}
-		resp, err := executor.GitClone(og.Request{
+		req := og.Request{
 			Context: ctx, Project: input.Project, URL: input.URL, Alias: input.Alias, Reference: input.Reference,
-		})
+		}
+		resp, err := executor.GitClone(req)
 		if err != nil {
 			return nil, ogCloneOutput{}, fmt.Errorf("execute clone: %w", err)
 		}
@@ -307,14 +308,14 @@ func callMessageTool(
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogMessageOutput, error) {
-	resp, err := callProject(ctx, projects, alias, req, operation)
+	resp, canonical, err := callProject(ctx, projects, alias, req, operation)
 	if err != nil {
 		return nil, ogMessageOutput{}, err
 	}
 	if err := og.ValidateMessageResponse(resp); err != nil {
 		return nil, ogMessageOutput{}, err
 	}
-	return nil, ogMessageOutput{Project: alias, Message: resp.Message}, nil
+	return nil, ogMessageOutput{Project: canonical, Message: resp.Message}, nil
 }
 
 func callPRProjectTool(
@@ -324,34 +325,34 @@ func callPRProjectTool(
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPROutput, error) {
-	resp, err := callProject(ctx, projects, alias, req, operation)
+	resp, canonical, err := callProject(ctx, projects, alias, req, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
 	if err := og.ValidatePRResponse(resp, 0); err != nil {
 		return nil, ogPROutput{}, err
 	}
-	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil
+	return nil, ogPROutput{Project: canonical, PR: *resp.PR}, nil
 }
 
 func callProject(
 	ctx context.Context,
 	projects *project.Store,
-	alias string,
+	reference string,
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
-) (og.Response, error) {
-	entry, err := projects.Get(alias)
+) (og.Response, string, error) {
+	entry, err := resolveOGProject(projects, reference)
 	if err != nil {
-		return og.Response{}, fmt.Errorf("resolve project: %w", err)
+		return og.Response{}, "", err
 	}
 	req.WorkDir = entry.Path
 	req.Context = ctx
 	resp, err := operation(req)
 	if err != nil {
-		return og.Response{}, fmt.Errorf("execute OG operation: %w", err)
+		return og.Response{}, "", fmt.Errorf("execute OG operation: %w", err)
 	}
-	return resp, nil
+	return resp, entry.Alias, nil
 }
 
 func authStatusHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogProjectInput, ogAuthOutput] {
@@ -360,14 +361,14 @@ func authStatusHandler(projects *project.Store, executor og.Executor) mcp.ToolHa
 		_ *mcp.CallToolRequest,
 		input ogProjectInput,
 	) (*mcp.CallToolResult, ogAuthOutput, error) {
-		resp, err := callProject(ctx, projects, input.Project, og.Request{}, executor.AuthStatus)
+		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{}, executor.AuthStatus)
 		if err != nil {
 			return nil, ogAuthOutput{}, err
 		}
-		if err := og.ValidateAuthResponse(resp, input.Project); err != nil {
+		if err := og.ValidateAuthResponse(resp, canonical); err != nil {
 			return nil, ogAuthOutput{}, err
 		}
-		return nil, ogAuthOutput{Project: input.Project, Auth: *resp.Auth}, nil
+		return nil, ogAuthOutput{Project: canonical, Auth: *resp.Auth}, nil
 	}
 }
 
@@ -384,7 +385,7 @@ func prModifyHandler(projects *project.Store, executor og.Executor) mcp.ToolHand
 		if err := og.ValidatePRModifyInput(input.Title, input.Body); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		resp, err := callProject(ctx, projects, input.Project, og.Request{
+		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
 			Index: prID, Title: input.Title, Body: input.Body,
 		}, executor.PRModify)
 		if err != nil {
@@ -393,7 +394,7 @@ func prModifyHandler(projects *project.Store, executor og.Executor) mcp.ToolHand
 		if err := og.ValidatePRModifyResponse(resp, prID, input.Title, input.Body); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		return nil, ogPROutput{Project: input.Project, PR: *resp.PR}, nil
+		return nil, ogPROutput{Project: canonical, PR: *resp.PR}, nil
 	}
 }
 
@@ -412,7 +413,7 @@ func prCommentHandler(
 		if err := og.ValidatePRCommentBody(&input.Body); err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		resp, err := callProject(ctx, projects, input.Project, og.Request{
+		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
 			Index: prID, Body: &input.Body,
 		}, executor.PRComment)
 		if err != nil {
@@ -421,7 +422,7 @@ func prCommentHandler(
 		if err := og.ValidateCommentResponse(resp, prID, input.Body); err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		return nil, ogCommentOutput{Project: input.Project, Comment: *resp.Comment}, nil
+		return nil, ogCommentOutput{Project: canonical, Comment: *resp.Comment}, nil
 	}
 }
 
@@ -435,14 +436,14 @@ func callPRTool(
 	if err := og.ValidatePositivePRID(id); err != nil {
 		return nil, ogPROutput{}, err
 	}
-	resp, err := callProject(ctx, projects, alias, og.Request{Index: id}, operation)
+	resp, canonical, err := callProject(ctx, projects, alias, og.Request{Index: id}, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
 	if err := og.ValidatePRResponse(resp, id); err != nil {
 		return nil, ogPROutput{}, err
 	}
-	return nil, ogPROutput{Project: alias, PR: *resp.PR}, nil
+	return nil, ogPROutput{Project: canonical, PR: *resp.PR}, nil
 }
 
 func addPRLinesTool(
@@ -499,14 +500,14 @@ func callPRLinesTool(
 	if err := og.ValidatePRLogTail(tail); err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	resp, err := callProject(ctx, projects, alias, og.Request{Index: id, Tail: tail}, operation)
+	resp, canonical, err := callProject(ctx, projects, alias, og.Request{Index: id, Tail: tail}, operation)
 	if err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
 	if err := og.ValidatePRResponse(resp, id); err != nil {
 		return nil, ogPRLinesOutput{}, err
 	}
-	return nil, ogPRLinesOutput{Project: alias, PR: *resp.PR, Lines: resp.Lines}, nil
+	return nil, ogPRLinesOutput{Project: canonical, PR: *resp.PR, Lines: resp.Lines}, nil
 }
 
 func optionalMCPPRID(id *int64) (int64, error) {
@@ -522,7 +523,7 @@ func optionalMCPPRID(id *int64) (int64, error) {
 func newOGMCPCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Serve alias-only forge tools over stdio MCP",
+		Short: "Serve project-reference forge tools over stdio MCP",
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

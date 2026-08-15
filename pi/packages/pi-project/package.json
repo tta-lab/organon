@@ -2,7 +2,7 @@
   "name": "@tta-lab/pi-project",
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi extension for Organon project discovery: list and get registered projects without MCP.",
+  "description": "Pi extension for Organon project discovery: list, find, and get registered projects without MCP.",
   "keywords": [
     "pi-package"
   ],

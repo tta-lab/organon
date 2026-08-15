@@ -621,7 +621,7 @@ func writeCloneProjects(t *testing.T, content string) *project.Store {
 	return project.NewStore(path)
 }
 
-func TestGitCloneByAliasUsesRegisteredPathAndRemote(t *testing.T) {
+func TestGitCloneByProjectReferenceUsesRegisteredPathAndRemote(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	destination := filepath.Join(home, "custom", "organon")
@@ -633,9 +633,9 @@ func TestGitCloneByAliasUsesRegisteredPathAndRemote(t *testing.T) {
 		return createClonedRepository(ctx, invocation)
 	})
 
-	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{Project: "orga"})
+	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{Project: "organon"})
 	if err != nil {
-		t.Fatalf("GitClone alias: %v", err)
+		t.Fatalf("GitClone project reference: %v", err)
 	}
 	assertTemporaryCloneInvocationFor(t, got, destination, "https://github.com/tta-lab/organon.git")
 	if resp.Clone == nil || resp.Clone.Alias != "orga" || resp.Clone.Path != destination ||

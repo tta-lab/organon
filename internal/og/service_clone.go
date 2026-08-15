@@ -82,7 +82,7 @@ func validateCloneRequest(req Request) error {
 
 func (s Service) resolveCloneRequest(req Request) (cloneSource, project.Entry, error) {
 	if req.Project != "" {
-		entry, err := s.projectStore().Get(req.Project)
+		entry, err := s.projectStore().Resolve(req.Project)
 		if err != nil {
 			return cloneSource{}, project.Entry{}, err
 		}

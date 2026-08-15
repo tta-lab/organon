@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 // Test-only fake project CLI: mirrors the documented JSON contract of the
-// real Go binary (list/get with --json, diagnostics on stderr).
-import { readFileSync } from "node:fs";
-
+// real Go binary (list/find/get with --json).
 const args = process.argv.slice(2);
 if (!args.includes("--json")) {
   process.stderr.write("Error: --json is required by the extension contract\n");
@@ -40,11 +38,30 @@ switch (cmd) {
     process.stdout.write(JSON.stringify({ projects: visible }) + "\n");
     break;
   }
+  case "find": {
+    const query = rest[0] ?? "";
+    if (query === "limited" && args[args.indexOf("--limit") + 1] !== "3") {
+      process.stderr.write("Error: expected --limit 3\n");
+      process.exit(1);
+    }
+    const visible =
+      query === "missing"
+        ? []
+        : projects.filter(
+            (p) => !p.archived && ["runtime", "limited"].includes(query) && p.alias === "len",
+          );
+    process.stdout.write(JSON.stringify({ projects: visible }) + "\n");
+    break;
+  }
   case "get": {
-    const alias = rest[0];
-    const found = projects.find((p) => p.alias === alias);
+    const reference = rest[0];
+    const found = projects.find(
+      (p) => p.alias === reference || (p.alias === "len" && reference === "lenos"),
+    );
     if (!found) {
-      process.stderr.write(`Error: project \"${alias}\" not found\n`);
+      process.stderr.write(
+        `Error: project \"${reference}\" not found; use project find or project list\n`,
+      );
       process.exit(1);
     }
     process.stdout.write(JSON.stringify({ project: found }) + "\n");

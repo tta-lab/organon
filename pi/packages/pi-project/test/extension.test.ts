@@ -35,11 +35,12 @@ describe("pi-project extension", () => {
     expect(def.name).toBe("project");
   });
 
-  it("exposes a closed action union: unknown fields rejected, get requires alias", () => {
+  it("exposes a closed action union: unknown fields rejected, get requires project reference", () => {
     expect(Value.Check(projectSchema, { action: "list" })).toBe(true);
     expect(Value.Check(projectSchema, { action: "list", include_archived: true })).toBe(true);
-    expect(Value.Check(projectSchema, { action: "get", alias: "len" })).toBe(true);
+    expect(Value.Check(projectSchema, { action: "get", project: "len" })).toBe(true);
     expect(Value.Check(projectSchema, { action: "get" })).toBe(false);
+    expect(Value.Check(projectSchema, { action: "get", alias: "len" })).toBe(false);
     expect(Value.Check(projectSchema, { action: "list", bogus: 1 })).toBe(false);
     expect(Value.Check(projectSchema, { action: "nope" })).toBe(false);
     expect(Value.Check(projectSchema, {})).toBe(false);
@@ -66,7 +67,7 @@ describe("pi-project extension", () => {
 
   it("get action returns the five-field project record in details", async () => {
     const def = projectTool();
-    const result = await callExecute(def, { action: "get", alias: "len" });
+    const result = await callExecute(def, { action: "get", project: "len" });
     const details = result.details as { project: Record<string, unknown> };
     expect(details.project.alias).toBe("len");
     expect(Object.keys(details.project).sort()).toEqual([
@@ -78,9 +79,48 @@ describe("pi-project extension", () => {
     ]);
   });
 
+  it("uses project references and exposes bounded active find", () => {
+    expect(Value.Check(projectSchema, { action: "get", project: "lenos" })).toBe(true);
+    expect(Value.Check(projectSchema, { action: "get", alias: "len" })).toBe(false);
+    expect(Value.Check(projectSchema, { action: "find", query: "runtime" })).toBe(true);
+    expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 16 })).toBe(true);
+    expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 0 })).toBe(false);
+    expect(Value.Check(projectSchema, { action: "find", query: "runtime", limit: 33 })).toBe(true);
+    expect(Value.Check(projectSchema, { action: "find", query: "" })).toBe(false);
+    expect(Value.Check(projectSchema, { action: "find" })).toBe(false);
+    expect(
+      Value.Check(projectSchema, { action: "find", query: "runtime", include_archived: true }),
+    ).toBe(false);
+  });
+
+  it("gets by a project reference and finds active projects with empty success", async () => {
+    const get = await callExecute(projectTool(), { action: "get", project: "lenos" });
+    expect((get.details as { project: { alias: string } }).project.alias).toBe("len");
+    expect((get.content[0] as { text: string }).text).toContain("len:");
+
+    const found = await callExecute(projectTool(), { action: "find", query: "runtime" });
+    expect(
+      (found.details as { projects: Array<{ alias: string }> }).projects.map((p) => p.alias),
+    ).toEqual(["len"]);
+    expect((found.content[0] as { text: string }).text).toContain("len");
+
+    const limited = await callExecute(projectTool(), {
+      action: "find",
+      query: "limited",
+      limit: 3,
+    });
+    expect((limited.details as { projects: Array<{ alias: string }> }).projects[0]?.alias).toBe(
+      "len",
+    );
+
+    const empty = await callExecute(projectTool(), { action: "find", query: "missing" });
+    expect((empty.details as { projects: unknown[] }).projects).toEqual([]);
+    expect((empty.content[0] as { text: string }).text).toContain("No active projects found");
+  });
+
   it("turns a nonzero exit into a concise error from stderr", async () => {
     const def = projectTool();
-    await expect(callExecute(def, { action: "get", alias: "missing" })).rejects.toThrow(
+    await expect(callExecute(def, { action: "get", project: "missing" })).rejects.toThrow(
       /project "missing" not found/,
     );
   });

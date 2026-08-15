@@ -50,11 +50,19 @@ func requestFor(cmd *cobra.Command, req og.Request) og.Request {
 	return req
 }
 
+func resolveOGProject(store *project.Store, reference string) (project.Entry, error) {
+	entry, err := store.Resolve(reference)
+	if err != nil {
+		return project.Entry{}, fmt.Errorf("resolve project: %w", err)
+	}
+	return entry, nil
+}
+
 func resolveWorkDir(cmd *cobra.Command, runtime commandRuntime) (workDir, alias string, err error) {
-	alias, _ = cmd.Flags().GetString("project")
-	if alias == "" {
+	reference, _ := cmd.Flags().GetString("project")
+	if reference == "" {
 		if cmd.Flags().Changed("project") {
-			return "", "", fmt.Errorf("project alias must not be empty")
+			return "", "", fmt.Errorf("project reference must not be empty")
 		}
 		workDir, err = os.Getwd()
 		if err != nil {
@@ -62,9 +70,9 @@ func resolveWorkDir(cmd *cobra.Command, runtime commandRuntime) (workDir, alias 
 		}
 		return workDir, "", nil
 	}
-	entry, err := runtime.projects.Get(alias)
+	entry, err := resolveOGProject(runtime.projects, reference)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve project: %w", err)
+		return "", "", err
 	}
-	return entry.Path, alias, nil
+	return entry.Path, entry.Alias, nil
 }

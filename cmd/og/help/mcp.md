@@ -1,19 +1,22 @@
-Serve typed forge tools over MCP stdio. Repository operations accept an exact
-registered single-layer project alias. `clone` accepts exactly one of a registered
-project alias or an HTTP(S) URL. URL mode may use an optional new alias or the
-reference flag. No tool accepts a destination path, working directory, MCP
-root, token, or file URI.
+Serve typed forge tools over stdio MCP. Repository operations accept a
+case-insensitive project reference: canonical alias, checkout basename, or
+remote repository basename. Exact alias matches take priority; ambiguous and
+unknown references fail safely and point to `project find` or `project list`.
+`clone` accepts exactly one of a registered project reference or an HTTP(S) URL.
+URL mode may use an optional new `alias` or the `reference` flag. No tool accepts
+a destination path, working directory, MCP root, token, or file URI as a project
+reference.
 
 The MCP server loads configuration and the project registry once at startup,
 then reuses the configured OG service for its lifetime. All pull request tools
-require an exact project alias. Get, modify, comment, checks, log, and failures
+require a project reference. Get, modify, comment, checks, log, and failures
 accept an optional positive PR ID and use the registered checkout's current
-branch when it is omitted.
+branch when it is omitted. Structured results return the canonical alias.
 
 Tools:
 
   auth_status             # inspect secret-free forge authentication state
-  clone                   # clone registered alias or URL to its controlled path
+  clone                   # clone registered project reference or URL
   push                    # push current branch; optional force-with-lease
   pull                    # run the complete guarded CLI pull workflow
   pr_create               # push current branch and create its pull request
@@ -27,9 +30,10 @@ Tools:
 
 Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
 CLI behavior and operate on the current named branch at the path registered for
-the alias. Force push is rejected on the default branch and otherwise uses
-`--force-with-lease`. Pull may switch to the default branch and delete a closed
-PR branch locally and remotely after the same safety checks as the CLI.
+the resolved canonical alias. Force push is rejected on the default branch and
+otherwise uses `--force-with-lease`. Pull may switch to the default branch and
+delete a closed PR branch locally and remotely after the same safety checks as
+the CLI.
 
 Archived aliases remain readable. Their pull is restricted to fast-forwarding
 the known default branch; push, tag, PR mutation/comment, and branch cleanup are

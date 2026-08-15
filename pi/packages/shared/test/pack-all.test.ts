@@ -17,8 +17,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 const workspace = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const testWorkspace = process.env.ORGANON_PI_TEST_WORKSPACE;
 const TOOLS = ["src", "web", "project", "og"];
-const TARGETS = [
+const TARGETS: Array<[string, string, string]> = [
   ["darwin", "arm64", "darwin-arm64"],
   ["linux", "x64", "linux-x64"],
   ["linux", "arm64", "linux-arm64"],
@@ -64,6 +65,12 @@ function isolatedNpmEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 const offlineNpmEnv = isolatedNpmEnv(hostileNpmEnv);
 const readManifest = (tgz: string) =>
   JSON.parse(execFileSync("tar", ["-xOf", tgz, "package/package.json"], { encoding: "utf8" }));
+
+function nativePackageDir(tool: string, suffix: string): string {
+  const hostSuffix = `${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch}`;
+  const root = suffix === hostSuffix ? (testWorkspace ?? workspace) : workspace;
+  return join(root, "packages", "native", `pi-${tool}-${suffix}`);
+}
 
 let packCount = 0;
 function pack(dir: string, name: string): string {
@@ -150,11 +157,11 @@ describe("all sixteen package manifests", () => {
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
     for (const { tool, action, assert } of smoke) {
-      // Pack the native packages (fixtures are staged in the workspace native
-      // packages by vitest's global setup for this run) and the main package.
+      // Pack the host native package from Vitest's disposable fixture
+      // workspace; repository native package directories remain untouched.
       const hostSuffix = `${osName}-${archName}`;
       const nativePkgName = `@tta-lab/pi-${tool}-${hostSuffix}`;
-      const nativePkgDir = join(workspace, "packages", "native", `pi-${tool}-${hostSuffix}`);
+      const nativePkgDir = nativePackageDir(tool, hostSuffix);
       const nativeTgz = pack(nativePkgDir, nativePkgName);
       const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
 
@@ -167,7 +174,7 @@ describe("all sixteen package manifests", () => {
       mkdirSync(installRoot, { recursive: true });
       const overrides: Record<string, string> = {};
       for (const [, , suffix] of TARGETS) {
-        const platformDir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`);
+        const platformDir = nativePackageDir(tool, suffix);
         const tgz = pack(platformDir, `@tta-lab/pi-${tool}-${suffix}`);
         overrides[`@tta-lab/pi-${tool}-${suffix}`] = `file:${tgz}`;
       }

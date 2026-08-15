@@ -21,7 +21,7 @@ var (
 
 var aliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-// Catalog is an immutable snapshot of active registered projects.
+// Catalog is an immutable snapshot of active and archived registered projects.
 type Catalog struct {
 	activeEntries   []Entry
 	archivedEntries []Entry

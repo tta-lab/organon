@@ -1,8 +1,25 @@
 GO_ENV := CGO_ENABLED=0
 
-.PHONY: all build test fmt vet lint tidy ci ci-scope install
+.PHONY: all build test fmt vet lint tidy ci ci-scope install pi-build
 
 all: fmt vet tidy build
+
+pi-build:
+	@set -eu; \
+		os=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
+		arch=$$(uname -m); \
+		case "$$arch" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) ;; esac; \
+		case "$$os/$$arch" in \
+			darwin/arm64|linux/arm64|linux/x64) ;; \
+			*) echo "unsupported pi host: $$os-$$arch (supported: darwin-arm64, linux-arm64, linux-x64)" >&2; exit 1 ;; \
+		esac; \
+		for tool in src web project og; do \
+			dest="pi/packages/native/pi-$$tool-$$os-$$arch/bin/$$tool"; \
+			mkdir -p "$$(dirname "$$dest")"; \
+			echo "building $$dest"; \
+			$(GO_ENV) go build -o "$$dest" "./cmd/$$tool"; \
+		done; \
+		(cd pi && pnpm install --frozen-lockfile && pnpm build)
 
 build:
 	@echo "Building binaries..."
