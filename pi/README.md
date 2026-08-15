@@ -4,14 +4,14 @@ Four independently installable [Pi](https://pi.dev) extension packages give Pi
 native access to Organon capabilities without MCP configuration. Each package
 carries a matching native Go binary for your platform, so installing the npm
 package is sufficient on a supported host. `pi-src`, `pi-web`, and `pi-project`
-each register one global tool; `pi-og` registers six capability-oriented tools.
+each register capability tools; `pi-og` registers six guarded forge tools.
 
-| Package               | Tool                                                                     | Capability                                                                                       |
-| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `@tta-lab/pi-src`     | `src`                                                                    | Structure-aware file reading and editing (replaces Pi's built-in `read` and `edit` while active) |
-| `@tta-lab/pi-web`     | `web`                                                                    | Web search, page fetch, library documentation, Sourcegraph code search                           |
-| `@tta-lab/pi-project` | `project`                                                                | List, find, and get registered projects                                                          |
-| `@tta-lab/pi-og`      | `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary                             |
+| Package               | Tool(s)                                                                  | Capability                                                               |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `@tta-lab/pi-src`     | `read`, `edit`                                                           | Structure-aware file reading and editing through exact-name Pi overrides |
+| `@tta-lab/pi-web`     | `web`                                                                    | Web search, page fetch, library documentation, Sourcegraph code search   |
+| `@tta-lab/pi-project` | `project`                                                                | List, find, and get registered projects                                  |
+| `@tta-lab/pi-og`      | `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary     |
 
 ## Install
 
@@ -37,34 +37,78 @@ Unsupported platforms fail at extension startup with an actionable error.
 Runtime binaries are never downloaded from GitHub releases, compiled during
 installation, or resolved from `PATH`.
 
-## `src` replaces built-in `read` and `edit`
+## `pi-src` overrides `read` and `edit`
 
-While `@tta-lab/pi-src` is active, Pi's built-in `read` and `edit` tools are
-deactivated and `src` becomes the single file inspection and editing interface.
-At session start the extension removes only the active built-ins it displaces;
-at session shutdown it restores exactly that remembered subset, preserving every
-other active-tool choice you have made. `write` is never disabled: creating
-files and whole-file replacement remain separate capabilities.
+`@tta-lab/pi-src` registers exactly two global tools named `read` and `edit`.
+They are exact-name execution overrides of Pi's built-in tools, not a separate
+`src` Pi tool. `write` and unrelated tools remain untouched. Ordinary Pi users
+can keep using the familiar built-in forms, while the installed Pi version's
+live built-in schemas, argument preparation, prompt contribution, and renderer
+contract remain the baseline for the overrides.
 
-`src` resolves paths relative to Pi's current working directory (or accepts
-absolute paths), has no project-registry dependency, and normalizes an
-accidental leading `@` like Pi's built-in tools do.
+The same package works in ordinary Pi and in a Fabric release that supports
+effective compatible core overrides. Install that Fabric release first and
+Organon second. Without the Fabric release, ordinary Pi still supports the
+built-in-compatible forms; Fabric's static guest gate simply will not advertise
+the added Organon fields yet. The extension has no Fabric dependency.
 
-### Symbol IDs are opaque
+There is no active-tool takeover or restoration lifecycle. Pi's exact-name
+registration is the only replacement mechanism, so reloading or ending a
+session does not toggle `read` or `edit` or change the active `write` tool.
 
-The `src` tool returns a typed outline from its `symbols` action. Each symbol
-has an **opaque ID** (for example `bK`) and a **display name** (for example
-`handleRequest`). Symbol-scoped operations (`read`, `replace`, `insert`,
-`delete`, `comment`) accept only the exact ID returned by `symbols` — never the
-display name. IDs can change after structural edits, so refresh the outline
-before another symbol-scoped operation.
+### `read` capability forms
 
-### Exact text edits
+In addition to the complete installed Pi built-in read input, the override
+accepts these closed object forms:
 
-The `edit` action performs exact multi-edit replacement on one file without any
-symbol lookup: every `oldText` must match one unique region of the original
-file, entries must not overlap, and all replacements are applied atomically in a
-single write (BOM and line endings preserved).
+```json
+{"path":"main.go","symbols":true}
+{"path":"main.go","symbol_id":"bK","offset":1,"limit":40}
+```
+
+The first returns the current outline. The second reads exactly one symbol or
+Markdown section, with offset and limit relative to that selected content.
+Outline results do not accept pagination fields. Symbol IDs are opaque and must
+come from the latest outline; a display name is never a valid ID.
+
+### `edit` capability forms
+
+The complete installed Pi built-in exact-edit input remains valid and keeps its
+atomic `edits[]` batch behavior:
+
+```json
+{
+  "path": "config.yaml",
+  "edits": [
+    { "oldText": "old value", "newText": "new value" },
+    { "oldText": "other", "newText": "updated" }
+  ]
+}
+```
+
+When the exact original text is already known, use this form directly; symbol
+discovery is not required. For structure-aware edits, first call `read` with
+`symbols: true`, copy an exact opaque ID, and use one of these forms:
+
+```json
+{"path":"main.go","operation":"replace","symbol_id":"bK","content":"func handle() {}"}
+{"path":"main.go","operation":"insert","symbol_id":"bK","position":"after","content":"func next() {}"}
+{"path":"main.go","operation":"delete","symbol_id":"bK"}
+{"path":"main.go","operation":"comment","symbol_id":"bK","content":"Handles requests."}
+```
+
+Structural edits refresh the file's outline before another symbol operation;
+IDs can change after a mutation. Combine disjoint exact replacements in one
+`edit` call. Symbol mutation results use Pi's built-in-compatible edit details:
+display diff, unified patch, and optional first changed line. Added symbol forms
+may not have a pre-execution exact-text preview, but the inherited edit renderer
+can render their returned diff normally.
+
+All paths are absolute or relative to Pi's invocation working directory and
+retain leading-`@` normalization. The `src` CLI remains available as the public
+command name and is unchanged. Exact edits reject missing, ambiguous,
+overlapping, nested, duplicate, and no-op replacements atomically while
+preserving BOM and line endings.
 
 ## MCP servers
 
@@ -72,10 +116,10 @@ The `web`, `project`, `og`, and `skill` MCP servers continue to serve non-Pi
 clients and are unchanged. Pi users who install the matching `web`, `project`,
 `pi-og`, or `src` extension should remove that capability's duplicate MCP
 server configuration from Pi, so it exposes native capability tools without
-transport duplicates. The old
-project-scoped `src` MCP server has been removed: Pi uses the local-path `src`
-extension instead, and CLI users use the normal `src` command. If you previously
-configured `organon-src` in an MCP client, remove that server entry.
+transport duplicates. The old project-scoped `src` MCP server has been removed:
+Pi uses the local-path `read`/`edit` extension, and CLI users use the normal
+`src` command. If you previously configured `organon-src` in an MCP client,
+remove that server entry.
 
 A native TypeScript/Defuddle implementation of `web.fetch` is a separate future
 spec; this repository's Web extension is a thin adapter over the Go CLI.
@@ -110,8 +154,8 @@ under the wrong platform name.
 
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to all sixteen
 manifests, `scripts/stage-natives.mjs` copies the cross-compiled Go binaries
-into the native packages (failing on a missing or wrong-platform artifact),
-and `scripts/publish-packages.mjs` supplies the one native-first publish plan
+into the native packages (failing on a missing or wrong-platform artifact), and
+`scripts/publish-packages.mjs` supplies the one native-first publish plan
 consumed by the release workflow. `scripts/release-dry-run.mjs` validates that
 same plan together with exact-version and GoReleaser artifact invariants before
 publishing.

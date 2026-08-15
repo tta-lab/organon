@@ -4,17 +4,37 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { srcTool } from "../src/tool.js";
+import { editTool, readTool } from "../src/tool.js";
 
-const def = srcTool();
+const readDefinition = readTool();
+const editDefinition = editTool();
 
 async function runEdit(path: string, cwd: string, oldText: string, newText: string) {
-  return def.execute(
+  return editDefinition.execute(
     "call-q",
-    { action: "edit", path, edits: [{ oldText, newText }] } as any,
+    { path, edits: [{ oldText, newText }] } as any,
     undefined,
     undefined,
     { cwd } as any,
+  );
+}
+
+async function runSymbolEdit(path: string, cwd: string, symbol_id: string, content: string) {
+  return editDefinition.execute(
+    "call-q-symbol",
+    { path, operation: "replace", symbol_id, content } as any,
+    undefined,
+    undefined,
+    { cwd } as any,
+  );
+}
+
+function idsByName(result: {
+  content: Array<{ type: string; text?: string }>;
+}): Record<string, string> {
+  const outline = result.content.find((block) => block.type === "text")?.text ?? "";
+  return Object.fromEntries(
+    [...outline.matchAll(/- \[([^\]]+)\] function (\w+)/g)].map((match) => [match[2]!, match[1]!]),
   );
 }
 
@@ -23,7 +43,7 @@ async function runEdit(path: string, cwd: string, oldText: string, newText: stri
 // the child-process read-modify-write window. Without the queue, two parallel
 // spawns would read the same snapshot and one write would clobber the other.
 describe("pi-src mutation serialization", () => {
-  it("applies concurrent edits to the same file without losing changes", async () => {
+  it("applies concurrent exact edits without losing changes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-src-queue-"));
     const path = join(dir, "sample.go");
     writeFileSync(
@@ -41,24 +61,33 @@ describe("pi-src mutation serialization", () => {
     expect(after).toContain("return 22");
   });
 
-  it("serializes concurrent whole-symbol replacements with their diffs", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pi-src-queue-"));
+  it("serializes concurrent symbol edits through the same file queue", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-src-queue-symbol-"));
     const path = join(dir, "sample.go");
     writeFileSync(
       path,
       "package sample\n\nfunc Foo() {\n\treturn 1\n}\n\nfunc Bar() {\n\treturn 2\n}\n",
     );
+    const outline = await readDefinition.execute(
+      "call-outline",
+      { path, symbols: true } as any,
+      undefined,
+      undefined,
+      { cwd: dir } as any,
+    );
+    const ids = idsByName(outline);
 
     const results = await Promise.all([
-      runEdit(path, dir, "func Foo() {", "func Foo() { // edited"),
-      runEdit(path, dir, "func Bar() {", "func Bar() { // edited"),
+      runSymbolEdit(path, dir, ids.Foo!, "func Foo() {\n\treturn 11\n}"),
+      runSymbolEdit(path, dir, ids.Bar!, "func Bar() {\n\treturn 22\n}"),
     ]);
 
     const after = readFileSync(path, "utf8");
-    expect(after).toContain("func Foo() { // edited");
-    expect(after).toContain("func Bar() { // edited");
-    // Both child processes reported success (their diffs were computed against
-    // the serialized states, so neither failed with a stale-snapshot error).
+    expect(after).toContain("return 11");
+    expect(after).toContain("return 22");
     expect(results).toHaveLength(2);
+    expect(
+      results.every((result) => (result.details as { patch: string }).patch.includes("--- a/")),
+    ).toBe(true);
   });
 });

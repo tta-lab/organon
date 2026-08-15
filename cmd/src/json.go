@@ -8,9 +8,9 @@ import (
 	"os"
 	"unicode/utf8"
 
-	"github.com/aymanbagabas/go-udiff"
 	"github.com/spf13/cobra"
 
+	"github.com/tta-lab/organon/internal/srcop"
 	"github.com/tta-lab/organon/internal/srcview"
 )
 
@@ -60,12 +60,15 @@ func printJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
 
-// mutationJSON is the machine-readable result of a symbol mutation.
+// mutationJSON is the machine-readable result of a symbol mutation. Its
+// change fields intentionally match the batch edit result so both mutation
+// families have the same Pi-facing contract.
 type mutationJSON struct {
 	Path             string `json:"path"`
 	Action           string `json:"action"`
 	SymbolID         string `json:"symbol_id,omitempty"`
 	Diff             string `json:"diff"`
+	Patch            string `json:"patch"`
 	FirstChangedLine int    `json:"first_changed_line,omitempty"`
 }
 
@@ -164,36 +167,21 @@ func targetID(afterID, beforeID string) string {
 	return beforeID
 }
 
-// writeMutationJSON writes the mutation result to disk and prints the
-// machine-readable result, keeping diagnostics off stdout.
+// writeMutationJSON writes the result to disk and prints the same display diff,
+// unified patch, and first-changed-line description used by batch edits.
 func writeMutationJSON(filename, action, symbolID string, source, result []byte) error {
+	description, err := srcop.DescribeChange(filename, source, result)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(filename, result, 0o644); err != nil {
 		return err
 	}
-	diffText, first := diffSummary(filename, source, result)
 	return printJSON(mutationJSON{
 		Path: filename, Action: action, SymbolID: symbolID,
-		Diff: diffText, FirstChangedLine: first,
+		Diff: description.Diff, Patch: description.Patch,
+		FirstChangedLine: description.FirstChangedLine,
 	})
-}
-
-// diffSummary renders a unified diff between old and new content and the
-// 1-indexed line of the first change in the new file.
-func diffSummary(filename string, old, new []byte) (string, int) {
-	diffText := udiff.Unified("a/"+filename, "b/"+filename, string(old), string(new))
-	return diffText, firstChangedLineBytes(old, new)
-}
-
-// firstChangedLineBytes returns the 1-indexed line of the first differing byte
-// in the new content, mirroring the Pi built-in edit's reporting of the first
-// changed line in the new file.
-func firstChangedLineBytes(old, new []byte) int {
-	limit := min(len(old), len(new))
-	pos := 0
-	for pos < limit && old[pos] == new[pos] {
-		pos++
-	}
-	return bytes.Count(new[:pos], []byte("\n")) + 1
 }
 
 // runSymbols dispatches between the human outline and the JSON outline; human
@@ -236,16 +224,13 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return printJSON(symbolOutlineJSON{
-		Path:       filename,
-		Language:   outline.Language,
-		Title:      outline.Title,
-		TotalBytes: len(source),
-		Symbols:    outline.Symbols,
+		Path: filename, Language: outline.Language, Title: outline.Title,
+		TotalBytes: len(source), Symbols: outline.Symbols,
 	})
 }
 
 // runRead dispatches between the human read and the JSON read; human output
-// remains the default, --json opts into the machine-readable form.
+// remains the default, --json opts into the machine-readable read result.
 func runRead(cmd *cobra.Command, args []string) error {
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
@@ -291,7 +276,6 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	limit, _ := cmd.Flags().GetInt("limit")
-
 	if limit < 0 {
 		return fmt.Errorf("limit must be zero or greater")
 	}
@@ -342,20 +326,12 @@ func buildReadJSON(filename string, source []byte, symbolID string, offset, limi
 		return readJSON{}, err
 	}
 	return readJSON{
-		Path:                  filename,
-		SymbolID:              symbolID,
-		Content:               window.Content,
-		StartLine:             window.StartLine,
-		TotalLines:            window.TotalLines,
-		TruncationTotalLines:  window.TruncationTotalLines,
-		TotalBytes:            window.TotalBytes,
-		Truncated:             window.Truncated,
-		TruncatedBy:           window.TruncatedBy,
-		OutputLines:           window.OutputLines,
-		OutputBytes:           window.OutputBytes,
-		OutputEndLine:         window.OutputEndLine,
-		RemainingLines:        window.RemainingLines,
-		NextOffset:            window.NextOffset,
-		FirstLineExceedsLimit: window.FirstLineExceedsLimit,
+		Path: filename, SymbolID: symbolID, Content: window.Content,
+		StartLine: window.StartLine, TotalLines: window.TotalLines,
+		TruncationTotalLines: window.TruncationTotalLines, TotalBytes: window.TotalBytes,
+		Truncated: window.Truncated, TruncatedBy: window.TruncatedBy,
+		OutputLines: window.OutputLines, OutputBytes: window.OutputBytes,
+		OutputEndLine: window.OutputEndLine, RemainingLines: window.RemainingLines,
+		NextOffset: window.NextOffset, FirstLineExceedsLimit: window.FirstLineExceedsLimit,
 	}, nil
 }

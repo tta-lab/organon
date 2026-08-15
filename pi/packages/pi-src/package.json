@@ -2,7 +2,7 @@
   "name": "@tta-lab/pi-src",
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi extension replacing built-in read and edit with structure-aware Organon src operations: symbols, reads, symbol mutations, and atomic batch edits.",
+  "description": "Pi extension overriding built-in read and edit with structure-aware Organon symbol navigation and mutations plus atomic exact edits.",
   "keywords": [
     "pi-package"
   ],

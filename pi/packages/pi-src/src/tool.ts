@@ -1,11 +1,16 @@
 import { createRequire } from "node:module";
 
 import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   convertToPng,
+  createEditToolDefinition,
+  createReadToolDefinition,
   formatDimensionNote,
   formatSize,
   resizeImage,
+  type EditToolDetails,
+  type ReadToolDetails,
   type TruncationResult,
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
@@ -13,124 +18,136 @@ import { Type, type Static } from "typebox";
 
 import {
   cliError,
-  modelTextResult,
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
+  truncateForModel,
 } from "@tta-lab/pi-shared";
 
 import { resolveSourcePath } from "./paths.js";
 
 const require = createRequire(import.meta.url);
 
-const symbolIdDescription =
-  "Exact opaque symbol or Markdown section ID returned by src action symbols; never a display name.";
-const symbolId = Type.String({ description: symbolIdDescription, minLength: 1 });
+// These are deliberately created from the installed Pi factories. The peer
+// dependency is the source of truth for the built-in schema and prompt
+// contribution, so the override follows the Pi version that hosts it.
+const builtInRead = createReadToolDefinition(process.cwd());
+const builtInEdit = createEditToolDefinition(process.cwd());
+
+// Pi's current TypeBox object schemas intentionally omit an
+// additionalProperties keyword. Close only the top-level built-in branches in
+// the override copy so Organon fields cannot accidentally mix into an
+// otherwise valid exact call; the live schema and its nested edit entries are
+// still sourced from the installed factory unchanged.
+const builtInReadParameters = { ...builtInRead.parameters, additionalProperties: false };
+const builtInEditParameters = { ...builtInEdit.parameters, additionalProperties: false };
 
 const pathDescription = "Path to the file (absolute, or relative to the current working directory)";
+const symbolIdDescription =
+  "Exact opaque symbol or Markdown section ID returned by read with symbols: true; never a display name.";
+const symbolId = Type.String({ description: symbolIdDescription, minLength: 1 });
 
-const editEntry = Type.Object(
+const symbolsReadSchema = Type.Object(
   {
-    oldText: Type.String({ description: "Exact original text to replace (may be multiline)" }),
-    newText: Type.String({ description: "Replacement text (may be multiline)" }),
+    path: Type.String({ description: pathDescription }),
+    symbols: Type.Boolean({
+      description: "Return the current symbol or Markdown section outline",
+      enum: [true],
+    }),
   },
   { additionalProperties: false },
 );
 
-export const srcSchema = Type.Union([
-  Type.Object(
-    {
-      action: StringEnum(["symbols"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["read"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: Type.Optional(symbolId),
-      offset: Type.Optional(
-        Type.Integer({
-          description: "1-indexed line offset within the selected content",
-          minimum: 1,
-        }),
-      ),
-      limit: Type.Optional(
-        Type.Integer({ description: "Maximum number of lines to read", minimum: 1 }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["replace"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: symbolId,
-      content: Type.String({
-        description: "New content of the symbol or Markdown section (may be multiline)",
+const symbolReadSchema = Type.Object(
+  {
+    path: Type.String({ description: pathDescription }),
+    symbol_id: symbolId,
+    offset: Type.Optional(
+      Type.Integer({
+        description: "1-indexed line offset within the selected symbol or section",
+        minimum: 1,
       }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["insert"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: symbolId,
-      position: StringEnum(["before", "after"] as const, {
-        description: "Insert before or after the symbol",
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        description: "Maximum number of lines in the selected symbol or section",
+        minimum: 1,
       }),
-      content: Type.String({ description: "Content to insert (may be multiline)" }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["delete"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: symbolId,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["comment"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: symbolId,
-      read: Type.Boolean({
-        description: "Must be true to read the existing doc comment",
-        enum: [true],
-      }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["comment"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      symbol_id: symbolId,
-      content: Type.String({ description: "New doc comment (may be multiline)" }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["edit"] as const, { description: "Action to perform" }),
-      path: Type.String({ description: pathDescription }),
-      edits: Type.Array(editEntry, {
-        description:
-          "Exact text replacements; every oldText must match one unique region of the original file and entries must not overlap",
-        minItems: 1,
-      }),
-    },
-    { additionalProperties: false },
-  ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+/** The read override is an explicit union with the live built-in branch. */
+export const readSchema = Type.Union([builtInReadParameters, symbolsReadSchema, symbolReadSchema]);
+
+const replaceSymbolSchema = Type.Object(
+  {
+    path: Type.String({ description: pathDescription }),
+    operation: StringEnum(["replace"] as const, {
+      description: "Replace one exact symbol or section",
+    }),
+    symbol_id: symbolId,
+    content: Type.String({ description: "Replacement content (may be multiline)" }),
+  },
+  { additionalProperties: false },
+);
+
+const insertSymbolSchema = Type.Object(
+  {
+    path: Type.String({ description: pathDescription }),
+    operation: StringEnum(["insert"] as const, {
+      description: "Insert around one exact symbol or section",
+    }),
+    symbol_id: symbolId,
+    position: StringEnum(["before", "after"] as const, {
+      description: "Insert before or after the symbol or section",
+    }),
+    content: Type.String({ description: "Content to insert (may be multiline)" }),
+  },
+  { additionalProperties: false },
+);
+
+const deleteSymbolSchema = Type.Object(
+  {
+    path: Type.String({ description: pathDescription }),
+    operation: StringEnum(["delete"] as const, {
+      description: "Delete one exact symbol or section",
+    }),
+    symbol_id: symbolId,
+  },
+  { additionalProperties: false },
+);
+
+const commentSymbolSchema = Type.Object(
+  {
+    path: Type.String({ description: pathDescription }),
+    operation: StringEnum(["comment"] as const, {
+      description: "Replace one exact symbol doc comment",
+    }),
+    symbol_id: symbolId,
+    content: Type.String({ description: "New doc comment content (may be multiline)" }),
+  },
+  { additionalProperties: false },
+);
+
+/** The edit override is an explicit union with the live built-in branch. */
+export const editSchema = Type.Union([
+  builtInEditParameters,
+  replaceSymbolSchema,
+  insertSymbolSchema,
+  deleteSymbolSchema,
+  commentSymbolSchema,
 ]);
 
-export type SrcInput = Static<typeof srcSchema>;
+export type ReadInput = Static<typeof readSchema>;
+export type EditInput = Static<typeof editSchema>;
 
-export interface SymbolsResult {
+type TextContentBlock = { type: "text"; text: string };
+type ImageContentBlock = { type: "image"; data: string; mimeType: string };
+type ReadContentBlock = TextContentBlock | ImageContentBlock;
+
+interface SymbolsResult {
   path: string;
   language: string;
   title?: string;
@@ -150,7 +167,7 @@ export interface SymbolsResult {
   }>;
 }
 
-export interface ReadResult {
+interface ReadResult {
   path: string;
   symbol_id?: string;
   content: string;
@@ -169,21 +186,16 @@ export interface ReadResult {
   media?: { kind: string; mime: string; data_base64: string };
 }
 
-export interface MutationResult {
+interface MutationResult {
   path: string;
   action: string;
   symbol_id?: string;
   diff: string;
+  patch: string;
   first_changed_line?: number;
 }
 
-export interface CommentReadResult {
-  path: string;
-  symbol_id: string;
-  comment: string;
-}
-
-export interface EditBatchResult {
+interface EditBatchResult {
   path: string;
   diff: string;
   patch: string;
@@ -191,51 +203,154 @@ export interface EditBatchResult {
   edits_applied: number;
 }
 
-const SRC_PROMPT_GUIDELINES = [
-  "Prefer src symbol-aware operations for structured source and Markdown files because they usually require less content and are more efficient.",
-  "Before a symbol-scoped src read or mutation, call src with action symbols for the current file and copy the exact returned ID.",
-  "A src symbol ID is the opaque ID returned by src action symbols; it is not the displayed symbol name and must never be guessed or constructed from a function, class, method, variable, or section name.",
-  "src action edit does not require symbols when the exact original text is already known.",
-  "When exact text is not already known, prefer src action symbols followed by a symbol-aware read or mutation.",
-  "Refresh src symbols after a structural edit before another symbol-scoped operation because IDs may have changed.",
-  "For multiple disjoint exact replacements in one file, use one src action edit with multiple entries. Entries match the original file and must not overlap.",
+const READ_PROMPT_GUIDELINES = [
+  "Prefer read's symbol-aware navigation for structured source and Markdown when the exact text is not already known.",
+  "Use read with symbols: true to obtain the current outline, then copy the exact opaque symbol_id; never use a display name or guess an ID.",
+  "Refresh read's symbol outline after a structural edit before another symbol-scoped read because IDs may have changed.",
 ];
 
-type Action =
-  | { action: "symbols"; path: string }
+const EDIT_PROMPT_GUIDELINES = [
+  "Prefer edit's symbol-aware operations for structured source and Markdown when the exact original text is not already known.",
+  "Before a symbol-scoped edit, call read with symbols: true and copy the exact opaque symbol_id; never use a display name or guess an ID.",
+  "Refresh read's symbol outline after a structural edit before another symbol-scoped operation because IDs may have changed.",
+  "Use edit's normal exact edits form directly when the original text is already known; it does not require symbol discovery.",
+  "For multiple disjoint exact replacements in one file, use one edit call with multiple entries in edits[].",
+];
+
+const MAX_READ_BYTES = 50 * 1024;
+
+interface ReadExecutionResult {
+  content: ReadContentBlock[];
+  details: ReadToolDetails | undefined;
+}
+
+interface EditExecutionResult {
+  content: TextContentBlock[];
+  details: EditToolDetails | undefined;
+}
+
+interface SymbolReadInput {
+  path: string;
+  symbol_id: string;
+  offset?: number;
+  limit?: number;
+}
+
+interface SymbolsReadInput {
+  path: string;
+  symbols: true;
+}
+
+type SymbolEditInput =
+  | { path: string; operation: "replace"; symbol_id: string; content: string }
   | {
-      action: "read";
       path: string;
-      symbol_id?: string;
-      offset?: number;
-      limit?: number;
-    }
-  | { action: "replace"; path: string; symbol_id: string; content: string }
-  | {
-      action: "insert";
-      path: string;
+      operation: "insert";
       symbol_id: string;
       position: "before" | "after";
       content: string;
     }
-  | { action: "delete"; path: string; symbol_id: string }
-  | { action: "comment"; path: string; symbol_id: string; read?: boolean; content?: string }
-  | { action: "edit"; path: string; edits: Array<{ oldText: string; newText: string }> };
+  | { path: string; operation: "delete"; symbol_id: string }
+  | { path: string; operation: "comment"; symbol_id: string; content: string };
 
-function isAction<T extends Action["action"]>(
-  input: SrcInput,
-  action: T,
-): input is Extract<SrcInput, { action: T }> {
-  return input.action === action;
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null;
 }
 
-function isReadComment(input: SrcInput): input is SrcInput & { action: "comment"; read: true } {
-  return input.action === "comment" && (input as { read?: boolean }).read === true;
+function isSymbolsRead(input: ReadInput): input is SymbolsReadInput {
+  const value = input as unknown as Record<string, unknown>;
+  return isRecord(value) && value["symbols"] === true && typeof value["path"] === "string";
 }
 
-const MAX_READ_BYTES = 50 * 1024;
+function isSymbolRead(input: ReadInput): input is SymbolReadInput {
+  const value = input as unknown as Record<string, unknown>;
+  return isRecord(value) && typeof value["symbol_id"] === "string";
+}
 
-/** Builds action-specific src read text from CLI-supplied window metadata. */
+function isSymbolEdit(input: EditInput): input is SymbolEditInput {
+  const value = input as unknown as Record<string, unknown>;
+  return isRecord(value) && typeof value["operation"] === "string";
+}
+
+function hasEmptySymbolID(input: unknown): boolean {
+  return isRecord(input) && typeof input.symbol_id === "string" && input.symbol_id.length === 0;
+}
+
+function assertSymbolID(input: unknown): void {
+  if (hasEmptySymbolID(input)) {
+    throw new Error("symbol_id must not be empty");
+  }
+}
+
+function appendReadWindow(args: string[], offset?: number, limit?: number): void {
+  if (offset !== undefined && offset > 0) {
+    const value = Math.trunc(offset);
+    if (value > 0) {
+      args.push("--offset", String(value));
+    }
+  }
+  if (limit !== undefined && limit > 0) {
+    const value = Math.trunc(limit);
+    if (value > 0) {
+      args.push("--limit", String(value));
+    }
+  }
+}
+
+function buildReadArgs(input: ReadInput, absolutePath: string): { args: string[] } {
+  assertSymbolID(input);
+  if (isSymbolsRead(input)) {
+    return { args: ["symbols", absolutePath, "--json"] };
+  }
+  if (isSymbolRead(input)) {
+    const args = ["read", absolutePath, "--symbol-id", input.symbol_id, "--json"];
+    appendReadWindow(args, input.offset, input.limit);
+    return { args };
+  }
+
+  const exactInput = input as { offset?: number; limit?: number };
+  const args = ["read", absolutePath, "--json"];
+  appendReadWindow(args, exactInput.offset, exactInput.limit);
+  return { args };
+}
+
+function buildEditArgs(input: EditInput, absolutePath: string): { args: string[]; stdin?: string } {
+  assertSymbolID(input);
+  if (isSymbolEdit(input)) {
+    switch (input.operation) {
+      case "replace":
+        return {
+          args: ["replace", absolutePath, "--symbol-id", input.symbol_id, "--json"],
+          stdin: input.content,
+        };
+      case "insert": {
+        const flag = input.position === "after" ? "--after" : "--before";
+        return {
+          args: ["insert", absolutePath, flag, input.symbol_id, "--json"],
+          stdin: input.content,
+        };
+      }
+      case "delete":
+        return { args: ["delete", absolutePath, "--symbol-id", input.symbol_id, "--json"] };
+      case "comment":
+        return {
+          args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--json"],
+          stdin: input.content,
+        };
+      default:
+        throw new Error("unsupported edit operation");
+    }
+  }
+
+  if (!isRecord(input) || !Array.isArray(input.edits)) {
+    throw new Error("edit input must contain edits or one symbol operation");
+  }
+  return {
+    args: ["edit", absolutePath, "--edits-json", "--json"],
+    stdin: JSON.stringify({ edits: input.edits }),
+  };
+}
+
 function renderReadText(result: ReadResult): string {
   if (result.media) {
     return `Read image file [${result.media.mime}]`;
@@ -265,7 +380,7 @@ function renderReadText(result: ReadResult): string {
   return content;
 }
 
-/** Converts the CLI's Pi-equivalent window into details metadata. */
+/** Converts the CLI's Pi-equivalent window into built-in read details. */
 function toTruncation(result: ReadResult): TruncationResult | undefined {
   if (!result.truncated) {
     return undefined;
@@ -285,167 +400,47 @@ function toTruncation(result: ReadResult): TruncationResult | undefined {
   };
 }
 
-function readModelText(result: ReadResult) {
-  const text = renderReadText(result);
-  const truncation = toTruncation(result);
-  return truncation ? { text, truncation, fullOutputPath: result.path } : { text };
-}
-
-export function srcTool() {
-  const binary = resolveBinaryPath("src", { require });
+function readTextResult(text: string, truncation?: TruncationResult): ReadExecutionResult {
   return {
-    name: "src",
-    label: "src",
-    description:
-      "Structure-aware source file reading and editing: inspect symbol outlines, read files or exact symbols, " +
-      "replace/insert/delete/comment symbols by opaque ID, and apply exact multi-edit batches to one file. " +
-      "Paths are absolute or relative to the current working directory. Text output is limited to 2,000 lines " +
-      "or 50KB; truncated output includes a continuation or full-output location.",
-    promptSnippet: "Inspect and edit source files with symbol-aware operations",
-    promptGuidelines: SRC_PROMPT_GUIDELINES,
-    parameters: srcSchema,
-    async execute(
-      _toolCallId: string,
-      params: SrcInput,
-      signal: AbortSignal | undefined,
-      _onUpdate: undefined,
-      ctx: { cwd: string; model?: { input?: string[] } },
-    ): Promise<{
-      content: Array<
-        { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-      >;
-      details: unknown;
-    }> {
-      const absolutePath = resolveSourcePath(params.path, ctx.cwd);
-      const run = () => runAndRender(binary, params, absolutePath, signal, ctx.model);
-      if (isAction(params, "edit") || isMutation(params)) {
-        // Mutations hold Pi's per-file mutation queue for the full
-        // child-process read-modify-write window.
-        return withFileMutationQueue(absolutePath, run);
-      }
-      return run();
-    },
+    content: [{ type: "text", text }],
+    details: truncation ? { truncation } : undefined,
   };
 }
 
-function isMutation(input: SrcInput): boolean {
-  return (
-    input.action === "replace" ||
-    input.action === "insert" ||
-    input.action === "delete" ||
-    input.action === "comment"
+async function renderSymbols(data: SymbolsResult): Promise<ReadExecutionResult> {
+  const lines = data.symbols.map(
+    (symbol) =>
+      `- [${symbol.id}] ${symbol.kind} ${symbol.name}${symbol.parent ? ` (parent: ${symbol.parent})` : ""} [L${symbol.start_line}-L${symbol.end_line}]${symbol.has_doc ? " (doc)" : ""}`,
   );
+  const text =
+    lines.length === 0
+      ? "No symbols found."
+      : `${data.path} (${data.language}):\n` + lines.join("\n");
+  const model = await truncateForModel(text, {
+    hint: "Use read with symbols: true again only when you need the current outline.",
+  });
+  return readTextResult(model.text, model.truncation);
 }
 
-async function runAndRender(
-  binary: string,
-  params: SrcInput,
-  absolutePath: string,
-  signal: AbortSignal | undefined,
-  model?: { input?: string[] },
-): Promise<{
-  content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  >;
-  details: unknown;
-}> {
-  const { args, stdin } = buildArgs(params, absolutePath);
-  const result = await runCli(binary, { args, stdin, signal });
-  if (result.exitCode !== 0) {
-    throw await cliError(result.stderr, result.exitCode);
+function readResult(data: ReadResult, model?: { input?: string[] }): Promise<ReadExecutionResult> {
+  if (data.media) {
+    return renderMedia(data, model);
   }
-  return render(params, result.stdout, model);
+  return Promise.resolve(readTextResult(renderReadText(data), toTruncation(data)));
 }
 
-function buildArgs(input: SrcInput, absolutePath: string): { args: string[]; stdin?: string } {
-  if ("symbol_id" in input && input.symbol_id !== undefined && input.symbol_id.length === 0) {
-    throw new Error("symbol_id must not be empty");
+function editDetails(
+  data: Pick<MutationResult, "diff" | "patch" | "first_changed_line">,
+): EditToolDetails {
+  const details: EditToolDetails = { diff: data.diff, patch: data.patch };
+  if (data.first_changed_line !== undefined) {
+    details.firstChangedLine = data.first_changed_line;
   }
-  if (isAction(input, "symbols")) {
-    return { args: ["symbols", absolutePath, "--json"] };
-  }
-  if (isAction(input, "read")) {
-    const args = ["read", absolutePath, "--json"];
-    if (input.symbol_id !== undefined) {
-      args.push("--symbol-id", input.symbol_id);
-    }
-    if (input.offset !== undefined && input.offset > 0) {
-      args.push("--offset", String(input.offset));
-    }
-    if (input.limit !== undefined && input.limit > 0) {
-      args.push("--limit", String(input.limit));
-    }
-    return { args };
-  }
-  if (isAction(input, "replace")) {
-    return {
-      args: ["replace", absolutePath, "--symbol-id", input.symbol_id, "--json"],
-      stdin: input.content,
-    };
-  }
-  if (isAction(input, "insert")) {
-    const flag = input.position === "after" ? "--after" : "--before";
-    return {
-      args: ["insert", absolutePath, flag, input.symbol_id, "--json"],
-      stdin: input.content,
-    };
-  }
-  if (isAction(input, "delete")) {
-    return { args: ["delete", absolutePath, "--symbol-id", input.symbol_id, "--json"] };
-  }
-  if (isAction(input, "comment")) {
-    if (isReadComment(input)) {
-      return {
-        args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--read", "--json"],
-      };
-    }
-    if ("read" in input) {
-      throw new Error("comment read must be true");
-    }
-    if ("content" in input) {
-      return {
-        args: ["comment", absolutePath, "--symbol-id", input.symbol_id, "--json"],
-        stdin: input.content,
-      };
-    }
-    throw new Error("comment requires content");
-  }
-  const edits = JSON.stringify({ edits: input.edits });
-  return { args: ["edit", absolutePath, "--edits-json", "--json"], stdin: edits };
+  return details;
 }
 
-async function render(
-  input: SrcInput,
-  stdout: string,
-  model?: { input?: string[] },
-): Promise<{
-  content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  >;
-  details: unknown;
-}> {
-  if (isAction(input, "symbols")) {
-    const data = parseSingleJsonDoc<SymbolsResult>(stdout);
-    const lines = data.symbols.map(
-      (s) =>
-        `- [${s.id}] ${s.kind} ${s.name}${s.parent ? ` (parent: ${s.parent})` : ""} [L${s.start_line}-L${s.end_line}]${s.has_doc ? " (doc)" : ""}`,
-    );
-    const text =
-      lines.length === 0
-        ? "No symbols found."
-        : `${data.path} (${data.language}):\n` + lines.join("\n");
-    return modelTextResult(data, text, {
-      hint: "Use src action symbols again after narrowing the source file.",
-    });
-  }
-  if (isAction(input, "read")) {
-    const data = parseSingleJsonDoc<ReadResult>(stdout);
-    if (data.media) {
-      return renderMedia(data, model);
-    }
-    return modelTextResult(data, readModelText(data));
-  }
-  if (isAction(input, "edit")) {
+function renderEdit(input: EditInput, stdout: string): EditExecutionResult {
+  if (!isSymbolEdit(input)) {
     const data = parseSingleJsonDoc<EditBatchResult>(stdout);
     return {
       content: [
@@ -454,20 +449,110 @@ async function render(
           text: `Successfully replaced ${data.edits_applied} block(s) in ${data.path}.`,
         },
       ],
-      details: data,
+      details: editDetails(data),
     };
   }
-  if (isAction(input, "comment") && isReadComment(input)) {
-    const data = parseSingleJsonDoc<CommentReadResult>(stdout);
-    return modelTextResult(data, data.comment, {
-      hint: "Use src action comment with the same symbol ID to read the comment again.",
-    });
-  }
+
   const data = parseSingleJsonDoc<MutationResult>(stdout);
   const label = data.symbol_id ? `${data.action} ${data.symbol_id}` : data.action;
   return {
     content: [{ type: "text", text: `Applied ${label} to ${data.path}.` }],
-    details: data,
+    details: editDetails(data),
+  };
+}
+
+async function runRead(
+  binary: string,
+  input: ReadInput,
+  absolutePath: string,
+  signal: AbortSignal | undefined,
+  model?: { input?: string[] },
+): Promise<ReadExecutionResult> {
+  const { args } = buildReadArgs(input, absolutePath);
+  const result = await runCli(binary, { args, signal });
+  if (result.exitCode !== 0) {
+    throw await cliError(result.stderr, result.exitCode);
+  }
+  const data = parseSingleJsonDoc<SymbolsResult | ReadResult>(result.stdout);
+  if (isSymbolsRead(input)) {
+    return renderSymbols(data as SymbolsResult);
+  }
+  return readResult(data as ReadResult, model);
+}
+
+async function runEdit(
+  binary: string,
+  input: EditInput,
+  absolutePath: string,
+  signal: AbortSignal | undefined,
+): Promise<EditExecutionResult> {
+  const { args, stdin } = buildEditArgs(input, absolutePath);
+  const result = await runCli(binary, { args, stdin, signal });
+  if (result.exitCode !== 0) {
+    throw await cliError(result.stderr, result.exitCode);
+  }
+  return renderEdit(input, result.stdout);
+}
+
+export function readTool() {
+  const binary = resolveBinaryPath("src", { require });
+  return {
+    name: "read",
+    label: builtInRead.label,
+    description:
+      `${builtInRead.description} ` +
+      "It also supports symbols: true for an outline and symbol_id for one exact symbol or Markdown section.",
+    promptSnippet: builtInRead.promptSnippet,
+    promptGuidelines: [...(builtInRead.promptGuidelines ?? []), ...READ_PROMPT_GUIDELINES],
+    parameters: readSchema,
+    async execute(
+      _toolCallId: string,
+      params: ReadInput,
+      signal: AbortSignal | undefined,
+      _onUpdate: undefined,
+      ctx: { cwd: string; model?: { input?: string[] } },
+    ): Promise<ReadExecutionResult> {
+      const absolutePath = resolveSourcePath(params.path, ctx.cwd);
+      return runRead(binary, params, absolutePath, signal, ctx.model);
+    },
+  };
+}
+
+function isOrganonEditArguments(input: unknown): boolean {
+  return isRecord(input) && "operation" in input;
+}
+
+export function editTool() {
+  const binary = resolveBinaryPath("src", { require });
+  return {
+    name: "edit",
+    label: builtInEdit.label,
+    description:
+      `${builtInEdit.description} ` +
+      "It also supports replace, insert, delete, and comment operations against exact opaque symbol or Markdown section IDs.",
+    promptSnippet: builtInEdit.promptSnippet,
+    promptGuidelines: [...(builtInEdit.promptGuidelines ?? []), ...EDIT_PROMPT_GUIDELINES],
+    parameters: editSchema,
+    // Let Pi's installed edit compatibility shim normalize familiar exact forms
+    // (including host-side positional/alias preparation) before this union is
+    // validated. Organon operation objects are passed through unchanged.
+    prepareArguments(args: unknown): Static<typeof editSchema> {
+      if (isOrganonEditArguments(args)) {
+        return args as Static<typeof editSchema>;
+      }
+      return (builtInEdit.prepareArguments?.(args) ?? args) as Static<typeof editSchema>;
+    },
+    async execute(
+      _toolCallId: string,
+      params: EditInput,
+      signal: AbortSignal | undefined,
+      _onUpdate: undefined,
+      ctx: { cwd: string },
+    ): Promise<EditExecutionResult> {
+      const absolutePath = resolveSourcePath(params.path, ctx.cwd);
+      const run = () => runEdit(binary, params, absolutePath, signal);
+      return withFileMutationQueue(absolutePath, run);
+    },
   };
 }
 
@@ -532,12 +617,7 @@ function mediaOmittedText(mimeType: string, message: string, note?: string): str
 async function renderMedia(
   data: ReadResult,
   model?: { input?: string[] },
-): Promise<{
-  content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  >;
-  details: unknown;
-}> {
+): Promise<ReadExecutionResult> {
   const media = data.media!;
   const note = nonVisionNote(model);
   const normalized = await normalizeInlineImage(media.data_base64, media.mime);
@@ -553,7 +633,7 @@ async function renderMedia(
           ),
         },
       ],
-      details: { mime: media.mime },
+      details: undefined,
     };
   }
 
@@ -573,7 +653,7 @@ async function renderMedia(
           ),
         },
       ],
-      details: { mime: media.mime },
+      details: undefined,
     };
   }
 
@@ -592,12 +672,11 @@ async function renderMedia(
       },
       { type: "image", data: resized.data, mimeType: resized.mimeType },
     ],
-    details: { mime: media.mime, width: resized.width, height: resized.height },
+    details: undefined,
   };
 }
 
-export function registerSrcTool(pi: {
-  registerTool(definition: ReturnType<typeof srcTool>): void;
-}): void {
-  pi.registerTool(srcTool());
+export function registerReadEditTools(pi: Pick<ExtensionAPI, "registerTool">): void {
+  pi.registerTool(readTool());
+  pi.registerTool(editTool());
 }

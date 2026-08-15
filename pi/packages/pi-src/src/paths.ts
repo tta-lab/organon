@@ -1,9 +1,10 @@
 import { isAbsolute, resolve as nodeResolve } from "node:path";
 
 /**
- * Resolves a src tool path the way Pi's built-in tools resolve theirs: strip
- * an accidental leading @, then resolve absolute paths directly or relative to
- * the session working directory. src has no project-registry dependency.
+ * Resolves an Organon source override path the way Pi's built-in tools resolve
+ * theirs: strip an accidental leading @, then resolve absolute paths directly
+ * or relative to the session working directory. The extension has no
+ * project-registry dependency.
  */
 export function resolveSourcePath(rawPath: string, cwd: string): string {
   let normalized = rawPath;

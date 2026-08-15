@@ -160,18 +160,20 @@ if (cmd === "read") {
 
 function writeAndReport(action, symbolId_, newSource, oldSource) {
   writeFileSync(path, newSource);
+  const oldLines = oldSource.split("\n");
+  const newLines = newSource.split("\n");
   const diff =
-    oldSource
-      .split("\n")
-      .map((l) => "-" + l)
-      .join("\n") +
+    oldLines.map((line) => "-" + line).join("\n") +
     "\n" +
-    newSource
-      .split("\n")
-      .map((l) => "+" + l)
-      .join("\n");
+    newLines.map((line) => "+" + line).join("\n");
+  const patch =
+    `--- a/${path}\n+++ b/${path}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n` +
+    oldLines.map((line) => `-${line}`).join("\n") +
+    "\n" +
+    newLines.map((line) => `+${line}`).join("\n");
   process.stdout.write(
-    JSON.stringify({ path, action, symbol_id: symbolId_, diff, first_changed_line: 1 }) + "\n",
+    JSON.stringify({ path, action, symbol_id: symbolId_, diff, patch, first_changed_line: 1 }) +
+      "\n",
   );
 }
 

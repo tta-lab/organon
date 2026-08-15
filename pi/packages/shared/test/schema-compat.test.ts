@@ -10,7 +10,7 @@ import {
   ogPushSchema,
 } from "../../pi-og/src/tool.js";
 import { projectSchema } from "../../pi-project/src/tool.js";
-import { srcSchema } from "../../pi-src/src/tool.js";
+import { editSchema, readSchema } from "../../pi-src/src/tool.js";
 import { webSchema } from "../../pi-web/src/tool.js";
 
 interface JsonSchemaLike {
@@ -47,11 +47,12 @@ function constPaths(value: unknown, path = "$", seen = new Set<object>()): strin
 }
 
 // Pi's docs prohibit const/Type.Literal anywhere in a tool schema because
-// Google's API cannot express those structures. Action discriminators therefore
-// use single-value StringEnum fields instead.
+// Google's API cannot express those structures. Organon uses enum-backed
+// booleans and StringEnum discriminators instead.
 describe("tool schemas are Google-compatible", () => {
   const tools: Array<[string, TSchema]> = [
-    ["src", srcSchema],
+    ["read", readSchema],
+    ["edit", editSchema],
     ["web", webSchema],
     ["project", projectSchema],
     ["og_auth_status", ogAuthStatusSchema],
