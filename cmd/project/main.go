@@ -24,11 +24,12 @@ func main() {
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Manage registered projects — list, get, resolve, and navigate",
+		Short: "Manage registered projects — list, find, get, resolve, and navigate",
 		Long:  helpRoot,
 	}
 
 	cmd.AddCommand(newListCmd())
+	cmd.AddCommand(newFindCmd())
 	cmd.AddCommand(newGetCmd())
 	cmd.AddCommand(newResolveCmd())
 	cmd.AddCommand(newJumpCmd())
@@ -75,6 +76,10 @@ func newListCmd() *cobra.Command {
 
 func printProjectBullets(entries []project.Entry) {
 	fmt.Println("Available projects:")
+	printProjectEntries(entries)
+}
+
+func printProjectEntries(entries []project.Entry) {
 	for _, e := range entries {
 		if e.Name != "" && e.Path != "" {
 			fmt.Printf("- %s: %s (path: %s)\n", e.Alias, e.Name, e.Path)
@@ -88,43 +93,79 @@ func printProjectBullets(entries []project.Entry) {
 	}
 }
 
+// --- find ---
+
+func newFindCmd() *cobra.Command {
+	var jsonOut bool
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "find <query>...",
+		Short: "Find active projects by relevance",
+		Long:  helpFind,
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entries, err := project.NewStore(config.ProjectsPath()).Find(strings.Join(args, " "), limit)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				if entries == nil {
+					entries = []project.Entry{}
+				}
+				return json.NewEncoder(os.Stdout).Encode(projectListOutput{Projects: entries})
+			}
+			if len(entries) == 0 {
+				fmt.Println("No active projects found.")
+				return nil
+			}
+			fmt.Println("Matching active projects:")
+			printProjectEntries(entries)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	cmd.Flags().IntVar(
+		&limit, "limit", project.DefaultFindLimit,
+		"Maximum number of active projects to return (maximum 32)",
+	)
+	return cmd
+}
+
 // --- get ---
+
+func canUseProjectReferenceFallback(target string) bool {
+	return strings.Contains(target, "/") || project.ValidateAlias(target) == nil
+}
 
 func newGetCmd() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
-		Use:   "get <alias>",
-		Short: "Get a project by alias (includes references)",
+		Use:   "get <project-reference>",
+		Short: "Get a project by reference (includes references)",
 		Long:  helpGet,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			alias := args[0]
+			reference := args[0]
 			store := project.NewStore(config.ProjectsPath())
-
-			// JSON mode mirrors the MCP project_get contract: the alias must be
-			// an exact registered single-layer alias, never an org/repo string.
-			if jsonOut {
-				e, err := store.Get(alias)
-				if err != nil {
-					return err
+			entry, resolveErr := store.Resolve(reference)
+			if resolveErr == nil {
+				if jsonOut {
+					return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: entry})
 				}
-				return json.NewEncoder(os.Stdout).Encode(projectGetOutput{Project: e})
+				fmt.Println(entry.Path)
+				return nil
+			}
+			if jsonOut || !errors.Is(resolveErr, project.ErrNotFound) {
+				return resolveErr
 			}
 
-			// Human mode keeps the reference-repo fallback for org/repo targets.
-			if !strings.Contains(alias, "/") {
-				e, err := store.Get(alias)
-				if err == nil {
-					fmt.Printf("%s\n", e.Path)
-					return nil
-				}
-				if !errors.Is(err, project.ErrNotFound) {
-					return err
-				}
+			// Human mode keeps the existing local reference-repository fallback.
+			if !canUseProjectReferenceFallback(reference) {
+				return resolveErr
 			}
-			repoPath, repoErr := reporef.Resolve(alias, config.DefaultReferencesPath())
+			repoPath, repoErr := reporef.Resolve(reference, config.DefaultReferencesPath())
 			if repoErr != nil {
-				return repoErr
+				return resolveErr
 			}
 			fmt.Println(repoPath)
 			return nil
@@ -138,40 +179,39 @@ func newGetCmd() *cobra.Command {
 
 func newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resolve <alias-or-path>",
-		Short: "Resolve a project alias or path to project identity and path",
+		Use:   "resolve <project-reference-or-path>",
+		Short: "Resolve a project reference or path to project identity and path",
 		Long:  helpResolve,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 			store := project.NewStore(config.ProjectsPath())
 
-			// Absolute paths are catalog lookups; org/repo targets go directly
-			// to reference resolution instead of alias validation.
+			// Absolute paths are an explicit catalog lookup mode.
 			if filepath.IsAbs(target) {
-				e, err := store.GetByPath(target)
-				if err == nil {
-					return json.NewEncoder(os.Stdout).Encode(e)
-				}
-				return err
-			}
-
-			if !strings.Contains(target, "/") {
-				e, err := store.Get(target)
-				if err == nil {
-					return json.NewEncoder(os.Stdout).Encode(e)
-				}
-				if !errors.Is(err, project.ErrNotFound) {
+				entry, err := store.GetByPath(target)
+				if err != nil {
 					return err
 				}
+				return json.NewEncoder(os.Stdout).Encode(entry)
 			}
 
-			// Fall back to reference repos
+			entry, resolveErr := store.Resolve(target)
+			if resolveErr == nil {
+				return json.NewEncoder(os.Stdout).Encode(entry)
+			}
+			if !errors.Is(resolveErr, project.ErrNotFound) {
+				return resolveErr
+			}
+
+			// org/repo and valid bare names retain their explicit reference-repo mode.
+			if !canUseProjectReferenceFallback(target) {
+				return resolveErr
+			}
 			repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
 			if repoErr != nil {
-				return repoErr
+				return resolveErr
 			}
-
 			return json.NewEncoder(os.Stdout).Encode(project.Entry{Alias: target, Path: repoPath})
 		},
 	}
@@ -182,7 +222,7 @@ func newResolveCmd() *cobra.Command {
 
 func newJumpCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "jump <alias|org/repo>",
+		Use:   "jump <project-reference|org/repo>",
 		Short: "Print the filesystem path for a project or reference repo",
 		Long:  helpJump,
 		Args:  cobra.ExactArgs(1),
@@ -190,32 +230,29 @@ func newJumpCmd() *cobra.Command {
 			target := args[0]
 			store := project.NewStore(config.ProjectsPath())
 
-			// 1. Try a bare project alias. org/repo targets go directly to
-			// reference resolution so strict alias validation cannot reject them.
-			if !strings.Contains(target, "/") {
-				e, err := store.Get(target)
-				if err == nil {
-					fmt.Println(e.Path)
-					return nil
-				}
-				if !errors.Is(err, project.ErrNotFound) {
-					return err
-				}
+			entry, resolveErr := store.Resolve(target)
+			if resolveErr == nil {
+				fmt.Println(entry.Path)
+				return nil
+			}
+			if !errors.Is(resolveErr, project.ErrNotFound) {
+				return resolveErr
 			}
 
-			// 2. Try reference repo
+			// Reference-repository lookup remains a separate explicit mode.
+			if !canUseProjectReferenceFallback(target) {
+				return resolveErr
+			}
 			repoPath, repoErr := reporef.Resolve(target, config.DefaultReferencesPath())
 			if repoErr == nil {
 				fmt.Println(repoPath)
 				return nil
 			}
-
-			// Surface repo lookup failure
 			if strings.Contains(target, "/") {
 				return repoErr
 			}
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: repo lookup also failed: %v\n", repoErr)
-			return fmt.Errorf("project %q not found", target)
+			return resolveErr
 		},
 	}
 	return cmd

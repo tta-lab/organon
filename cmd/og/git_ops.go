@@ -31,9 +31,16 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	canonicalAlias, err := normalizeOGProjectRequest(runtime.projects, &req)
+	if err != nil {
+		return err
+	}
 	resp, err := runtime.executor.GitClone(requestFor(cmd, req))
 	if err != nil {
 		return err
+	}
+	if canonicalAlias != "" && resp.Clone != nil {
+		resp.Clone.Alias = canonicalAlias
 	}
 	if err := og.ValidateCloneResponse(resp); err != nil {
 		return err
@@ -72,7 +79,7 @@ func runGitPush(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 
@@ -95,7 +102,7 @@ func runGitPull(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 
@@ -104,7 +111,7 @@ func runGitTag(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	workDir, _, err := resolveWorkDir(cmd, runtime)
+	workDir, alias, err := resolveWorkDir(cmd, runtime)
 	if err != nil {
 		return err
 	}
@@ -123,6 +130,6 @@ func runGitTag(cmd *cobra.Command, args []string) error {
 	if err := og.ValidateMessageResponse(resp); err != nil {
 		return err
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }

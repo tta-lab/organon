@@ -27,7 +27,7 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogAuthJSON{Project: alias, Auth: *resp.Auth})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 
@@ -55,7 +55,7 @@ func runPRWithOutput(
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 	}
-	return printPR(cmd, resp.PR)
+	return printProjectPR(cmd, alias, resp.PR)
 }
 
 func runLines(
@@ -83,13 +83,47 @@ func runLines(
 		return printJSON(cmd, ogPRLinesJSON{Project: alias, PR: *resp.PR, Lines: resp.Lines})
 	}
 	if len(resp.Lines) == 0 {
-		printResponse(cmd, resp)
+		printProjectResponse(cmd, alias, resp)
 		return nil
+	}
+	if alias != "" {
+		cmd.Printf("Project %s:\n", alias)
 	}
 	for _, line := range resp.Lines {
 		cmd.Println(line)
 	}
 	return nil
+}
+
+func printProjectResponse(cmd *cobra.Command, alias string, resp og.Response) {
+	if alias == "" {
+		printResponse(cmd, resp)
+		return
+	}
+	if resp.Message != "" {
+		cmd.Printf("%s: %s\n", alias, resp.Message)
+		return
+	}
+	if resp.PR != nil {
+		cmd.Printf("Project %s:\n", alias)
+		_ = printPR(cmd, resp.PR)
+		return
+	}
+	if len(resp.Lines) > 0 {
+		cmd.Printf("Project %s:\n", alias)
+		for _, line := range resp.Lines {
+			cmd.Println(line)
+		}
+		return
+	}
+	printResponse(cmd, resp)
+}
+
+func printProjectPR(cmd *cobra.Command, alias string, pr *og.PullRequest) error {
+	if alias != "" {
+		cmd.Printf("Project %s:\n", alias)
+	}
+	return printPR(cmd, pr)
 }
 
 func printResponse(cmd *cobra.Command, resp og.Response) {

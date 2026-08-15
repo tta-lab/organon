@@ -46,6 +46,24 @@ func (s *Store) Get(alias string) (Entry, error) {
 	return catalog.GetExact(alias)
 }
 
+// Resolve reads the current registry and resolves an existing project reference.
+func (s *Store) Resolve(reference string) (Entry, error) {
+	catalog, err := s.Snapshot()
+	if err != nil {
+		return Entry{}, err
+	}
+	return catalog.Resolve(reference)
+}
+
+// Find reads the current registry and returns ranked active projects.
+func (s *Store) Find(query string, limit int) ([]Entry, error) {
+	catalog, err := s.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+	return catalog.Find(query, limit)
+}
+
 // GetByPath reads the current registry and returns an exact cleaned path.
 func (s *Store) GetByPath(path string) (Entry, error) {
 	catalog, err := s.Snapshot()

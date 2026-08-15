@@ -208,7 +208,7 @@ func TestCLIRejectsExplicitEmptyProjectBeforeDomainCall(t *testing.T) {
 		return og.Response{}, nil
 	}}
 	_, _, err := runDirectCLI(t, executor, testProjectStore(t), "", "auth", "status", "--project", "", "--json")
-	if err == nil || !strings.Contains(err.Error(), "project alias must not be empty") {
+	if err == nil || !strings.Contains(err.Error(), "project reference must not be empty") {
 		t.Fatalf("error = %v", err)
 	}
 	if called {
@@ -437,5 +437,49 @@ allowed_base_urls = ["http://forgejo.example"]
 	}
 	if strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error contains secret material: %v", err)
+	}
+}
+
+func TestCLIResolvesAlternateProjectReferenceBeforeExecutor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	content := "[fb]\npath = \"/work/flick-backend\"\nremote = \"https://example.com/owner/flick-backend.git\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projects := project.NewStore(path)
+	var got og.Request
+	executor := &directExecutor{gitPush: func(req og.Request) (og.Response, error) {
+		got = req
+		return og.Response{Message: "pushed"}, nil
+	}}
+
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "push", "--project", "FLICK-BACKEND", "--json")
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if got.WorkDir != "/work/flick-backend" {
+		t.Fatalf("request = %+v, want resolved checkout", got)
+	}
+	var output ogMessageJSON
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if output.Project != "fb" {
+		t.Fatalf("output project = %q, want canonical fb", output.Project)
+	}
+}
+
+func TestCLIRejectsUnknownOGProjectBeforeExecutorWithRecovery(t *testing.T) {
+	called := false
+	executor := &directExecutor{gitPush: func(og.Request) (og.Response, error) {
+		called = true
+		return og.Response{Message: "unexpected"}, nil
+	}}
+	_, _, err := runDirectCLI(t, executor, testProjectStore(t), "", "push", "--project", "missing", "--json")
+	if err == nil || !strings.Contains(err.Error(), "project find") || !strings.Contains(err.Error(), "project list") {
+		t.Fatalf("error = %v, want shared recovery guidance", err)
+	}
+	if called {
+		t.Fatal("executor called for unknown project")
 	}
 }

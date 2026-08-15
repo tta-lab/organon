@@ -11,6 +11,9 @@ var helpList string
 //go:embed help/get.md
 var helpGet string
 
+//go:embed help/find.md
+var helpFind string
+
 //go:embed help/resolve.md
 var helpResolve string
 

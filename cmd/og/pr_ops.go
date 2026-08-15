@@ -43,7 +43,7 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 
@@ -119,7 +119,7 @@ func runPRModify(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 
@@ -154,7 +154,7 @@ func runPRComment(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogCommentJSON{Project: alias, Comment: *resp.Comment})
 	}
-	printResponse(cmd, resp)
+	printProjectResponse(cmd, alias, resp)
 	return nil
 }
 

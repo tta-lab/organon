@@ -36,7 +36,7 @@ func newRootCmdWithExecutor(
 	cmd.SetErr(stderr)
 
 	cmd.PersistentFlags().String("project", "",
-		"Exact registered project alias; resolved to its checkout path for guarded operations")
+		"Project reference (alias, checkout name, or repository name); resolved to its checkout path")
 
 	cmd.AddCommand(newPRCmd())
 	cmd.AddCommand(newGitPushCmd())
@@ -203,7 +203,7 @@ func newGitTagCmd() *cobra.Command {
 
 func newGitCloneCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "clone <project-alias|http(s)-url>",
+		Use:   "clone <project-reference|http(s)-url>",
 		Short: "Clone a repository to its derived project or reference path",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runGitClone,

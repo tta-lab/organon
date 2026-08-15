@@ -71,10 +71,17 @@ describe("pi-og extension", () => {
     expect(Value.Check(ogSchema, { action: "auth_status", project: "ko", bogus: 1 })).toBe(false);
   });
 
-  it("rejects empty project aliases for every registered-project action before starting the CLI", async () => {
+  it("rejects empty project references for every registered-project action before starting the CLI", async () => {
     for (const input of emptyProjectInputs) {
-      await expect(call(input)).rejects.toThrow(/project alias must not be empty/);
+      await expect(call(input)).rejects.toThrow(/project reference must not be empty/);
     }
+  });
+
+  it("passes project references through and renders the canonical alias returned by OG", async () => {
+    const auth = await call({ action: "auth_status", project: "flick-backend" });
+    expect((auth.details as { project: string }).project).toBe("fb");
+    const push = await call({ action: "push", project: "flick-backend" });
+    expect((push.details as { project: string }).project).toBe("fb");
   });
 
   it("auth_status works with only the package-local fixture binary", async () => {
@@ -91,7 +98,7 @@ describe("pi-og extension", () => {
 
   it("push/pull forward force and return the OG message", async () => {
     const push = await call({ action: "push", project: "ko", force: true });
-    expect((push.content[0] as { text: string }).text).toBe("push completed");
+    expect((push.content[0] as { text: string }).text).toBe("ko: push completed");
     const pull = await call({ action: "pull", project: "ko" });
     expect((pull.details as { project: string }).project).toBe("ko");
   });

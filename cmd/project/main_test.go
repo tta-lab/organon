@@ -181,7 +181,7 @@ func TestProjectList_Empty(t *testing.T) {
 	}
 }
 
-func TestProjectGetRejectsDottedAliasWithoutReferenceFallback(t *testing.T) {
+func TestProjectGetRejectsUnsupportedReferenceWithoutFallback(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	writeProjectsConfig(t, tmpHome, `
@@ -198,8 +198,8 @@ remote = "https://example.com/owner/fse.git"
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(err.Error(), "invalid project alias") {
-		t.Fatalf("error = %v, want invalid project alias", err)
+	if !strings.Contains(err.Error(), "project find") || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %v, want project-reference recovery guidance", err)
 	}
 }
 
@@ -273,5 +273,148 @@ func TestProjectCommandsPreserveOrgRepoReferenceLookup(t *testing.T) {
 			stdout, err := runProject(t, tt.args)
 			tt.want(t, stdout, err)
 		})
+	}
+}
+
+func TestProjectRegisteredBranchesResolveAlternateReferencesCanonically(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[fb]
+name = "FlickNote Backend"
+path = "/projects/flick-backend"
+remote = "https://example.com/owner/flick-backend.git"
+`)
+
+	stdout, err := runProject(t, []string{"get", "FLICK-BACKEND", "--json"})
+	if err != nil {
+		t.Fatalf("get alternate reference: %v", err)
+	}
+	var getOutput struct {
+		Project map[string]any `json:"project"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &getOutput); err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	if getOutput.Project["alias"] != "fb" || getOutput.Project["path"] != "/projects/flick-backend" {
+		t.Fatalf("get output = %#v, want canonical fb", getOutput.Project)
+	}
+
+	stdout, err = runProject(t, []string{"resolve", "flick-backend"})
+	if err != nil {
+		t.Fatalf("resolve alternate reference: %v", err)
+	}
+	var resolveOutput map[string]any
+	if err := json.Unmarshal([]byte(stdout), &resolveOutput); err != nil {
+		t.Fatalf("decode resolve: %v", err)
+	}
+	if resolveOutput["alias"] != "fb" {
+		t.Fatalf("resolve output = %#v, want canonical fb", resolveOutput)
+	}
+
+	stdout, err = runProject(t, []string{"jump", "flick-backend"})
+	if err != nil {
+		t.Fatalf("jump alternate reference: %v", err)
+	}
+	if stdout != "/projects/flick-backend\n" {
+		t.Fatalf("jump output = %q", stdout)
+	}
+}
+
+func TestProjectFindJSONOrderingAndEmptyResult(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[fb]
+name = "FlickNote Backend"
+path = "/projects/flick-backend"
+remote = "https://example.com/owner/flick-backend.git"
+
+[backend]
+name = "Backend Worker"
+path = "/projects/worker"
+remote = "https://example.com/owner/worker.git"
+
+[archived.old]
+name = "Backend old"
+path = "/projects/old-backend"
+remote = "https://example.com/owner/old-backend.git"
+`)
+
+	stdout, err := runProject(t, []string{"find", "backend", "--json"})
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	var output struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatalf("decode find: %v", err)
+	}
+	if len(output.Projects) != 2 || output.Projects[0]["alias"] != "backend" || output.Projects[1]["alias"] != "fb" {
+		t.Fatalf("find projects = %#v, want backend then fb", output.Projects)
+	}
+	for _, entry := range output.Projects {
+		if entry["archived"] == true {
+			t.Fatalf("find returned archived project: %#v", entry)
+		}
+	}
+
+	stdout, err = runProject(t, []string{"find", "no-such-project", "--json"})
+	if err != nil {
+		t.Fatalf("unmatched find: %v", err)
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatalf("decode empty find: %v", err)
+	}
+	if output.Projects == nil || len(output.Projects) != 0 {
+		t.Fatalf("empty find projects = %#v, want nonnil empty array", output.Projects)
+	}
+
+	stdout, err = runProject(t, []string{"find", "no-such-project"})
+	if err != nil || stdout != "No active projects found.\n" {
+		t.Fatalf("human empty find = %q, err = %v", stdout, err)
+	}
+}
+
+func TestProjectNotFoundSuggestsActiveFindRecovery(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[fb]
+name = "FlickNote Backend"
+path = "/projects/flick-backend"
+remote = "https://example.com/owner/flick-backend.git"
+
+[archived.old]
+name = "FlickNote Backend old"
+path = "/projects/flick-backend-old"
+remote = "https://example.com/owner/flick-backend-old.git"
+`)
+
+	_, err := runProject(t, []string{"get", "flick-backnd", "--json"})
+	if err == nil || !strings.Contains(err.Error(), "fb") ||
+		!strings.Contains(err.Error(), "project find") || !strings.Contains(err.Error(), "project list") ||
+		strings.Contains(err.Error(), "old") {
+		t.Fatalf("not-found error = %v, want active suggestion and recovery hint", err)
+	}
+}
+
+func TestProjectHumanReferenceFallbackSurvivesActiveSuggestions(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	writeProjectsConfig(t, tmpHome, `[near]
+name = "TTA Lab Demo"
+path = "/projects/near"
+remote = "https://example.com/owner/near.git"
+`)
+	repoPath := filepath.Join(tmpHome, "code", "references", "github.com", "tta-lab", "demo")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("mkdir reference repo: %v", err)
+	}
+
+	stdout, err := runProject(t, []string{"get", "tta-lab/demo"})
+	if err != nil {
+		t.Fatalf("get reference fallback: %v", err)
+	}
+	if stdout != repoPath+"\n" {
+		t.Fatalf("get output = %q, want %q", stdout, repoPath+"\n")
 	}
 }

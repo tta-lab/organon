@@ -20,7 +20,8 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 const positional = args.filter((_, i) => !consumed.has(i));
-const project = flags.get("project") ?? "";
+const rawProject = flags.get("project") ?? "";
+const project = rawProject === "flick-backend" ? "fb" : rawProject;
 const prId = flags.get("pr-id");
 const fail = flags.get("fail") === "true";
 
@@ -116,7 +117,7 @@ if (cmd.startsWith("auth status")) {
   process.stdout.write(
     JSON.stringify({
       clone: {
-        alias: flags.get("alias") ?? "",
+        alias: flags.get("alias") ?? (target === "flick-backend" ? "fb" : ""),
         path: "/work/" + (target ?? "repo"),
         host: "github.com",
         owner: "tta-lab",

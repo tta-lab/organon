@@ -10,7 +10,7 @@ host.
 | --------------------- | --------- | ------------------------------------------------------------------------------------------------ |
 | `@tta-lab/pi-src`     | `src`     | Structure-aware file reading and editing (replaces Pi's built-in `read` and `edit` while active) |
 | `@tta-lab/pi-web`     | `web`     | Web search, page fetch, library documentation, Sourcegraph code search                           |
-| `@tta-lab/pi-project` | `project` | List and get registered projects                                                                 |
+| `@tta-lab/pi-project` | `project` | List, find, and get registered projects                                                          |
 | `@tta-lab/pi-og`      | `og`      | Guarded Git and forge operations through the package-local og binary                             |
 
 ## Install
@@ -93,13 +93,19 @@ private and bundled into each extension (there is no fifth published runtime
 package).
 
 ```bash
-pnpm install
+make pi-build
+cd pi
 pnpm exec prettier --write .
 pnpm exec tsc -p tsconfig.json --noEmit
 pnpm exec vitest run
-pnpm -r --filter './packages/pi-*' run build
 node scripts/test-release-invariants.mjs
 ```
+
+`make pi-build` detects the supported host, builds the four CGO-disabled Go
+binaries directly into the matching native packages, installs the frozen Pi
+lockfile, and builds all four extension bundles. It recreates missing native
+`bin` directories and rejects unsupported hosts instead of staging a binary
+under the wrong platform name.
 
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to all sixteen
 manifests, `scripts/stage-natives.mjs` copies the cross-compiled Go binaries
@@ -113,15 +119,11 @@ publishing.
 
 An extension resolves only its host platform's native package binary (for
 example `@tta-lab/pi-src-darwin-arm64/bin/src`); it never reads `PATH` or
-`$GOBIN`. To debug against a real Go binary, build the current-platform binary
-into the matching native package, then load the extension directly or install
-the package locally:
+`$GOBIN`. To debug against real Go binaries, run `make pi-build`, then load the
+extension directly or install the package locally:
 
 ```bash
-pnpm --dir pi install
-pnpm --dir pi run build
-
-CGO_ENABLED=0 go build -o pi/packages/native/pi-src-darwin-arm64/bin/src ./cmd/src
+make pi-build
 file pi/packages/native/pi-src-darwin-arm64/bin/src   # Mach-O 64-bit arm64
 
 pi -e ./pi/packages/pi-src/dist/index.js
@@ -129,10 +131,10 @@ pi -e ./pi/packages/pi-src/dist/index.js
 pi install /Users/neil/code/guion-opensource/organon/pi/packages/pi-src
 ```
 
-The pi-src/web/project/og tests resolve their binaries from the workspace native
-packages during the run; vitest's global setup stages the fixture binaries
-there and its teardown removes them immediately after, so a local session never
-resolves a leftover fixture. The offline pack smoke works entirely from
-throwaway copies and never writes into the workspace native packages. Replace
-the host-platform binary name (`darwin-arm64`, `linux-x64`, `linux-arm64`) and
-the tool as needed.
+The pi-src/web/project/og tests resolve fixture binaries from a fresh
+temporary package-shaped workspace. Vitest never creates, replaces, or removes
+files in repository `packages/native/*/bin` directories, so running the tests
+with real binaries present leaves them byte-for-byte unchanged—and running with
+them absent leaves them absent. The offline pack smoke also uses throwaway
+copies. Replace the host-platform binary name (`darwin-arm64`, `linux-x64`,
+`linux-arm64`) and the tool as needed.

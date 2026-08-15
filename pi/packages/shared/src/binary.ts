@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-import { detectPlatform, type PlatformTriple } from "./platform.js";
+import { detectPlatform } from "./platform.js";
 
 /** Resolves an npm specifier to a path; injectable for tests. */
 export type BinaryResolver = (specifier: string) => string;
@@ -26,7 +26,13 @@ export interface BinaryResolutionOptions {
  * actionable error from detectPlatform.
  */
 export function resolveBinaryPath(tool: string, options?: BinaryResolutionOptions): string {
-  const pkg = nativePackageName(tool);
+  const { os, arch } = detectPlatform();
+  const pkg = `@tta-lab/pi-${tool}-${os}-${arch}`;
+  const testWorkspace =
+    process.env.VITEST === "true" ? process.env.ORGANON_PI_TEST_WORKSPACE : undefined;
+  if (testWorkspace && !options?.resolve) {
+    return join(testWorkspace, "packages", "native", `pi-${tool}-${os}-${arch}`, "bin", tool);
+  }
   const require = options?.require ?? createRequire(import.meta.url);
   const resolver = options?.resolve ?? ((specifier: string) => require.resolve(specifier));
   let packageRoot: string;

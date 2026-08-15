@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
+
+	"github.com/tta-lab/organon/internal/textmatch"
 )
 
 const (
@@ -33,7 +34,7 @@ func SearchSkills(skills []Skill, query string, limit int) ([]Skill, error) {
 		return nil, fmt.Errorf("limit must be greater than zero")
 	}
 	limit = min(limit, MaxSearchLimit)
-	queryTokens := skillSearchTokens(query)
+	queryTokens := textmatch.Tokens(query)
 	querySet := tokenSet(queryTokens)
 	queryName := strings.Join(queryTokens, " ")
 	ranked := make([]skillSearchRank, 0, len(skills))
@@ -57,17 +58,17 @@ func SearchSkills(skills []Skill, query string, limit int) ([]Skill, error) {
 func rankSkillSearch(
 	candidate Skill, queryTokens []string, querySet map[string]struct{}, queryName string,
 ) skillSearchRank {
-	nameTokens := skillSearchTokens(candidate.Name)
+	nameTokens := textmatch.Tokens(candidate.Name)
 	nameSet := tokenSet(nameTokens)
 	if len(nameTokens) > 1 {
 		nameSet[strings.Join(nameTokens, "")] = struct{}{}
 	}
-	descriptionSet := tokenSet(skillSearchTokens(candidate.Description))
-	categorySet := tokenSet(skillSearchTokens(candidate.Category))
+	descriptionSet := tokenSet(textmatch.Tokens(candidate.Description))
+	categorySet := tokenSet(textmatch.Tokens(candidate.Category))
 	rank := skillSearchRank{
 		skill:      candidate,
 		exactName:  strings.Join(nameTokens, " ") == queryName,
-		namePhrase: containsTokenSequence(nameTokens, queryTokens),
+		namePhrase: textmatch.ContainsTokenSequence(nameTokens, queryTokens),
 	}
 	for token := range querySet {
 		_, inName := nameSet[token]
@@ -114,56 +115,10 @@ func skillSearchLess(left, right skillSearchRank) bool {
 	return left.skill.Name < right.skill.Name
 }
 
-func skillSearchTokens(value string) []string {
-	runes := []rune(value)
-	tokens := make([]string, 0, 8)
-	var token strings.Builder
-	flush := func() {
-		if token.Len() == 0 {
-			return
-		}
-		tokens = append(tokens, token.String())
-		token.Reset()
-	}
-	for i, current := range runes {
-		if !unicode.IsLetter(current) && !unicode.IsNumber(current) {
-			flush()
-			continue
-		}
-		startsWord := token.Len() > 0 && unicode.IsUpper(current) &&
-			(i > 0 && unicode.IsLower(runes[i-1]) || i+1 < len(runes) && unicode.IsLower(runes[i+1]))
-		if startsWord {
-			flush()
-		}
-		token.WriteRune(unicode.ToLower(current))
-	}
-	flush()
-	return tokens
-}
-
 func tokenSet(tokens []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(tokens))
 	for _, token := range tokens {
 		set[token] = struct{}{}
 	}
 	return set
-}
-
-func containsTokenSequence(tokens, sequence []string) bool {
-	if len(sequence) == 0 || len(sequence) > len(tokens) {
-		return false
-	}
-	for start := 0; start <= len(tokens)-len(sequence); start++ {
-		matches := true
-		for offset := range sequence {
-			if tokens[start+offset] != sequence[offset] {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return true
-		}
-	}
-	return false
 }

@@ -16,7 +16,12 @@ type projectListInput struct {
 }
 
 type projectGetInput struct {
-	Alias string `json:"alias" jsonschema:"exact registered single-layer project alias"`
+	Project string `json:"project" jsonschema:"project reference: alias, checkout basename, or remote basename"`
+}
+
+type projectFindInput struct {
+	Query string `json:"query" jsonschema:"non-blank natural-language query for active projects"`
+	Limit *int   `json:"limit,omitempty" jsonschema:"maximum results; defaults to 8 and is capped at 32"`
 }
 
 type projectListOutput struct {
@@ -68,16 +73,35 @@ func newProjectMCPServer(projects *project.Store) *mcp.Server {
 		_ *mcp.CallToolRequest,
 		input projectGetInput,
 	) (*mcp.CallToolResult, projectGetOutput, error) {
-		entry, err := projects.Get(input.Alias)
+		entry, err := projects.Resolve(input.Project)
 		if err != nil {
 			return nil, projectGetOutput{}, fmt.Errorf("get project: %w", err)
 		}
 		return nil, projectGetOutput{Project: entry}, nil
 	}
 	mcp.AddTool(server, discoveryTool(
+		"project_find",
+		"Find active projects",
+		"Find active projects by alias, display name, checkout name, or repository name. "+
+			"Results are ranked and return canonical aliases.",
+	), func(
+		_ context.Context, _ *mcp.CallToolRequest, input projectFindInput,
+	) (*mcp.CallToolResult, projectListOutput, error) {
+		limit := project.DefaultFindLimit
+		if input.Limit != nil {
+			limit = *input.Limit
+		}
+		entries, err := projects.Find(input.Query, limit)
+		if err != nil {
+			return nil, projectListOutput{}, fmt.Errorf("find projects: %w", err)
+		}
+		return nil, projectListOutput{Projects: entries}, nil
+	})
+
+	mcp.AddTool(server, discoveryTool(
 		"project_get",
 		"Get registered project",
-		"Get one registered project by exact single-layer alias.",
+		"Get one registered project by an exact case-insensitive project reference and return its canonical alias.",
 	), projectGetHandler)
 
 	return server

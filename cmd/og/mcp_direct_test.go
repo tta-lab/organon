@@ -316,3 +316,135 @@ allowed_base_urls = ["http://forgejo.example"]
 		t.Fatalf("result contains secret material: %s", content)
 	}
 }
+
+func TestOGMCPResolvesAlternateProjectReferenceAndReturnsCanonicalAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	content := "[fb]\npath = \"/work/flick-backend\"\nremote = \"https://example.com/owner/flick-backend.git\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got og.Request
+	executor := &directExecutor{
+		gitPush: func(req og.Request) (og.Response, error) {
+			got = req
+			return og.Response{Message: "pushed"}, nil
+		},
+		gitClone: func(req og.Request) (og.Response, error) {
+			got = req
+			return og.Response{Clone: &og.CloneResult{
+				Alias: "caller-spelling", Path: "/work/flick-backend", Host: "example.com", Owner: "owner", Repo: "flick-backend",
+				Provider: "generic", Remote: "https://example.com/owner/flick-backend.git", Registered: true,
+			}}, nil
+		},
+	}
+	session := connectDirectMCP(t, executor, project.NewStore(path))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "push", Arguments: map[string]any{"project": "FLICK-BACKEND"},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("alternate push = %#v, err = %v", result, err)
+	}
+	if got.WorkDir != "/work/flick-backend" {
+		t.Fatalf("push request = %+v, want resolved checkout", got)
+	}
+	var output ogMessageOutput
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.Project != "fb" {
+		t.Fatalf("push project = %q, want canonical fb", output.Project)
+	}
+
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "clone", Arguments: map[string]any{"project": "flick-backend"},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("alternate clone = %#v, err = %v", result, err)
+	}
+	if got.Project != "fb" {
+		t.Fatalf("clone request = %+v, want canonical project", got)
+	}
+	var cloneOutput ogCloneOutput
+	encoded, err = json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &cloneOutput); err != nil {
+		t.Fatal(err)
+	}
+	if cloneOutput.Clone.Alias != "fb" {
+		t.Fatalf("clone output alias = %q, want canonical fb", cloneOutput.Clone.Alias)
+	}
+}
+
+func TestOGMCPRejectsUnknownProjectBeforeExecutorWithRecovery(t *testing.T) {
+	called := false
+	executor := &directExecutor{gitPush: func(og.Request) (og.Response, error) {
+		called = true
+		return og.Response{Message: "unexpected"}, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "push", Arguments: map[string]any{"project": "missing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, _ := json.Marshal(result.Content)
+	if !result.IsError ||
+		!strings.Contains(string(content), "project find") ||
+		!strings.Contains(string(content), "project list") {
+		t.Fatalf("result = %#v, want shared recovery tool error", result)
+	}
+	if called {
+		t.Fatal("executor called for unknown project")
+	}
+}
+
+func TestOGProjectTargetingSeamNormalizesEveryRegisteredOperation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.toml")
+	content := "[fb]\npath = \"/work/flick-backend\"\nremote = \"https://example.com/owner/flick-backend.git\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projects := project.NewStore(path)
+	record := func(req og.Request) (og.Response, error) {
+		if req.WorkDir != "/work/flick-backend" || req.Context == nil {
+			t.Fatalf("request = %+v, want resolved checkout and context", req)
+		}
+		return og.Response{}, nil
+	}
+	executor := &directExecutor{
+		gitPush: record, gitPull: record, gitTag: record,
+		prCreate: record, prView: record, prFind: record, prGet: record,
+		prModify: record, prComment: record, prChecks: record, prLog: record,
+		prFailures: record, authStatus: record,
+	}
+	operations := []struct {
+		name string
+		op   func(og.Request) (og.Response, error)
+	}{
+		{name: "push", op: executor.GitPush}, {name: "pull", op: executor.GitPull},
+		{name: "tag", op: executor.GitTag}, {name: "pr create", op: executor.PRCreate},
+		{name: "pr view", op: executor.PRView}, {name: "pr find", op: executor.PRFind},
+		{name: "pr get", op: executor.PRGet}, {name: "pr modify", op: executor.PRModify},
+		{name: "pr comment", op: executor.PRComment}, {name: "pr checks", op: executor.PRChecks},
+		{name: "pr log", op: executor.PRLog}, {name: "pr failures", op: executor.PRFailures},
+		{name: "auth status", op: executor.AuthStatus},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			_, canonical, err := callProject(context.Background(), projects, "flick-backend", og.Request{}, operation.op)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if canonical != "fb" {
+				t.Fatalf("canonical alias = %q, want fb", canonical)
+			}
+		})
+	}
+}

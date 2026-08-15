@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -70,7 +71,7 @@ func TestProjectMCPListsOnlyDiscoveryTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"project_get", "project_list"}
+	want := []string{"project_find", "project_get", "project_list"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tool names = %v, want %v", names, want)
 	}
@@ -111,7 +112,7 @@ func TestProjectMCPReturnsStructuredCatalogData(t *testing.T) {
 		},
 		{
 			name: "project_get",
-			args: map[string]any{"alias": "organon"},
+			args: map[string]any{"project": "organon"},
 			want: map[string]any{"project": map[string]any{
 				"alias": "organon", "name": "Organon", "path": "/work/code/projects/tta-lab/organon",
 				"remote": "https://github.com/tta-lab/organon.git", "archived": false,
@@ -150,7 +151,7 @@ func TestProjectMCPReloadsRegistryOnEveryCall(t *testing.T) {
 
 	writeProjectsConfig(t, home, "[two]\npath = \"/projects/two\"\nremote = \"https://example.com/owner/two.git\"\n")
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "project_get", Arguments: map[string]any{"alias": "two"},
+		Name: "project_get", Arguments: map[string]any{"project": "two"},
 	})
 	if err != nil {
 		t.Fatalf("call project_get: %v", err)
@@ -165,7 +166,7 @@ func TestProjectMCPRejectsInvalidOrUnknownAliasesAsToolErrors(t *testing.T) {
 	for _, alias := range []string{"organon.child", "/work/code/projects/tta-lab/organon", "missing"} {
 		t.Run(alias, func(t *testing.T) {
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-				Name: "project_get", Arguments: map[string]any{"alias": alias},
+				Name: "project_get", Arguments: map[string]any{"project": alias},
 			})
 			if err != nil {
 				t.Fatalf("protocol error: %v", err)
@@ -203,7 +204,7 @@ remote = "https://github.com/tta-lab/organon.git"
 		t.Fatalf("connect command transport: %v", err)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "project_get", Arguments: map[string]any{"alias": "organon"},
+		Name: "project_get", Arguments: map[string]any{"project": "organon"},
 	})
 	if err != nil {
 		t.Fatalf("call project_get: %v", err)
@@ -213,5 +214,118 @@ remote = "https://github.com/tta-lab/organon.git"
 	}
 	if err := session.Close(); err != nil {
 		t.Fatalf("close session: %v", err)
+	}
+}
+
+func projectMCPToolSchema(t *testing.T, session *mcp.ClientSession, name string) map[string]any {
+	t.Helper()
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name != name {
+			continue
+		}
+		encoded, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(encoded, &schema); err != nil {
+			t.Fatal(err)
+		}
+		return schema
+	}
+	t.Fatalf("tool %q not found", name)
+	return nil
+}
+
+func projectMCPStructuredCall(
+	t *testing.T, session *mcp.ClientSession, name string, args map[string]any,
+) map[string]any {
+	t.Helper()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil || result.IsError {
+		t.Fatalf("%s result = %#v, err = %v", name, result, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+func TestProjectMCPExposesProjectReferenceSchemas(t *testing.T) {
+	session := connectProjectMCP(t, testProjectMCPServer(t))
+	getSchema := projectMCPToolSchema(t, session, "project_get")
+	findSchema := projectMCPToolSchema(t, session, "project_find")
+	getProperties := getSchema["properties"].(map[string]any)
+	if _, exists := getProperties["project"]; !exists {
+		t.Fatalf("project_get schema = %#v, want project field", getSchema)
+	}
+	if _, exists := getProperties["alias"]; exists {
+		t.Fatalf("project_get schema retains alias field: %#v", getSchema)
+	}
+	findProperties := findSchema["properties"].(map[string]any)
+	if _, exists := findProperties["query"]; !exists {
+		t.Fatalf("project_find schema = %#v, want query field", findSchema)
+	}
+	if _, exists := findProperties["limit"]; !exists {
+		t.Fatalf("project_find schema = %#v, want optional limit field", findSchema)
+	}
+}
+
+func TestProjectMCPGetsAlternateProjectReferenceCanonically(t *testing.T) {
+	session := connectProjectMCP(t, testProjectMCPServer(t))
+	output := projectMCPStructuredCall(t, session, "project_get", map[string]any{"project": "ORGANON"})
+	if output["project"].(map[string]any)["alias"] != "organon" {
+		t.Fatalf("get output = %#v, want canonical alias", output)
+	}
+}
+
+func TestProjectMCPFindsActiveProjectsAndReturnsEmptyResult(t *testing.T) {
+	session := connectProjectMCP(t, testProjectMCPServer(t))
+	output := projectMCPStructuredCall(t, session, "project_find", map[string]any{"query": "organon"})
+	projects := output["projects"].([]any)
+	if len(projects) != 1 || projects[0].(map[string]any)["alias"] != "organon" {
+		t.Fatalf("find output = %#v", output)
+	}
+
+	output = projectMCPStructuredCall(t, session, "project_find", map[string]any{"query": "unrelated"})
+	projects = output["projects"].([]any)
+	if projects == nil || len(projects) != 0 {
+		t.Fatalf("empty find output = %#v", output)
+	}
+}
+
+func TestProjectMCPResolutionErrorsExposeSuggestionsAndRejectAliasInput(t *testing.T) {
+	session := connectProjectMCP(t, testProjectMCPServer(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "project_get", Arguments: map[string]any{"project": "organom"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, _ := json.Marshal(result.Content)
+	message := string(content)
+	findHint := strings.Contains(message, "project find") || strings.Contains(message, "project_find")
+	listHint := strings.Contains(message, "project list") || strings.Contains(message, "project_list")
+	if !result.IsError || !strings.Contains(message, "organon") || !findHint || !listHint {
+		t.Fatalf("suggestion error = %s", content)
+	}
+
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "project_get", Arguments: map[string]any{"alias": "organon"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatalf("legacy alias input result = %#v, want tool error", result)
 	}
 }

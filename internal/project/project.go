@@ -36,6 +36,28 @@ func Get(path, alias string) (*Entry, error) {
 	return &entry, nil
 }
 
+// Resolve returns a project for a canonical alias or an alternate exact project reference.
+func Resolve(path, reference string) (*Entry, error) {
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := catalog.Resolve(reference)
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+// Find returns ranked active projects for a natural-language query.
+func Find(path, query string, limit int) ([]Entry, error) {
+	catalog, err := OpenCatalog(path)
+	if err != nil {
+		return nil, err
+	}
+	return catalog.Find(query, limit)
+}
+
 // GetByPath returns a project by exact filesystem path. Returns nil if not found.
 func GetByPath(projectsPath, targetPath string) (*Entry, error) {
 	catalog, err := OpenCatalog(projectsPath)
