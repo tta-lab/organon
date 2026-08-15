@@ -209,10 +209,14 @@ const READ_PROMPT_SNIPPET =
 const EDIT_PROMPT_SNIPPET =
   "Use edit({ path, operation: 'replace', symbol_id: id, content }) for source symbols or Markdown sections, or edit({ path, edits: [{ oldText, newText }] }) for exact text";
 
+const SYMBOL_ID_STABILITY_GUIDANCE =
+  "Opaque IDs are deterministic from canonical symbol or heading labels: body, content, and line-only edits normally preserve unchanged IDs, while renames or structural changes may not; treat the latest returned outline as authoritative.";
+
 const READ_PROMPT_GUIDELINES = [
   "Prefer read's symbol-aware navigation for structured source and Markdown when the exact text is not already known.",
   "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow: get the outline first, then copy its exact returned ID; never use symbol or a display name.",
   "A symbol-scoped read uses the returned symbol_id for either a source symbol or a Markdown heading section.",
+  SYMBOL_ID_STABILITY_GUIDANCE,
   "Continue from a post-edit outline returned by edit; request read with symbols: true again only when another edit may have made IDs stale or the needed entry was omitted.",
 ];
 
@@ -220,6 +224,7 @@ const EDIT_PROMPT_GUIDELINES = [
   "Prefer edit's symbol-aware operations for structured source and Markdown when the exact original text is not already known.",
   "Source symbols and Markdown heading sections share the same outline → opaque symbol_id workflow for symbol-scoped read, replace, insert, and delete; source comment operations use that same opaque symbol_id form for documentation.",
   "Before the first symbol-scoped edit, get the outline with read's symbols form and copy its exact opaque ID into symbol_id; never use symbol or a display name.",
+  SYMBOL_ID_STABILITY_GUIDANCE,
   "After a symbol mutation, continue from the post-edit outline returned in that edit result instead of making a redundant outline read; refresh only when a later edit may have made IDs stale or truncation omitted the needed entry.",
   "Keep symbol replacement and exact-text replacement distinct: the former uses operation, symbol_id, and content; the latter uses edits[] with oldText and newText.",
   "Use normal exact edit directly when the original text is already known; a later exact edit may make previously returned symbol IDs stale.",

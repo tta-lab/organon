@@ -70,8 +70,10 @@ The first returns the current outline. The second reads exactly one source
 symbol or Markdown heading section, with offset and limit relative to that
 selected content. Source symbols and Markdown heading sections use the same
 outline → opaque `symbol_id` workflow. Outline results do not accept pagination
-fields. IDs are opaque and must come from the latest outline; a display name is
-never a valid ID.
+fields. IDs are deterministic from canonical symbol or heading labels, so body,
+content, and line-only edits normally preserve unchanged IDs; renames or
+structural changes may not. Treat the latest returned outline as authoritative,
+and never use a display name as an ID.
 
 ### `edit` capability forms
 
