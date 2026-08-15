@@ -2,7 +2,7 @@
   "name": "@tta-lab/pi-og",
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi extension for guarded Organon Git and forge operations: clone, push, pull, PR lifecycle, and CI status through the og daemon without MCP.",
+  "description": "Pi extension for guarded Organon Git and forge operations: clone, push, pull, PR lifecycle, and CI status through the package-local og binary without MCP.",
   "keywords": [
     "pi-package"
   ],

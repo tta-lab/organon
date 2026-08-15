@@ -35,6 +35,7 @@ var (
 )
 
 type repoContext struct {
+	Context          context.Context
 	WorkDir          string
 	ProjectAlias     string
 	Archived         bool
@@ -124,6 +125,9 @@ func resolveRemoteRepoContextWith(
 }
 
 func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error {
+	if err := operationContext(ctxInfo).Err(); err != nil {
+		return err
+	}
 	if ctxInfo.WorkDir == "" || ctxInfo.RemoteURL == "" || ctxInfo.BaseURL == "" {
 		return nil
 	}
@@ -204,7 +208,7 @@ func resolveRegisteredRepo(workDir string, projects *project.Store) (string, pro
 				registeredInput.Alias, registeredInput.Path, root,
 			)
 		}
-		return root, registeredInput, nil
+		return registeredInput.Path, registeredInput, nil
 	}
 	if inputErr != nil && !errors.Is(inputErr, project.ErrNotFound) {
 		return "", project.Entry{}, inputErr
@@ -217,7 +221,7 @@ func resolveRegisteredRepo(workDir string, projects *project.Store) (string, pro
 		}
 		for _, candidate := range entries {
 			if sameRealPath(candidate.Path, root) {
-				return root, candidate, nil
+				return candidate.Path, candidate, nil
 			}
 		}
 		return "", project.Entry{}, fmt.Errorf("workdir %q is not inside a registered project", root)
@@ -225,7 +229,7 @@ func resolveRegisteredRepo(workDir string, projects *project.Store) (string, pro
 	if err != nil {
 		return "", project.Entry{}, err
 	}
-	return root, entry, nil
+	return entry.Path, entry, nil
 }
 
 func sameRealPath(left, right string) bool {
@@ -282,6 +286,9 @@ type gitAuthentication struct {
 var runGitWithCredsFunc = runGitWithCredsImpl
 
 func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...string) error {
+	if err := operationContext(ctxInfo).Err(); err != nil {
+		return err
+	}
 	if err := validateCurrentRemoteTargets(ctxInfo, purpose == githubapp.PurposeGitWrite); err != nil {
 		return err
 	}
@@ -318,7 +325,7 @@ func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitA
 	if ctxInfo.githubBroker == nil {
 		return gitAuthentication{}, fmt.Errorf("GitHub App authentication is not configured")
 	}
-	token, err := ctxInfo.githubBroker.Token(context.Background(), ctxInfo.Owner, ctxInfo.Repo, purpose)
+	token, err := ctxInfo.githubBroker.Token(operationContext(ctxInfo), ctxInfo.Owner, ctxInfo.Repo, purpose)
 	if err != nil {
 		if purpose == githubapp.PurposeGitRead &&
 			(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound)) {
@@ -347,7 +354,7 @@ func requireGitPushTarget(ctxInfo *repoContext, operation string) error {
 }
 
 func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(operationContext(ctxInfo), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	switch ctxInfo.Provider {
@@ -368,6 +375,13 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 		)
 	}
 	return nil
+}
+
+func operationContext(ctxInfo *repoContext) context.Context {
+	if ctxInfo != nil && ctxInfo.Context != nil {
+		return ctxInfo.Context
+	}
+	return context.Background()
 }
 
 func redactSecret(value, secret string) string {

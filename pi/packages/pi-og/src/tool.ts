@@ -229,13 +229,13 @@ interface CloneResult {
 }
 
 const OG_PROMPT_GUIDELINES = [
-  "Use og with a registered project alias; every Git and forge mutation runs through the guarded daemon, so never pass paths, tokens, or credential environment names to og.",
+  "Use og with a registered project alias; every Git and forge mutation runs through the configured OG process, so never pass paths, tokens, or credential environment names to og.",
   "Use og action auth_status to check forge authentication before retrying failed push or PR operations.",
   "Use og action clone with either a registered project or an HTTP(S) URL; project clones never accept alias or reference.",
   "Use og action pr_get without pr_id to inspect the registered checkout's current-branch pull request, or with a positive pr_id for a branch-free remote operation.",
   "Use og action pr_log and pr_failures to inspect CI logs with an optional tail between 0 and 1000 lines.",
   "Use og action pr_modify with at least one of title or body; an empty body explicitly clears it. Use og action pr_comment with a non-blank body.",
-  "Use og action push with force only for force-with-lease; the daemon always rejects force on the default branch.",
+  "Use og action push with force only for force-with-lease; OG always rejects force on the default branch.",
 ];
 
 type Action = OgInput;
@@ -254,9 +254,9 @@ export function ogTool() {
     label: "og",
     description:
       "Guarded repository and forge operations for registered projects: clone, push, pull, PR lifecycle, " +
-      "comments, and CI status. All calls go through the og daemon, which owns credentials and policy. " +
+      "comments, and CI status. All calls use the package-local og binary, which owns credentials and policy. " +
       "Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
-    promptSnippet: "Run guarded Git and forge operations through the og daemon",
+    promptSnippet: "Run guarded Git and forge operations through the package-local og binary",
     promptGuidelines: OG_PROMPT_GUIDELINES,
     parameters: ogSchema,
     async execute(

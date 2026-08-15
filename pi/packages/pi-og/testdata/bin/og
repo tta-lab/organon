@@ -40,7 +40,7 @@ const PR = {
 };
 
 if (fail) {
-  process.stderr.write("Error: daemon policy rejected the operation\n");
+  process.stderr.write("Error: OG policy rejected the operation\n");
   process.exit(1);
 }
 

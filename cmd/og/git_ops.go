@@ -27,7 +27,11 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 		}
 		req.Project = selector
 	}
-	resp, err := og.NewClientFromEnv().CallContext(cmd.Context(), "/git/clone", req)
+	runtime, err := runtimeFor(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := runtime.executor.GitClone(requestFor(cmd, req))
 	if err != nil {
 		return err
 	}
@@ -49,12 +53,16 @@ func runGitClone(cmd *cobra.Command, args []string) error {
 }
 
 func runGitPush(cmd *cobra.Command, args []string) error {
-	workDir, alias, err := resolveDaemonWorkDir(cmd)
+	runtime, err := runtimeFor(cmd)
+	if err != nil {
+		return err
+	}
+	workDir, alias, err := resolveWorkDir(cmd, runtime)
 	if err != nil {
 		return err
 	}
 	force, _ := cmd.Flags().GetBool("force")
-	resp, err := daemonCall("/git/push", og.Request{WorkDir: workDir, Force: force})
+	resp, err := runtime.executor.GitPush(requestFor(cmd, og.Request{WorkDir: workDir, Force: force}))
 	if err != nil {
 		return err
 	}
@@ -64,16 +72,20 @@ func runGitPush(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
-	printDaemonResponse(cmd, resp)
+	printResponse(cmd, resp)
 	return nil
 }
 
 func runGitPull(cmd *cobra.Command, args []string) error {
-	workDir, alias, err := resolveDaemonWorkDir(cmd)
+	runtime, err := runtimeFor(cmd)
 	if err != nil {
 		return err
 	}
-	resp, err := daemonCall("/git/pull", og.Request{WorkDir: workDir})
+	workDir, alias, err := resolveWorkDir(cmd, runtime)
+	if err != nil {
+		return err
+	}
+	resp, err := runtime.executor.GitPull(requestFor(cmd, og.Request{WorkDir: workDir}))
 	if err != nil {
 		return err
 	}
@@ -83,12 +95,16 @@ func runGitPull(cmd *cobra.Command, args []string) error {
 	if jsonFlag(cmd) {
 		return printJSON(cmd, ogMessageJSON{Project: alias, Message: resp.Message})
 	}
-	printDaemonResponse(cmd, resp)
+	printResponse(cmd, resp)
 	return nil
 }
 
 func runGitTag(cmd *cobra.Command, args []string) error {
-	workDir, _, err := resolveDaemonWorkDir(cmd)
+	runtime, err := runtimeFor(cmd)
+	if err != nil {
+		return err
+	}
+	workDir, _, err := resolveWorkDir(cmd, runtime)
 	if err != nil {
 		return err
 	}
@@ -100,10 +116,13 @@ func runGitTag(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		tag = args[0]
 	}
-	resp, err := daemonCall("/git/tag", og.Request{WorkDir: workDir, Tag: tag, Bump: bump})
+	resp, err := runtime.executor.GitTag(requestFor(cmd, og.Request{WorkDir: workDir, Tag: tag, Bump: bump}))
 	if err != nil {
 		return err
 	}
-	printDaemonResponse(cmd, resp)
+	if err := og.ValidateMessageResponse(resp); err != nil {
+		return err
+	}
+	printResponse(cmd, resp)
 	return nil
 }

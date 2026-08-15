@@ -1,7 +1,6 @@
 package og
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/tta-lab/organon/internal/githubapp"
@@ -233,7 +232,7 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 		if ctx.githubBroker == nil {
 			return nil, fmt.Errorf("GitHub App authentication is not configured")
 		}
-		token, err := ctx.githubBroker.Token(context.Background(), ctx.Owner, ctx.Repo, githubapp.PurposeAPI)
+		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, githubapp.PurposeAPI)
 		if err != nil {
 			return nil, err
 		}

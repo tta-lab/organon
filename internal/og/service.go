@@ -10,22 +10,22 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
-// Service owns daemon-scoped dependencies shared across requests.
+// Service owns configured dependencies shared across direct operations.
 type Service struct {
 	githubBroker githubapp.CredentialBroker
 	projects     *project.Store
 	config       ogconfig.Config
 }
 
-// NewService constructs a daemon service. A nil broker leaves GitHub App
-// authentication unavailable while preserving non-GitHub operations.
+// NewService constructs a service with the default project registry. A nil broker
+// leaves GitHub App authentication unavailable while preserving non-GitHub operations.
 func NewService(githubBroker githubapp.CredentialBroker) Service {
 	return NewServiceWithConfig(
 		githubBroker, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
 	)
 }
 
-// NewServiceWithConfig constructs a daemon service with explicit hot registry and trust policy.
+// NewServiceWithConfig constructs a service with an explicit hot registry and trust policy.
 func NewServiceWithConfig(
 	githubBroker githubapp.CredentialBroker,
 	projects *project.Store,
@@ -34,12 +34,12 @@ func NewServiceWithConfig(
 	return Service{githubBroker: githubBroker, projects: projects, config: cfg}
 }
 
-// GitHubAppConfigured reports whether this daemon has GitHub App credentials.
+// GitHubAppConfigured reports whether this service has GitHub App credentials.
 func (s Service) GitHubAppConfigured() bool {
 	return s.githubBroker != nil
 }
 
-// Validate checks daemon-owned configuration without starting listeners or network operations.
+// Validate checks configured project and remote policy without network operations.
 func (s Service) Validate() error {
 	catalog, err := s.projectStore().Snapshot()
 	if err != nil {
@@ -55,6 +55,28 @@ func (s Service) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (s Service) resolveRepoContextForRequest(req Request) (*repoContext, error) {
+	ctx, err := s.resolveRepoContextFor(req.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	bindRequestContext(ctx, req)
+	return ctx, nil
+}
+
+func (s Service) resolveRemoteRepoContextForRequest(req Request) (*repoContext, error) {
+	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	bindRequestContext(ctx, req)
+	return ctx, nil
+}
+
+func bindRequestContext(ctx *repoContext, req Request) {
+	ctx.Context = requestContext(req)
 }
 
 func (s Service) resolveRepoContextFor(workDir string) (*repoContext, error) {
@@ -73,6 +95,11 @@ func (s Service) resolveRemoteRepoContextFor(workDir string) (*repoContext, erro
 	}
 	ctx.githubBroker = s.githubBroker
 	return ctx, nil
+}
+
+// ProjectStore returns the hot registry used by this service.
+func (s Service) ProjectStore() *project.Store {
+	return s.projectStore()
 }
 
 func (s Service) projectStore() *project.Store {

@@ -8,7 +8,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/og"
+	"github.com/tta-lab/organon/internal/project"
 )
+
+const cmdStatus = "status"
 
 func main() {
 	if err := newRootCmd(os.Stdout, os.Stderr).Execute(); err != nil {
@@ -18,6 +21,12 @@ func main() {
 }
 
 func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
+	return newRootCmdWithExecutor(stdout, stderr, nil, nil)
+}
+
+func newRootCmdWithExecutor(
+	stdout, stderr io.Writer, executor og.Executor, projects *project.Store,
+) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "og",
 		Short: "Run typed repository and forge operations",
@@ -35,9 +44,13 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(newGitTagCmd())
 	cmd.AddCommand(newGitCloneCmd())
 	cmd.AddCommand(newAuthCmd())
-	cmd.AddCommand(newDaemonCmd())
 	cmd.AddCommand(newOGMCPCmd())
 
+	if executor != nil {
+		cmd.SetContext(withCommandRuntime(cmd.Context(), commandRuntime{
+			executor: executor, projects: projects,
+		}))
+	}
 	return cmd
 }
 
@@ -211,26 +224,6 @@ func newAuthCmd() *cobra.Command {
 	authStatus := newRunnableCmd(cmdStatus, "Show authentication status", runAuthStatus)
 	authStatus.Flags().Bool("json", false, "Output the structured result as JSON")
 	cmd.AddCommand(authStatus)
-	return cmd
-}
-
-func newDaemonCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "daemon",
-		Short: "Inspect or run the og daemon",
-		Long:  helpDaemon,
-		Args:  cobra.NoArgs,
-		RunE:  showHelp,
-	}
-	cmd.AddCommand(newRunnableCmd("run", "Run the daemon in the foreground", runDaemonRun))
-	cmd.AddCommand(newRunnableCmd("validate", "Validate daemon configuration without starting it", runDaemonValidate))
-	cmd.AddCommand(newRunnableCmd("install", "Install the daemon user service", runDaemonInstall))
-	cmd.AddCommand(newRunnableCmd("uninstall", "Remove the daemon user service", runDaemonUninstall))
-	cmd.AddCommand(newRunnableCmd("start", "Start the daemon user service", runDaemonStart))
-	cmd.AddCommand(newRunnableCmd("stop", "Stop the daemon user service", runDaemonStop))
-	cmd.AddCommand(newRunnableCmd("restart", "Restart the daemon user service", runDaemonRestart))
-	cmd.AddCommand(newRunnableCmd(cmdStatus, "Show daemon status", runDaemonStatus))
-	cmd.AddCommand(newRunnableCmd("health", "Show daemon health", runDaemonHealth))
 	return cmd
 }
 

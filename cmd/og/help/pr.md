@@ -20,6 +20,6 @@ Behavior:
   provider API paths. `og pr failures --tail <lines>` and
   `og pr log --tail <lines>` show CI failure detail.
 
-GitHub API calls use a repository-scoped App installation token minted by the
-daemon. GitHub tokens supplied through the environment or request payload are
-ignored or rejected.
+GitHub API calls use a repository-scoped App installation token minted in the
+OG process. GitHub tokens supplied through the environment or request payload
+are ignored or rejected.

@@ -4,10 +4,11 @@ project alias or an HTTP(S) URL. URL mode may use an optional new alias or the
 reference flag. No tool accepts a destination path, working directory, MCP
 root, token, or file URI.
 
-The `og` daemon must already be running. All pull request tools require an
-exact project alias. Get, modify, comment, checks, log, and failures accept an
-optional positive PR ID and use the registered checkout's current branch when
-it is omitted.
+The MCP server loads configuration and the project registry once at startup,
+then reuses the configured OG service for its lifetime. All pull request tools
+require an exact project alias. Get, modify, comment, checks, log, and failures
+accept an optional positive PR ID and use the registered checkout's current
+branch when it is omitted.
 
 Tools:
 
@@ -26,18 +27,16 @@ Tools:
 
 Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
 CLI behavior and operate on the current named branch at the path registered for
-the alias.
-Force push is rejected on the default branch and otherwise uses
+the alias. Force push is rejected on the default branch and otherwise uses
 `--force-with-lease`. Pull may switch to the default branch and delete a closed
 PR branch locally and remotely after the same safety checks as the CLI.
 
 Archived aliases remain readable. Their pull is restricted to fast-forwarding
 the known default branch; push, tag, PR mutation/comment, and branch cleanup are
-blocked in the daemon. Registry additions are visible on the next tool call
-without restarting this MCP process.
+blocked. Registry additions are visible on the next tool call without
+restarting this MCP process.
 
-Tag, merge, raw provider access, and daemon lifecycle operations are not
-exposed.
+Tag, merge, and raw provider access are not exposed.
 
 Example MCP client configuration:
 
