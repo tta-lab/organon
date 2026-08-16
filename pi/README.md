@@ -131,8 +131,9 @@ Pi uses the local-path `read`/`edit` extension, and CLI users use the normal
 `src` command. If you previously configured `organon-src` in an MCP client,
 remove that server entry.
 
-A native TypeScript/Defuddle implementation of `web.fetch` is a separate future
-spec; this repository's Web extension is a thin adapter over the Go CLI.
+The Pi `web.fetch` action uses the bundled TypeScript Defuddle implementation
+and does not require a globally installed `defuddle` CLI. The other Web actions
+remain thin adapters over the Go CLI.
 
 ## CLI JSON output
 

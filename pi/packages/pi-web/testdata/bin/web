@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // Test-only fake web CLI: mirrors the documented JSON contract of the real
 // Go binary for search/fetch/docs_resolve/docs_fetch/sgraph with --json.
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
+if (process.env.PI_WEB_TEST_INVOCATIONS) {
+  appendFileSync(process.env.PI_WEB_TEST_INVOCATIONS, JSON.stringify(args) + "\n");
+}
 if (!args.includes("--json")) {
   process.stderr.write("Error: --json is required by the extension contract\n");
   process.exit(2);

@@ -1,7 +1,7 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
@@ -23,6 +23,30 @@ async function waitForFile(path: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`child did not write ${path}`);
+}
+
+async function startServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
+  server: Server;
+  url: string;
+}> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("server did not bind");
+  return { server, url: `http://127.0.0.1:${address.port}` };
+}
+
+async function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
+  const prior = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-web-home-"));
+  process.env.HOME = home;
+  try {
+    return await fn();
+  } finally {
+    if (prior === undefined) delete process.env.HOME;
+    else process.env.HOME = prior;
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 describe("pi-web extension", () => {
@@ -82,31 +106,81 @@ describe("pi-web extension", () => {
     await expect(call({ action: "search", query: "boom" })).rejects.toThrow(/rate limited/);
   });
 
-  it("fetch action maps tree/section/full/tree-threshold flags and returns structured details", async () => {
-    const result = await call({
-      action: "fetch",
-      url: "https://example.com/page",
-      tree: true,
-      section_id: "b2",
-      tree_threshold: 999,
+  it("fetches HTML in-process and preserves tree navigation details", async () => {
+    const { server, url } = await startServer((_req, res) => {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(
+        "<html><head><title>Test</title></head><body><article>" +
+          "<h1>Test page</h1><h2>Install</h2><p>Install content.</p>" +
+          "<h3>Details</h3><p>Details content.</p></article></body></html>",
+      );
     });
-    const details = result.details as {
-      url: string;
-      mode: string;
-      content: string;
-      truncation?: unknown;
-    };
-    expect(details.url).toBe("https://example.com/page");
-    expect(details.mode).toBe("tree");
-    expect(details.content).toContain("threshold 999");
-    expect((details as any).truncation).toBeUndefined();
-    expect((result.content[0] as { text: string }).text).toContain("rendered content");
+    try {
+      const result = await withTempHome(() =>
+        call({ action: "fetch", url, tree: true, tree_threshold: 999 }),
+      );
+      const details = result.details as { url: string; mode: string; content: string };
+      expect(details.url).toBe(url);
+      expect(details.mode).toBe("tree");
+      expect(details.content).toContain("Install");
+      expect(details.content).toContain("Details");
+      expect((result.content[0] as { text: string }).text).toContain("Use -s <id>");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
-  it("fetch failure surfaces as a concise error", async () => {
-    await expect(call({ action: "fetch", url: "https://boom.example" })).rejects.toThrow(
-      /connection refused/,
-    );
+  it("fetches non-HTML text and rejects HTTP errors", async () => {
+    const { server, url } = await startServer((req, res) => {
+      if (req.url === "/error") {
+        res.statusCode = 500;
+        res.end("server error");
+        return;
+      }
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.end("plain text content");
+    });
+    try {
+      await withTempHome(async () => {
+        const result = await call({ action: "fetch", url });
+        expect((result.details as { content: string }).content).toBe("plain text content");
+        await expect(call({ action: "fetch", url: `${url}/error` })).rejects.toThrow("HTTP 500");
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("dispatches fetch natively while all other actions invoke the packaged binary", async () => {
+    const { server, url } = await startServer((_req, res) => {
+      res.setHeader("Content-Type", "text/plain");
+      res.end("native fetch");
+    });
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-invocations-"));
+    const invocationPath = join(directory, "invocations");
+    const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
+    process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+    try {
+      await withTempHome(async () => {
+        await call({ action: "fetch", url });
+        expect(existsSync(invocationPath)).toBe(false);
+
+        await call({ action: "search", query: "dispatch-proof" });
+        await call({ action: "docs_resolve", query: "dispatch-proof" });
+        await call({ action: "docs_fetch", library_id: "/dispatch-proof" });
+        await call({ action: "sgraph", query: "dispatch-proof" });
+      });
+      const invocations = readFileSync(invocationPath, "utf8");
+      expect(invocations).toContain('["search","dispatch-proof","--json"]');
+      expect(invocations).toContain('["docs","resolve","dispatch-proof","--json"]');
+      expect(invocations).toContain('["docs","fetch","/dispatch-proof","--json"]');
+      expect(invocations).toContain('["sgraph","dispatch-proof","--json"]');
+    } finally {
+      if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
+      else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
+      rmSync(directory, { recursive: true, force: true });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("docs_resolve passes the query and returns library records", async () => {
@@ -140,25 +214,33 @@ describe("pi-web extension", () => {
     expect((result.content[0] as { text: string }).text).toContain("matches");
   });
 
-  it("fetch returns bounded model text with its complete structured content", async () => {
-    const result = await call({ action: "fetch", url: "https://large.example" });
-    const details = result.details as {
-      content: string;
-      truncation: { truncated: boolean; truncatedBy: string };
-      fullOutputPath: string;
-    };
-
+  it("returns bounded model text with its complete structured content", async () => {
+    const { server, url } = await startServer((_req, res) => {
+      res.setHeader("Content-Type", "text/plain");
+      res.end(Array.from({ length: 3000 }, (_, index) => `line ${index}`).join("\n"));
+    });
     try {
-      expect(details.truncation).toMatchObject({ truncated: true, truncatedBy: "lines" });
-      expect((result.content[0] as { text: string }).text).toContain("section_id");
-      expect((result.content[0] as { text: string }).text).toContain(
-        `Full output saved to: ${details.fullOutputPath}`,
-      );
-      expect(readFileSync(details.fullOutputPath, "utf8")).toBe(details.content);
-    } finally {
-      if (details.fullOutputPath) {
-        rmSync(dirname(details.fullOutputPath), { recursive: true, force: true });
+      const result = await withTempHome(() => call({ action: "fetch", url }));
+      const details = result.details as {
+        content: string;
+        truncation: { truncated: boolean; truncatedBy: string };
+        fullOutputPath: string;
+      };
+
+      try {
+        expect(details.truncation).toMatchObject({ truncated: true, truncatedBy: "lines" });
+        expect((result.content[0] as { text: string }).text).toContain("section_id");
+        expect((result.content[0] as { text: string }).text).toContain(
+          `Full output saved to: ${details.fullOutputPath}`,
+        );
+        expect(readFileSync(details.fullOutputPath, "utf8")).toBe(details.content);
+      } finally {
+        if (details.fullOutputPath) {
+          rmSync(dirname(details.fullOutputPath), { recursive: true, force: true });
+        }
       }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
