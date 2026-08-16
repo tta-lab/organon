@@ -9,5 +9,5 @@ export default defineConfig({
   clean: true,
   sourcemap: false,
   external: ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "typebox"],
-  noExternal: ["defuddle", "linkedom"],
+  noExternal: ["defuddle", "linkedom", "markdown-it"],
 });

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-const DEFAULT_TREE_THRESHOLD = 5000;
-const MAX_CONTENT_CHARS = 30_000;
-const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+import MarkdownIt from "markdown-it";
+
+type MarkdownToken = ReturnType<InstanceType<typeof MarkdownIt>["parse"]>[number];
 
 type Heading = {
   level: number;
@@ -15,6 +15,14 @@ export type MarkdownResult = {
   content: string;
   mode: "full" | "tree" | "section";
 };
+
+const DEFAULT_TREE_THRESHOLD = 5000;
+const MAX_CONTENT_CHARS = 30_000;
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+// Keep this parser local to Pi fetch. The block token maps are the source of
+// truth for section offsets, including headings nested in lists and quotes.
+const markdown = new MarkdownIt();
 
 export function renderMarkdown(
   source: string,
@@ -51,53 +59,54 @@ export function truncateContent(content: string): string {
 }
 
 function parseHeadings(source: string): Omit<Heading, "id">[] {
+  const tokens = markdown.parse(source, {});
+  const lineOffsets = getLineOffsets(source);
   const headings: Omit<Heading, "id">[] = [];
-  const lines = source.split("\n");
-  let offset = 0;
-  let fenced = false;
 
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!.replace(/\r$/, "");
-    const trimmed = line.trimStart();
-    if (/^(```|~~~)/.test(trimmed)) {
-      fenced = !fenced;
-      offset += lines[index]!.length + 1;
-      continue;
-    }
-    if (fenced) {
-      offset += lines[index]!.length + 1;
-      continue;
-    }
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!token || token.type !== "heading_open") continue;
 
-    const atx = line.match(/^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*?)\s*|[ \t]*)$/);
-    if (atx) {
-      headings.push({
-        level: atx[1]!.length,
-        text: normalizeHeadingText(atx[2] ?? ""),
-        start: offset,
-      });
-      offset += lines[index]!.length + 1;
-      continue;
-    }
-
-    const next = lines[index + 1]?.replace(/\r$/, "");
-    if (next && /^[ \t]{0,3}(=+|-+)[ \t]*$/.test(next) && line.trim() !== "") {
-      headings.push({
-        level: next.trimStart().startsWith("=") ? 1 : 2,
-        text: normalizeHeadingText(line.trim()),
-        start: offset,
-      });
-    }
-    offset += lines[index]!.length + 1;
+    const inline = tokens[index + 1];
+    const line = token.map?.[0] ?? 0;
+    headings.push({
+      level: Number(token.tag.slice(1)),
+      text: headingText(inline),
+      start: lineOffsets[line] ?? source.length,
+    });
   }
   return headings;
 }
 
-function normalizeHeadingText(text: string): string {
-  return text
-    .replace(/[ \t]+#+[ \t]*$/, "")
-    .replace(/`([^`]*)`/g, "$1")
-    .trim();
+function getLineOffsets(source: string): number[] {
+  const offsets = [0];
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] === "\n") offsets.push(index + 1);
+  }
+  return offsets;
+}
+
+function headingText(token: MarkdownToken | undefined): string {
+  if (!token || token.type !== "inline") return "";
+
+  const text = (token.children ?? []).map(inlineTokenText).join("");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function inlineTokenText(token: MarkdownToken): string {
+  switch (token.type) {
+    case "text":
+    case "code_inline":
+    case "image":
+      return token.content;
+    case "softbreak":
+    case "hardbreak":
+      return " ";
+    default:
+      // Open/close tokens for emphasis and links carry no label. Their text
+      // children are visited independently, so markup never enters an ID.
+      return "";
+  }
 }
 
 function assignIds(headings: Omit<Heading, "id">[]): Heading[] {
@@ -169,9 +178,8 @@ function renderTree(source: string, headings: Heading[]): string {
   const hasMore = new Map<number, boolean>();
   let tree = "";
   nodes.forEach((node, index) => {
-    const isLast = !nodes.slice(index + 1).some((future) => future.depth <= node.depth)
-      ? true
-      : nodes.slice(index + 1).find((future) => future.depth <= node.depth)!.depth < node.depth;
+    const next = nodes.slice(index + 1).find((future) => future.depth <= node.depth);
+    const isLast = !next || next.depth < node.depth;
     let indent = "";
     for (let depth = 0; depth < node.depth; depth++) {
       indent += hasMore.get(depth) ? "│   " : "    ";

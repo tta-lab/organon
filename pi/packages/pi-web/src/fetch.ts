@@ -62,7 +62,7 @@ async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<stri
       redirect: "follow",
       signal: request.signal,
     });
-    if (!response.ok) {
+    if (response.status >= 400) {
       throw new Error(`HTTP ${response.status}`);
     }
 

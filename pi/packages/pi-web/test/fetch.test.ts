@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { fetchWebPage } from "../src/fetch.js";
 import { renderMarkdown } from "../src/markdown.js";
@@ -19,17 +20,36 @@ async function startServer(handler: (req: IncomingMessage, res: ServerResponse) 
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-async function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
+async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const prior = process.env.HOME;
   const home = mkdtempSync(join(tmpdir(), "pi-web-fetch-home-"));
   process.env.HOME = home;
   try {
-    return await fn();
+    return await fn(home);
   } finally {
     if (prior === undefined) delete process.env.HOME;
     else process.env.HOME = prior;
     rmSync(home, { recursive: true, force: true });
   }
+}
+
+function cachePath(home: string, url: string, date = new Date()): string {
+  const parsed = new URL(url);
+  let base = url.replaceAll("://", "___");
+  if (parsed.search) base = base.split("?", 1)[0]!;
+  base = base.replaceAll("/", "_").replace(/_$/, "").replaceAll("..", "__");
+  if (parsed.search) {
+    const queryHash = createHash("sha256").update(parsed.search.slice(1)).digest("hex").slice(0, 8);
+    base += `_q${queryHash}`;
+  }
+  if (base.length > 200) {
+    const hash = createHash("sha256").update(base).digest("hex").slice(0, 8);
+    base = base.slice(0, 191) + `_${hash}`;
+  }
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+    .join("-");
+  return join(home, ".cache", "organon", "scrapes", `${base}__${day}.md`);
 }
 
 describe.sequential("native Pi fetch", () => {
@@ -59,6 +79,107 @@ describe.sequential("native Pi fetch", () => {
     } finally {
       if (priorGateway === undefined) delete process.env.BROWSER_GATEWAY_URL;
       else process.env.BROWSER_GATEWAY_URL = priorGateway;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("accepts final 3xx responses and rejects only 4xx/5xx responses", async () => {
+    const originalFetch = globalThis.fetch;
+    const statuses = [399, 400, 503];
+    let status = 399;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("status body", {
+          status,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    ) as typeof fetch;
+    try {
+      await withTempHome(async () => {
+        await expect(fetchWebPage({ url: "http://status.test/399" })).resolves.toMatchObject({
+          content: "status body",
+        });
+        for (const rejectedStatus of statuses.slice(1)) {
+          status = rejectedStatus;
+          await expect(
+            fetchWebPage({ url: `http://status.test/${rejectedStatus}` }),
+          ).rejects.toThrow(`HTTP ${rejectedStatus}`);
+        }
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("reuses compatible cache entries, expires stale entries, and separates queries", async () => {
+    let requests = 0;
+    const { server, url } = await startServer((req, res) => {
+      requests++;
+      res.setHeader("Content-Type", "text/plain");
+      res.end(`network ${req.url}`);
+    });
+    try {
+      await withTempHome(async (home) => {
+        const cachedURL = `${url}/cached`;
+        mkdirSync(join(home, ".cache", "organon", "scrapes"), { recursive: true });
+        writeFileSync(cachePath(home, cachedURL), "Go-compatible cache");
+        await expect(fetchWebPage({ url: cachedURL })).resolves.toMatchObject({
+          content: "Go-compatible cache",
+        });
+        expect(requests).toBe(0);
+
+        const staleURL = `${url}/stale`;
+        writeFileSync(
+          cachePath(home, staleURL, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+          "stale cache",
+        );
+        await expect(fetchWebPage({ url: staleURL })).resolves.toMatchObject({
+          content: `network /stale`,
+        });
+        expect(requests).toBe(1);
+
+        await fetchWebPage({ url: `${url}/query?value=one` });
+        await fetchWebPage({ url: `${url}/query?value=two` });
+        await fetchWebPage({ url: `${url}/query?value=one` });
+        expect(requests).toBe(3);
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("continues without caching when setup, read, or write fails", async () => {
+    let requests = 0;
+    const { server, url } = await startServer((_req, res) => {
+      requests++;
+      res.setHeader("Content-Type", "text/plain");
+      res.end("cache failure fallback");
+    });
+    const priorHome = process.env.HOME;
+    const homeFile = mkdtempSync(join(tmpdir(), "pi-web-cache-file-"));
+    let cacheHome: string | undefined;
+    const invalidHome = join(homeFile, "home-file");
+    writeFileSync(invalidHome, "not a directory");
+    try {
+      process.env.HOME = invalidHome;
+      await fetchWebPage({ url: `${url}/setup-failure` });
+      await fetchWebPage({ url: `${url}/setup-failure` });
+      expect(requests).toBe(2);
+
+      cacheHome = mkdtempSync(join(tmpdir(), "pi-web-cache-read-"));
+      process.env.HOME = cacheHome;
+      const cacheDirectory = join(cacheHome, ".cache", "organon", "scrapes");
+      const brokenPath = cachePath(cacheHome, `${url}/read-write-failure`);
+      mkdirSync(cacheDirectory, { recursive: true });
+      mkdirSync(brokenPath, { recursive: true });
+      await fetchWebPage({ url: `${url}/read-write-failure` });
+      await fetchWebPage({ url: `${url}/read-write-failure` });
+      expect(requests).toBe(4);
+    } finally {
+      if (priorHome === undefined) delete process.env.HOME;
+      else process.env.HOME = priorHome;
+      rmSync(homeFile, { recursive: true, force: true });
+      if (cacheHome) rmSync(cacheHome, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
@@ -95,6 +216,27 @@ describe.sequential("native Pi fetch", () => {
         await expect(pending).rejects.toThrow("Operation aborted");
       });
     } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("normalizes request timeout without waiting 30 seconds", async () => {
+    const { server, url } = await startServer((_req, _res) => {
+      // Keep the response open until the request signal aborts it.
+    });
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((handler: (...args: any[]) => void, timeout?: number, ...args: any[]) =>
+        realSetTimeout(handler, timeout === 30_000 ? 0 : timeout, ...args)) as typeof setTimeout);
+    try {
+      await withTempHome(async () => {
+        await expect(fetchWebPage({ url: `${url}/slow` })).rejects.toThrow(
+          "fetch timed out after 30 seconds",
+        );
+      });
+    } finally {
+      timeoutSpy.mockRestore();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

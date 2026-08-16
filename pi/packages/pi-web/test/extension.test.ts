@@ -151,6 +151,38 @@ describe("pi-web extension", () => {
     }
   });
 
+  it("dispatches fetch natively while all other actions invoke the packaged binary", async () => {
+    const { server, url } = await startServer((_req, res) => {
+      res.setHeader("Content-Type", "text/plain");
+      res.end("native fetch");
+    });
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-invocations-"));
+    const invocationPath = join(directory, "invocations");
+    const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
+    process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+    try {
+      await withTempHome(async () => {
+        await call({ action: "fetch", url });
+        expect(existsSync(invocationPath)).toBe(false);
+
+        await call({ action: "search", query: "dispatch-proof" });
+        await call({ action: "docs_resolve", query: "dispatch-proof" });
+        await call({ action: "docs_fetch", library_id: "/dispatch-proof" });
+        await call({ action: "sgraph", query: "dispatch-proof" });
+      });
+      const invocations = readFileSync(invocationPath, "utf8");
+      expect(invocations).toContain('["search","dispatch-proof","--json"]');
+      expect(invocations).toContain('["docs","resolve","dispatch-proof","--json"]');
+      expect(invocations).toContain('["docs","fetch","/dispatch-proof","--json"]');
+      expect(invocations).toContain('["sgraph","dispatch-proof","--json"]');
+    } finally {
+      if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
+      else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
+      rmSync(directory, { recursive: true, force: true });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("docs_resolve passes the query and returns library records", async () => {
     const result = await call({ action: "docs_resolve", query: "react" });
     const details = result.details as { query: string; libraries: Array<{ id: string }> };
