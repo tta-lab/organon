@@ -203,17 +203,25 @@ config so the login credential is removed with the checkout:
 set -eu
 RELEASE_COMMIT=<intended-release-commit>
 RELEASE_VERSION=<next-version>-beta.1
-TMP_CHECKOUT="$(mktemp -d)"
+TMP_HOME="$(mktemp -d)"
 NPM_CONFIG_USERCONFIG="$(mktemp "${TMPDIR:-/tmp}/organon-npmrc.XXXXXX")"
+export HOME="$TMP_HOME"
 export NPM_CONFIG_USERCONFIG
 export NPM_CONFIG_PROVENANCE=false
-trap 'rm -f "$NPM_CONFIG_USERCONFIG"; rm -rf "$TMP_CHECKOUT"' EXIT
+trap 'rm -f "$NPM_CONFIG_USERCONFIG"; rm -rf "$TMP_HOME"' EXIT
 
-git clone https://github.com/tta-lab/organon.git "$TMP_CHECKOUT/organon"
-cd "$TMP_CHECKOUT/organon"
+# og derives the checkout under this disposable HOME; it is not registered in
+# the maintainer's normal project registry. The local tag below is never pushed.
+og clone https://github.com/tta-lab/organon.git
+cd "$HOME/code/projects/tta-lab/organon"
 git checkout --detach "$RELEASE_COMMIT"
 test -z "$(git status --porcelain)"
 
+case "$RELEASE_VERSION" in
+  *-*) ;;
+  *) echo "bootstrap version must be a beta prerelease" >&2; exit 1 ;;
+esac
+RELEASE_TAG="v$RELEASE_VERSION"
 # Use npm >= 11.10.0, log in to the account with account-level 2FA enabled,
 # and complete the interactive 2FA challenge when npm asks for it.
 npm login --registry=https://registry.npmjs.org
@@ -222,23 +230,19 @@ npm whoami --registry=https://registry.npmjs.org
 # npm profile enable-2fa auth-and-writes --registry=https://registry.npmjs.org
 
 (cd pi && pnpm install --frozen-lockfile && pnpm -r --filter './packages/pi-*' run build)
-# GoReleaser cross-builds all supported native artifacts (darwin-arm64,
-# linux-x64, and linux-arm64) without publishing a GitHub release.
-goreleaser release --snapshot --clean
+# GoReleaser reads the exact version from this ephemeral local tag. --skip=publish
+# creates dist artifacts and metadata without creating a GitHub release; never
+# run og push, git push, or a publish command against this checkout's tag.
+git tag --force "$RELEASE_TAG" "$RELEASE_COMMIT"
+goreleaser release --clean --skip=publish
 (cd pi && node scripts/stage-natives.mjs ../dist)
 for f in pi/packages/native/pi-*/bin/*; do
   test -x "$f"
 done
 
-case "$RELEASE_VERSION" in
-  *-*) ;;
-  *) echo "bootstrap version must be a beta prerelease" >&2; exit 1 ;;
-esac
-# Snapshot metadata carries GoReleaser's -SNAPSHOT suffix, so validate the
-# staged artifacts with the snapshot-aware invariant seam before syncing npm.
 (cd pi && node scripts/test-release-invariants.mjs ../dist)
 (cd pi && node scripts/sync-version.mjs "$RELEASE_VERSION")
-(cd pi && node scripts/release-dry-run.mjs "$RELEASE_VERSION")
+(cd pi && node scripts/release-dry-run.mjs "$RELEASE_VERSION" ../dist)
 (cd pi && pnpm exec vitest run)
 (cd pi && node scripts/publish-packages.mjs)
 ```
@@ -294,19 +298,13 @@ Do not enable the normal release path until all sixteen outputs match those
 claims. If setup must be corrected, inspect the trust ID with `npm trust list`,
 revoke only the incorrect relationship, and configure that package again.
 
-Finally, require 2FA for package writes so traditional publish tokens are not a
-routine path; the configured OIDC trusted publishers remain permitted:
-
-```bash
-cd pi
-for package in $(node --input-type=module -e '
-  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
-  for (const entry of packagePublishPlan()) console.log(entry.name);
-'); do
-  npm access set mfa=publish "$package" --registry=https://registry.npmjs.org
-  sleep 2
-done
-```
+Finally, configure the token restriction separately for each package in the npm
+website: open the package **Settings**, open **Publishing access**, and select
+**Require two-factor authentication and disallow tokens**. Verify that setting
+on every one of the sixteen package pages before enabling routine releases.
+This is the npm policy that blocks traditional publish tokens while retaining
+the configured OIDC Trusted Publishers; verify it in the package settings rather
+than relying on a CLI 2FA setting.
 
 ### GitHub Environment and routine OIDC release
 

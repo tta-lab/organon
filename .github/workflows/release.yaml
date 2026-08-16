@@ -118,10 +118,10 @@ jobs:
         working-directory: pi
         run: |
           version="${RELEASE_TAG#v}"
-          case "$version" in
-            *-*) dist_tag=beta ;;
-            *) dist_tag=latest ;;
-          esac
+          dist_tag="$(node --input-type=module -e '
+            import { distTagForVersion } from "./scripts/publish-packages.mjs";
+            console.log(distTagForVersion(process.argv[1]));
+          ' "$version")"
           {
             echo "## Release preflight passed"
             echo

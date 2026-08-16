@@ -93,7 +93,11 @@ function pack(dir: string, name: string): string {
   // (or earlier runs) can never be selected by name.
   const dest = join(tmp, `pack-${packCount++}`);
   mkdirSync(dest, { recursive: true });
-  execFileSync("pnpm", ["pack", "--pack-destination", dest], { cwd: dir, stdio: "pipe" });
+  execFileSync("pnpm", ["pack", "--pack-destination", dest], {
+    cwd: dir,
+    stdio: "pipe",
+    env: offlineNpmEnv,
+  });
   const files = readdirSync(dest).filter((f) => f.endsWith(".tgz"));
   if (files.length !== 1) {
     throw new Error(`expected one tarball in ${dest}, got ${files.join(",")}`);
