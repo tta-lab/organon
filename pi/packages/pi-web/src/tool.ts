@@ -5,11 +5,15 @@ import { Type, type Static } from "typebox";
 
 import {
   cliError,
+  detectPlatform,
   parseSingleJsonDoc,
   resolveBinaryPath,
   runCli,
   modelTextResult,
 } from "@tta-lab/pi-shared";
+
+import { fetchWebPage, type FetchResult } from "./fetch.js";
+export type { FetchResult } from "./fetch.js";
 
 const require = createRequire(import.meta.url);
 
@@ -98,12 +102,6 @@ export interface SearchResult {
   results: Array<{ title: string; link: string; snippet: string; position: number }>;
 }
 
-export interface FetchResult {
-  url: string;
-  mode: string;
-  content: string;
-}
-
 export interface DocsLibrary {
   id: string;
   title: string;
@@ -162,7 +160,7 @@ function isAction<T extends Action["action"]>(
  * tool-result details.
  */
 export function webTool() {
-  const binary = resolveBinaryPath("web", { require });
+  detectPlatform();
   return {
     name: "web",
     label: "Web",
@@ -180,6 +178,14 @@ export function webTool() {
       _onUpdate: undefined,
       _ctx: unknown,
     ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
+      if (isAction(params, "fetch")) {
+        const data = await fetchWebPage(params, signal);
+        return await modelTextResult(data, data.content, {
+          hint: "Use fetch with tree or section_id to navigate the document.",
+        });
+      }
+
+      const binary = resolveBinaryPath("web", { require });
       const args = buildArgs(params);
       const result = await runCli(binary, { args, signal });
       if (result.exitCode !== 0) {
