@@ -6,12 +6,13 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
-  release:
+  preflight:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,15 +29,152 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.26.2
 
-      - name: Test
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Go format check
+        run: |
+          make fmt
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Code not formatted. Run 'make fmt' and commit."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Go vet
+        run: make vet
+
+      - name: Go lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          args: --timeout=5m
+
+      - name: Go tests
         run: make test
+
+      - name: Go build
+        run: make build
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Pi format check
+        working-directory: pi
+        run: pnpm exec prettier --check .
+
+      - name: Pi typecheck
+        working-directory: pi
+        run: pnpm exec tsc -p tsconfig.json --noEmit
+
+      - name: Pi build
+        working-directory: pi
+        run: pnpm -r --filter './packages/pi-*' run build
+
+      - name: Pi tests
+        working-directory: pi
+        run: pnpm exec vitest run
+
+      - name: Pi release invariants
+        working-directory: pi
+        run: node scripts/test-release-invariants.mjs
+
+      - name: Validate release tag version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        working-directory: pi
+        run: node scripts/sync-version.mjs "${RELEASE_TAG#v}" --dry-run
+
+      - name: GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: release --snapshot --clean
+
+      - name: Stage native binaries and verify them
+        working-directory: pi
+        run: |
+          node scripts/stage-natives.mjs ../dist
+          for f in packages/native/pi-*/bin/*; do
+            test -x "$f" || { echo "$f is not executable"; exit 1; }
+          done
+          echo "all native binaries present and executable"
+
+      - name: Verify snapshot release invariants
+        working-directory: pi
+        run: node scripts/test-release-invariants.mjs ../dist
+
+      - name: Publish release preflight summary
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        working-directory: pi
+        run: |
+          version="${RELEASE_TAG#v}"
+          case "$version" in
+            *-*) dist_tag=beta ;;
+            *) dist_tag=latest ;;
+          esac
+          {
+            echo "## Release preflight passed"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            printf '| Tag | `%s` |\n' "$RELEASE_TAG"
+            printf '| Commit | `%s` |\n' "$RELEASE_SHA"
+            printf '| Package version | `%s` |\n' "$version"
+            echo "| Packages | 16 (12 native, 4 main) |"
+            printf '| npm dist-tag | `%s` |\n' "$dist_tag"
+            echo "| Checks | Go gates, Pi gates, snapshot staging, release invariants |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Ensure npm Trusted Publishing CLI
+        run: |
+          npm install --global npm@11.10.0
+          NPM_VERSION="$(npm --version)" node -e '
+            const [major, minor, patch] = process.env.NPM_VERSION.split(".").map(Number);
+            if (major < 11 || (major === 11 && (minor < 10 || (minor === 10 && patch < 0)))) {
+              throw new Error(`npm ${major}.${minor}.${patch} is below the Trusted Publishing minimum 11.10.0`);
+            }
+            console.log(`npm ${major}.${minor}.${patch} is ready for Trusted Publishing`);
+          '
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
 
       - name: Release binaries and archives
         uses: goreleaser/goreleaser-action@v7
@@ -75,8 +213,6 @@ jobs:
         working-directory: pi
         run: node scripts/release-dry-run.mjs "${GITHUB_REF_NAME#v}" ../dist
 
-      - name: Publish extension packages
+      - name: Publish extension packages through npm OIDC
         working-directory: pi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node scripts/publish-packages.mjs

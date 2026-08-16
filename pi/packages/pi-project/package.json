@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Pi extension for Organon project discovery: list, find, and get registered projects without MCP.",
+  "homepage": "https://github.com/tta-lab/organon#readme",
+  "bugs": {
+    "url": "https://github.com/tta-lab/organon/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tta-lab/organon.git",
+    "directory": "pi/packages/pi-project"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "keywords": [
     "pi-package"
   ],

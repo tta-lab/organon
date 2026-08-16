@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// CI-friendly release invariant test: syncs all sixteen manifests to a
+// CI-friendly release invariant test: syncs the single publish plan to a
 // throwaway version (or the goreleaser snapshot version when a dist dir is
 // given), validates the invariants including the tag-to-artifact mapping, then
 // restores the workspace manifests so the dev tree keeps workspace:*.
 //
 // Usage: node scripts/test-release-invariants.mjs [goreleaserDistDir]
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { packagePublishPlan } from "./publish-packages.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
 const dist = process.argv[2];
+const plan = packagePublishPlan(workspace);
 
 let testVersion = "0.0.0-test";
 if (dist && existsSync(join(dist, "metadata.json"))) {
@@ -20,15 +23,9 @@ if (dist && existsSync(join(dist, "metadata.json"))) {
   testVersion = String(meta.version ?? testVersion).replace(/^v/, "");
 }
 
-const mainPackages = readdirSync(join(workspace, "packages")).filter((d) => d.startsWith("pi-"));
-const nativePackages = readdirSync(join(workspace, "packages", "native"));
-const manifests = [...mainPackages, ...nativePackages];
 const original = new Map();
-for (const dir of manifests) {
-  const pkgDir = nativePackages.includes(dir)
-    ? join("packages", "native", dir)
-    : join("packages", dir);
-  const path = join(workspace, pkgDir, "package.json");
+for (const entry of plan) {
+  const path = join(entry.path, "package.json");
   original.set(path, readFileSync(path, "utf8"));
 }
 
@@ -38,17 +35,13 @@ try {
     stdio: "inherit",
   });
   const args = ["scripts/release-dry-run.mjs", testVersion];
-  if (dist) {
-    args.push(dist);
-  }
+  if (dist) args.push(dist);
   execFileSync(process.execPath, args, { cwd: workspace, stdio: "inherit" });
   console.log(
-    `release invariants hold for ${manifests.length} manifests at ${testVersion}` +
+    `release invariants hold for ${plan.length} manifests at ${testVersion}` +
       (dist ? " with goreleaser artifacts" : ""),
   );
 } finally {
-  for (const [path, content] of original) {
-    writeFileSync(path, content);
-  }
+  for (const [path, content] of original) writeFileSync(path, content);
   console.log("workspace manifests restored");
 }

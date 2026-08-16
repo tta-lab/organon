@@ -2,6 +2,20 @@
   "name": "@tta-lab/pi-project-darwin-arm64",
   "version": "0.1.0",
   "description": "Native darwin/arm64 binary for @tta-lab/pi-project. Installed as an optional dependency by the matching main package.",
+  "homepage": "https://github.com/tta-lab/organon#readme",
+  "bugs": {
+    "url": "https://github.com/tta-lab/organon/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tta-lab/organon.git",
+    "directory": "pi/packages/native/pi-project-darwin-arm64"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "os": [
     "darwin"
   ],

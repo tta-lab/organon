@@ -27,8 +27,8 @@ const TARGETS: Array<[string, string, string]> = [
 const tmp = mkdtempSync(join(tmpdir(), "pi-pack-all-"));
 const hostileNpmUserConfig = join(tmp, "hostile-npmrc");
 writeFileSync(hostileNpmUserConfig, "omit=optional\nignore-scripts=false\n");
-const hostileNpmEnv = {
-  ...process.env,
+const hostileNpmEnv: NodeJS.ProcessEnv = {
+  PATH: process.env.PATH ?? "",
   NPM_CONFIG_USERCONFIG: hostileNpmUserConfig,
   NPM_CONFIG_OMIT: "optional",
   npm_config_registry: "https://registry.invalid",
@@ -46,8 +46,6 @@ function isolatedNpmEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = Object.fromEntries(
     Object.entries(base).filter(([key]) => !key.toLowerCase().startsWith("npm_config_")),
   );
-  delete env.NODE_AUTH_TOKEN;
-  delete env.NPM_TOKEN;
   return {
     ...env,
     HOME: isolatedNpmHome,
@@ -65,6 +63,23 @@ function isolatedNpmEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 const offlineNpmEnv = isolatedNpmEnv(hostileNpmEnv);
 const readManifest = (tgz: string) =>
   JSON.parse(execFileSync("tar", ["-xOf", tgz, "package/package.json"], { encoding: "utf8" }));
+const packageFiles = (tgz: string) =>
+  execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" }).split("\n").filter(Boolean);
+
+function expectPublicMetadata(manifest: any, directory: string): void {
+  expect(manifest.homepage).toBe("https://github.com/tta-lab/organon#readme");
+  expect(manifest.bugs).toEqual({ url: "https://github.com/tta-lab/organon/issues" });
+  expect(manifest.repository).toEqual({
+    type: "git",
+    url: "git+https://github.com/tta-lab/organon.git",
+    directory,
+  });
+  expect(manifest.license).toBe("Apache-2.0");
+  expect(manifest.publishConfig).toEqual({
+    registry: "https://registry.npmjs.org",
+    access: "public",
+  });
+}
 
 function nativePackageDir(tool: string, suffix: string): string {
   const hostSuffix = `${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch}`;
@@ -100,6 +115,7 @@ describe("all sixteen package manifests", () => {
         const dir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`);
         const manifest = readManifest(pack(dir, `@tta-lab/pi-${tool}-${suffix}`));
         expect(manifest.version).toBe(version);
+        expectPublicMetadata(manifest, `pi/packages/native/pi-${tool}-${suffix}`);
         expect(manifest.os).toEqual([os]);
         expect(manifest.cpu).toEqual([cpu]);
         expect(manifest.bin).toEqual({ [tool]: `bin/${tool}` });
@@ -107,16 +123,20 @@ describe("all sixteen package manifests", () => {
     }
   }, 120000);
 
-  it("packs every main package with exact-version optional native dependencies", () => {
+  it("packs every main package with public metadata, a README, and exact-version optional native dependencies", () => {
+    const version = readManifest(
+      pack(join(workspace, "packages", "pi-src"), "@tta-lab/pi-src"),
+    ).version;
     for (const tool of TOOLS) {
-      const manifest = readManifest(
-        pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`),
-      );
-      expect(manifest.version).toBe("0.1.0");
+      const tgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
+      const manifest = readManifest(tgz);
+      expect(manifest.version).toBe(version);
+      expectPublicMetadata(manifest, `pi/packages/pi-${tool}`);
+      expect(packageFiles(tgz)).toContain("package/README.md");
       expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
       for (const [, , suffix] of TARGETS) {
         const dep = `@tta-lab/pi-${tool}-${suffix}`;
-        expect(manifest.optionalDependencies[dep]).toBe("0.1.0");
+        expect(manifest.optionalDependencies[dep]).toBe(version);
         expect(manifest.optionalDependencies[dep]).not.toMatch(/[\^~]/);
       }
       expect(Object.keys(manifest.optionalDependencies).length).toBe(3);
