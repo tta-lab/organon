@@ -84,7 +84,7 @@ async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<stri
       if (!content || content.trim() === "") {
         throw new Error("no content could be extracted");
       }
-      return truncateContent(content);
+      return truncateContent(content.endsWith("\n") ? content : content + "\n");
     } catch (error) {
       throw new Error(`defuddle parse failed: ${errorMessage(error)}`);
     }

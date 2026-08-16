@@ -184,6 +184,21 @@ describe.sequential("native Pi fetch", () => {
     }
   });
 
+  it("preserves the Go HTML extraction trailing newline", async () => {
+    const { server, url } = await startServer((_req, res) => {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end("<html><body><article><p>Extracted text.</p></article></body></html>");
+    });
+    try {
+      await withTempHome(async () => {
+        const result = await fetchWebPage({ url, full: true });
+        expect(result.content).toBe("Extracted text.\n");
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("rejects binary media and binary bodies with actionable errors", async () => {
     const { server, url } = await startServer((req, res) => {
       if (req.url === "/body") {
