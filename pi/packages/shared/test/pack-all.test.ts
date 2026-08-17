@@ -178,19 +178,21 @@ describe("all sixteen package manifests", () => {
       },
       {
         tool: "web",
-        action: { action: "search", query: "tree-sitter" },
+        publicTool: "web_search",
+        action: { query: "tree-sitter" },
         assert: (result: any) => expect(result.details.provider).toBe("DuckDuckGo"),
       },
       {
         tool: "project",
-        action: { action: "list" },
+        publicTool: "project_list",
+        action: {},
         assert: (result: any) => expect(result.details.projects.length).toBeGreaterThan(0),
       },
       {
         tool: "og",
-        publicTool: "og_auth_status",
+        publicTool: "og_push",
         action: { project: "ko" },
-        assert: (result: any) => expect(result.details.auth.ready).toBe(true),
+        assert: (result: any) => expect(result.details.message).toContain("push completed"),
       },
     ];
 

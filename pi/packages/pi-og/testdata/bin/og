@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // Test-only fake og CLI: mirrors the documented JSON contract of the real Go
 // binary for auth/status, push, pull, clone, and pr operations with --json.
+import { appendFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
+if (process.env.PI_OG_TEST_INVOCATIONS) {
+  appendFileSync(process.env.PI_OG_TEST_INVOCATIONS, JSON.stringify(args) + "\n");
+}
 const flags = new Map();
 const consumed = new Set();
 for (let i = 0; i < args.length; i++) {

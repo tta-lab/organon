@@ -28,45 +28,29 @@ const nonBlankPrTitle = Type.String({
   minLength: 1,
   pattern: "\\S",
 });
-const nonBlankCommentBody = Type.String({
-  description: "Non-blank pull request comment body (may be multiline)",
-  minLength: 1,
-  pattern: "\\S",
-});
-
-export const ogAuthStatusSchema = Type.Object(
+export const ogCloneSchema = Type.Object(
   {
-    project: requiredProject,
-  },
-  { additionalProperties: false },
-);
-
-export const ogCloneSchema = Type.Union([
-  Type.Object(
-    {
-      project: requiredProject,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      url: Type.String({
+    project: Type.Optional(requiredProject),
+    url: Type.Optional(
+      Type.String({
         description: "HTTP(S) repository URL with exactly owner/repo",
         minLength: 1,
       }),
-      alias: Type.Optional(
-        Type.String({ description: "Optional exact single-layer project alias" }),
-      ),
-      reference: Type.Optional(
-        Type.Boolean({
-          description: "Clone under the references tree without registration",
-          default: false,
-        }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-]);
+    ),
+    alias: Type.Optional(Type.String({ description: "Optional exact single-layer project alias" })),
+    reference: Type.Optional(
+      Type.Boolean({
+        description: "Clone under the references tree without registration",
+        default: false,
+      }),
+    ),
+  },
+  {
+    additionalProperties: false,
+    description:
+      "Provide exactly one of project or url. URL clones may also use alias or reference; project clones may not.",
+  },
+);
 
 export const ogPullSchema = Type.Object(
   {
@@ -88,118 +72,47 @@ export const ogPushSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const ogPrSchema = Type.Union([
-  Type.Object(
-    {
-      action: StringEnum(["create"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      title: nonBlankPrTitle,
-      body: Type.Optional(
-        Type.String({ description: "Optional pull request body (may be multiline)" }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["find"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      state: Type.Optional(
-        StringEnum(["open", "closed", "all"] as const, {
-          description: "Pull request state to search",
-          default: "open",
-        }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["get"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-      title: nonBlankPrTitle,
-      body: Type.Optional(
-        Type.String({ description: "Replacement pull request body; an empty string clears it" }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["modify"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-      title: Type.Optional(nonBlankPrTitle),
-      body: Type.String({
-        description: "Replacement pull request body; an empty string clears it",
+export const ogPrSchema = Type.Object(
+  {
+    action: StringEnum(["create", "find", "get", "modify", "comment"] as const, {
+      description:
+        "Pull request operation. create requires title; modify requires title or body; comment requires a non-blank body.",
+    }),
+    project: requiredProject,
+    pr_id: Type.Optional(positivePrId),
+    state: Type.Optional(
+      StringEnum(["open", "closed", "all"] as const, {
+        description: "Pull request state for find; defaults to open",
+        default: "open",
       }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["comment"] as const, { description: "Pull request operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-      body: nonBlankCommentBody,
-    },
-    { additionalProperties: false },
-  ),
-]);
+    ),
+    title: Type.Optional(nonBlankPrTitle),
+    body: Type.Optional(
+      Type.String({ description: "Pull request body or comment (may be multiline)" }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-export const ogChecksSchema = Type.Union([
-  Type.Object(
-    {
-      action: StringEnum(["status"] as const, { description: "CI inspection operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["log"] as const, { description: "CI inspection operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-      tail: Type.Optional(
-        Type.Integer({
-          description: "Number of log tail lines; defaults to 50",
-          minimum: 0,
-          maximum: 1000,
-          default: 50,
-        }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      action: StringEnum(["failures"] as const, { description: "CI inspection operation" }),
-      project: requiredProject,
-      pr_id: Type.Optional(positivePrId),
-      tail: Type.Optional(
-        Type.Integer({
-          description: "Number of failure-log tail lines; defaults to 50",
-          minimum: 0,
-          maximum: 1000,
-          default: 50,
-        }),
-      ),
-    },
-    { additionalProperties: false },
-  ),
-]);
+export const ogChecksSchema = Type.Object(
+  {
+    action: StringEnum(["status", "log", "failures"] as const, {
+      description: "CI inspection operation; log and failures accept tail",
+    }),
+    project: requiredProject,
+    pr_id: Type.Optional(positivePrId),
+    tail: Type.Optional(
+      Type.Integer({
+        description: "Number of log or failure-log tail lines; defaults to 50",
+        minimum: 0,
+        maximum: 1000,
+        default: 50,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-export type OgAuthStatusInput = Static<typeof ogAuthStatusSchema>;
 export type OgCloneInput = Static<typeof ogCloneSchema>;
 export type OgPullInput = Static<typeof ogPullSchema>;
 export type OgPushInput = Static<typeof ogPushSchema>;
@@ -207,7 +120,6 @@ export type OgPrInput = Static<typeof ogPrSchema>;
 export type OgChecksInput = Static<typeof ogChecksSchema>;
 
 type OgOperation =
-  | { action: "auth_status"; project: string }
   | { action: "pull"; project: string }
   | { action: "push"; project: string; force?: boolean }
   | { action: "clone"; project: string }
@@ -226,19 +138,6 @@ type OgOperation =
   | { action: "pr_comment"; project: string; pr_id?: number; body: string }
   | { action: "pr_log"; project: string; pr_id?: number; tail?: number }
   | { action: "pr_failures"; project: string; pr_id?: number; tail?: number };
-
-interface AuthStatus {
-  project: string;
-  provider: string;
-  host: string;
-  owner: string;
-  repo: string;
-  auth_mode: string;
-  ready: boolean;
-  token_env?: string;
-  token_set?: boolean;
-  permissions?: Array<{ name: string; required: string; actual?: string; ready: boolean }>;
-}
 
 interface PullRequest {
   index: number;
@@ -273,10 +172,6 @@ interface CloneResult {
   already_existed?: boolean;
 }
 
-const AUTH_PROMPT_GUIDELINES = [
-  "Use og_auth_status with a project reference (canonical alias, checkout basename, or remote repository basename); never pass paths, tokens, or credential environment names.",
-];
-
 const CLONE_PROMPT_GUIDELINES = [
   "Use og_clone with either a registered project reference or an HTTP(S) repository URL without embedded credentials; project clones never accept alias or reference selectors.",
   "Never pass paths, tokens, credential environment names, or credential-bearing URLs to og_clone.",
@@ -288,12 +183,10 @@ const PULL_PROMPT_GUIDELINES = [
 
 const PUSH_PROMPT_GUIDELINES = [
   "Use og_push with a project reference; force means force-with-lease and OG rejects it on the default branch. Never pass paths, tokens, or credential environment names.",
-  "Use og_auth_status to check forge authentication before retrying a failed og_push operation.",
 ];
 
 const PR_PROMPT_GUIDELINES = [
   "Use og_pr with a project reference and one of create, find, get, modify, or comment; never pass paths, tokens, or credential environment names.",
-  "Use og_auth_status to check forge authentication before retrying failed og_pr operations.",
   "Use og_pr with action get without pr_id for the registered checkout's current-branch pull request, or with a positive pr_id for a branch-free remote operation.",
   "Use og_pr with action modify with at least one of title or body; an empty body explicitly clears it. Use action comment with a non-blank body.",
 ];
@@ -302,18 +195,6 @@ const CHECKS_PROMPT_GUIDELINES = [
   "Use og_checks with a project reference and one of status, log, or failures; never pass paths, tokens, or credential environment names.",
   "Use og_checks with action log or failures and an optional tail between 0 and 1000 lines to inspect CI output.",
 ];
-
-export function ogAuthStatusTool() {
-  return makeOgTool({
-    name: "og_auth_status",
-    description:
-      "Check guarded forge authentication for a registered project reference. All calls use the package-local og binary, which owns credentials and policy.",
-    promptSnippet: "Check guarded forge authentication with og_auth_status",
-    promptGuidelines: AUTH_PROMPT_GUIDELINES,
-    parameters: ogAuthStatusSchema,
-    normalize: (input) => normalizeAuthStatus(input as OgAuthStatusInput),
-  });
-}
 
 export function ogCloneTool() {
   return makeOgTool({
@@ -375,74 +256,190 @@ export function ogChecksTool() {
   });
 }
 
-function normalizeAuthStatus(input: OgAuthStatusInput): OgOperation {
-  return { action: "auth_status", project: input.project };
+function record(input: unknown): Record<string, unknown> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("tool input must be an object");
+  }
+  return input as Record<string, unknown>;
+}
+
+function requireProject(input: unknown): string {
+  const value = record(input).project;
+  if (typeof value !== "string" || !/\S/.test(value)) {
+    throw new Error("project reference must not be empty");
+  }
+  return value;
+}
+
+function rejectUnknownFields(input: Record<string, unknown>, allowed: string[]): void {
+  for (const field of Object.keys(input)) {
+    if (!allowed.includes(field)) {
+      throw new Error(`unknown field ${field}`);
+    }
+  }
+}
+
+function rejectFields(input: Record<string, unknown>, action: string, fields: string[]): void {
+  for (const field of fields) {
+    if (field in input) {
+      throw new Error(`og_${action} action does not accept field ${field}`);
+    }
+  }
+}
+
+function requirePositivePrID(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new Error("pr_id must be a positive integer");
+  }
+  return value;
+}
+
+function requireNonBlank(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/\S/.test(value)) {
+    throw new Error(`${field} must not be blank`);
+  }
+  return value;
 }
 
 function normalizeClone(input: OgCloneInput): OgOperation {
-  if ("project" in input) {
-    return { action: "clone", project: input.project };
+  const value = record(input);
+  rejectUnknownFields(value, ["project", "url", "alias", "reference"]);
+  const hasProject = "project" in value;
+  const hasURL = "url" in value;
+  if (hasProject === hasURL) {
+    throw new Error("og_clone requires exactly one of project or url");
+  }
+  if (hasProject) {
+    const project = requireProject(input);
+    rejectFields(value, "clone", ["alias", "reference"]);
+    return { action: "clone", project };
+  }
+  if (typeof value.url !== "string" || !/\S/.test(value.url)) {
+    throw new Error("url must not be empty");
+  }
+  if (value.alias !== undefined && typeof value.alias !== "string") {
+    throw new Error("alias must be a string");
+  }
+  if (value.reference !== undefined && typeof value.reference !== "boolean") {
+    throw new Error("reference must be a boolean");
   }
   return {
     action: "clone",
-    url: input.url,
-    alias: input.alias,
-    reference: input.reference,
+    url: value.url,
+    alias: value.alias as string | undefined,
+    reference: value.reference as boolean | undefined,
   };
 }
 
 function normalizePull(input: OgPullInput): OgOperation {
-  return { action: "pull", project: input.project };
+  rejectUnknownFields(record(input), ["project"]);
+  return { action: "pull", project: requireProject(input) };
 }
 
 function normalizePush(input: OgPushInput): OgOperation {
-  return { action: "push", project: input.project, force: input.force };
+  const value = record(input);
+  rejectUnknownFields(value, ["project", "force"]);
+  if (value.force !== undefined && typeof value.force !== "boolean") {
+    throw new Error("force must be a boolean");
+  }
+  return {
+    action: "push",
+    project: requireProject(input),
+    force: value.force as boolean | undefined,
+  };
 }
 
 function normalizePr(input: OgPrInput): OgOperation {
-  switch (input.action) {
+  const value = record(input);
+  rejectUnknownFields(value, ["action", "project", "pr_id", "state", "title", "body"]);
+  if (typeof value.action !== "string") throw new Error("og_pr action is required");
+  const project = requireProject(input);
+  const pr_id = requirePositivePrID(value.pr_id);
+  switch (value.action) {
     case "create":
-      return { action: "pr_create", project: input.project, title: input.title, body: input.body };
+      rejectFields(value, "pr", ["pr_id", "state"]);
+      if (value.body !== undefined && typeof value.body !== "string") {
+        throw new Error("body must be a string");
+      }
+      return {
+        action: "pr_create",
+        project,
+        title: requireNonBlank(value.title, "title"),
+        body: value.body as string | undefined,
+      };
     case "find":
-      return { action: "pr_find", project: input.project, state: input.state };
+      rejectFields(value, "pr", ["pr_id", "title", "body"]);
+      if (
+        value.state !== undefined &&
+        value.state !== "open" &&
+        value.state !== "closed" &&
+        value.state !== "all"
+      ) {
+        throw new Error("state must be open, closed, or all");
+      }
+      return {
+        action: "pr_find",
+        project,
+        state: value.state as "open" | "closed" | "all" | undefined,
+      };
     case "get":
-      return { action: "pr_get", project: input.project, pr_id: input.pr_id };
+      rejectFields(value, "pr", ["state", "title", "body"]);
+      return { action: "pr_get", project, pr_id };
     case "modify":
+      rejectFields(value, "pr", ["state"]);
+      if (value.title === undefined && value.body === undefined) {
+        throw new Error("pull request modify requires title or body; nothing to update");
+      }
+      if (value.title !== undefined) requireNonBlank(value.title, "title");
+      if (value.body !== undefined && typeof value.body !== "string") {
+        throw new Error("body must be a string");
+      }
       return {
         action: "pr_modify",
-        project: input.project,
-        pr_id: input.pr_id,
-        title: input.title,
-        body: input.body,
+        project,
+        pr_id,
+        title: value.title as string | undefined,
+        body: value.body as string | undefined,
       };
     case "comment":
+      rejectFields(value, "pr", ["state", "title"]);
       return {
         action: "pr_comment",
-        project: input.project,
-        pr_id: input.pr_id,
-        body: input.body,
+        project,
+        pr_id,
+        body: requireNonBlank(value.body, "comment body"),
       };
+    default:
+      throw new Error("og_pr action must be create, find, get, modify, or comment");
   }
 }
 
 function normalizeChecks(input: OgChecksInput): OgOperation {
-  switch (input.action) {
+  const value = record(input);
+  rejectUnknownFields(value, ["action", "project", "pr_id", "tail"]);
+  if (typeof value.action !== "string") throw new Error("og_checks action is required");
+  const project = requireProject(input);
+  const pr_id = requirePositivePrID(value.pr_id);
+  if (
+    value.tail !== undefined &&
+    (typeof value.tail !== "number" ||
+      !Number.isInteger(value.tail) ||
+      value.tail < 0 ||
+      value.tail > 1000)
+  ) {
+    throw new Error("tail must be an integer between 0 and 1000");
+  }
+  switch (value.action) {
     case "status":
-      return { action: "pr_checks", project: input.project, pr_id: input.pr_id };
+      rejectFields(value, "checks", ["tail"]);
+      return { action: "pr_checks", project, pr_id };
     case "log":
-      return {
-        action: "pr_log",
-        project: input.project,
-        pr_id: input.pr_id,
-        tail: input.tail,
-      };
+      return { action: "pr_log", project, pr_id, tail: value.tail as number | undefined };
     case "failures":
-      return {
-        action: "pr_failures",
-        project: input.project,
-        pr_id: input.pr_id,
-        tail: input.tail,
-      };
+      return { action: "pr_failures", project, pr_id, tail: value.tail as number | undefined };
+    default:
+      throw new Error("og_checks action must be status, log, or failures");
   }
 }
 
@@ -489,9 +486,6 @@ function isAction<T extends OgOperation["action"]>(
 
 function buildArgs(input: OgOperation): { args: string[]; stdin?: string } {
   const project = projectArgs(input);
-  if (isAction(input, "auth_status")) {
-    return { args: ["auth", "status", ...project, "--json"] };
-  }
   if (isAction(input, "pull")) {
     return { args: ["pull", ...project, "--json"] };
   }
@@ -499,8 +493,8 @@ function buildArgs(input: OgOperation): { args: string[]; stdin?: string } {
     return { args: ["push", ...project, ...(input.force ? ["--force"] : []), "--json"] };
   }
   if (isAction(input, "clone")) {
-    // The schema enforces exactly one selector mode; the CLI enforces the
-    // remaining domain rules (project clones never accept alias/reference).
+    // Runtime validation enforces exactly one selector mode; the CLI enforces
+    // the remaining repository URL domain rules.
     const projectClone = "project" in input;
     const args = ["clone", projectClone ? input.project : input.url];
     if (!projectClone && input.alias) {
@@ -579,17 +573,6 @@ async function render(
   input: OgOperation,
   stdout: string,
 ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-  if (isAction(input, "auth_status")) {
-    const data = parseSingleJsonDoc<{ project?: string; auth: AuthStatus }>(stdout);
-    const a = data.auth;
-    const project = data.project ?? a.project;
-    const text =
-      `${project}: ${a.ready ? "Authenticated" : "Not authenticated"}: ${a.provider} ${a.host}/${a.owner}/${a.repo}` +
-      (a.ready ? "" : ` (auth mode: ${a.auth_mode})`);
-    return modelTextResult(data, text, {
-      hint: useHint(input, "again after resolving the reported issue."),
-    });
-  }
   if (isAction(input, "push") || isAction(input, "pull")) {
     const data = parseSingleJsonDoc<{ project?: string; message: string }>(stdout);
     return modelTextResult(data, `${data.project ?? ""}: ${data.message}`.replace(/^: /, ""), {
@@ -628,7 +611,6 @@ async function render(
 }
 
 const PUBLIC_OPERATION_TARGETS: Record<OgOperation["action"], { tool: string; action?: string }> = {
-  auth_status: { tool: "og_auth_status" },
   clone: { tool: "og_clone" },
   pull: { tool: "og_pull" },
   push: { tool: "og_push" },
@@ -658,7 +640,6 @@ function formatPR(pr: PullRequest): string {
 type OgToolDefinition = ReturnType<typeof makeOgTool>;
 
 export function registerOgTools(pi: { registerTool(definition: OgToolDefinition): void }): void {
-  pi.registerTool(ogAuthStatusTool());
   pi.registerTool(ogCloneTool());
   pi.registerTool(ogPullTool());
   pi.registerTool(ogPushTool());

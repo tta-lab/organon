@@ -4,14 +4,14 @@ Four independently installable [Pi](https://pi.dev) extension packages give Pi
 native access to Organon capabilities without MCP configuration. Each package
 carries a matching native Go binary for your platform, so installing the npm
 package is sufficient on a supported host. `pi-src`, `pi-web`, and `pi-project`
-each register capability tools; `pi-og` registers six guarded forge tools.
+each register capability tools; `pi-og` registers five guarded forge tools.
 
-| Package               | Tool(s)                                                                  | Capability                                                               |
-| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `@tta-lab/pi-src`     | `read`, `edit`                                                           | Structure-aware file reading and editing through exact-name Pi overrides |
-| `@tta-lab/pi-web`     | `web`                                                                    | Web search, page fetch, library documentation, Sourcegraph code search   |
-| `@tta-lab/pi-project` | `project`                                                                | List, find, and get registered projects                                  |
-| `@tta-lab/pi-og`      | `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary     |
+| Package               | Tool(s)                                                | Capability                                                               |
+| --------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `@tta-lab/pi-src`     | `read`, `edit`                                         | Structure-aware file reading and editing through exact-name Pi overrides |
+| `@tta-lab/pi-web`     | `web_search`, `web_fetch`, `web_docs`, `web_sgraph`    | Web search, page fetch, library documentation, Sourcegraph code search   |
+| `@tta-lab/pi-project` | `project_list`, `project_find`, `project_get`          | List, find, and get registered projects                                  |
+| `@tta-lab/pi-og`      | `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary     |
 
 ## Install
 
@@ -131,9 +131,10 @@ Pi uses the local-path `read`/`edit` extension, and CLI users use the normal
 `src` command. If you previously configured `organon-src` in an MCP client,
 remove that server entry.
 
-The Pi `web.fetch` action uses the bundled TypeScript Defuddle implementation
-and does not require a globally installed `defuddle` CLI. The other Web actions
-remain thin adapters over the Go CLI.
+The Pi `web_fetch` tool uses the bundled TypeScript Defuddle implementation
+and does not require a globally installed `defuddle` CLI. `web_search`,
+`web_docs`, and `web_sgraph` remain thin adapters over the Go CLI. The grouped
+`web_docs` tool uses `resolve` and `fetch` actions.
 
 ## CLI JSON output
 
