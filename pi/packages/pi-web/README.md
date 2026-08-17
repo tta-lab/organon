@@ -1,8 +1,7 @@
 # @tta-lab/pi-web
 
 A [Pi](https://pi.dev) extension that provides native Organon web capabilities:
-web search, page fetching, library documentation lookup, and Sourcegraph code
-search without MCP configuration.
+the `web_search`, `web_fetch`, `web_docs`, and `web_sgraph` capabilities without MCP configuration. `web_docs` uses `resolve` and `fetch` actions.
 
 ## Install
 

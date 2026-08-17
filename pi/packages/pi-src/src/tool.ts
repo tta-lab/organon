@@ -17,7 +17,6 @@ import {
 import { Type, type Static } from "typebox";
 
 import {
-  objectUnion,
   cliError,
   parseSingleJsonDoc,
   resolveBinaryPath,
@@ -35,111 +34,49 @@ const require = createRequire(import.meta.url);
 const builtInRead = createReadToolDefinition(process.cwd());
 const builtInEdit = createEditToolDefinition(process.cwd());
 
-// Pi's current TypeBox object schemas intentionally omit an
-// additionalProperties keyword. Close only the top-level built-in branches in
-// the override copy so Organon fields cannot accidentally mix into an
-// otherwise valid exact call; the live schema and its nested edit entries are
-// still sourced from the installed factory unchanged.
-const builtInReadParameters = { ...builtInRead.parameters, additionalProperties: false };
-const builtInEditParameters = { ...builtInEdit.parameters, additionalProperties: false };
+// Pi's current TypeBox object schemas intentionally omit an additionalProperties
+// keyword. Reuse their property definitions directly, while making only the
+// mode-specific fields optional where the Organon mode does not use them.
+const builtInReadParameters = builtInRead.parameters;
+const builtInEditParameters = builtInEdit.parameters;
 
-const pathDescription = "Path to the file (absolute, or relative to the current working directory)";
 const symbolIdDescription =
   "Exact opaque symbol or Markdown section ID returned by read with symbols: true; use symbol_id, not symbol or a display name.";
 const symbolId = Type.String({ description: symbolIdDescription, minLength: 1 });
 
-const symbolsReadSchema = Type.Object(
+export const readSchema = Type.Object(
   {
-    path: Type.String({ description: pathDescription }),
-    symbols: Type.Boolean({
-      description: "Return the file's current symbol or Markdown section outline",
-      enum: [true],
-    }),
-  },
-  { additionalProperties: false },
-);
-
-const symbolReadSchema = Type.Object(
-  {
-    path: Type.String({ description: pathDescription }),
-    symbol_id: symbolId,
-    offset: Type.Optional(
-      Type.Integer({
-        description: "1-indexed line offset within the selected symbol or section",
-        minimum: 1,
+    ...builtInReadParameters.properties,
+    symbols: Type.Optional(
+      Type.Boolean({
+        description: "Return the file's current symbol or Markdown section outline",
+        enum: [true],
       }),
     ),
-    limit: Type.Optional(
-      Type.Integer({
-        description: "Maximum number of lines in the selected symbol or section",
-        minimum: 1,
+    symbol_id: Type.Optional(symbolId),
+  },
+  { additionalProperties: false },
+);
+
+export const editSchema = Type.Object(
+  {
+    ...builtInEditParameters.properties,
+    edits: Type.Optional(builtInEditParameters.properties.edits!),
+    operation: Type.Optional(
+      StringEnum(["replace", "insert", "delete", "comment"] as const, {
+        description: "Symbol-aware edit operation",
       }),
     ),
+    symbol_id: Type.Optional(symbolId),
+    position: Type.Optional(
+      StringEnum(["before", "after"] as const, {
+        description: "Insert before or after the symbol",
+      }),
+    ),
+    content: Type.Optional(Type.String({ description: "Replacement or documentation content" })),
   },
   { additionalProperties: false },
 );
-
-/** The read override is an explicit union with the live built-in branch. */
-export const readSchema = objectUnion([builtInReadParameters, symbolsReadSchema, symbolReadSchema]);
-
-const replaceSymbolSchema = Type.Object(
-  {
-    path: Type.String({ description: pathDescription }),
-    operation: StringEnum(["replace"] as const, {
-      description: "Replace one exact symbol or section",
-    }),
-    symbol_id: symbolId,
-    content: Type.String({ description: "Replacement content (may be multiline)" }),
-  },
-  { additionalProperties: false },
-);
-
-const insertSymbolSchema = Type.Object(
-  {
-    path: Type.String({ description: pathDescription }),
-    operation: StringEnum(["insert"] as const, {
-      description: "Insert around one exact symbol or section",
-    }),
-    symbol_id: symbolId,
-    position: StringEnum(["before", "after"] as const, {
-      description: "Insert before or after the symbol or section",
-    }),
-    content: Type.String({ description: "Content to insert (may be multiline)" }),
-  },
-  { additionalProperties: false },
-);
-
-const deleteSymbolSchema = Type.Object(
-  {
-    path: Type.String({ description: pathDescription }),
-    operation: StringEnum(["delete"] as const, {
-      description: "Delete one exact symbol or section",
-    }),
-    symbol_id: symbolId,
-  },
-  { additionalProperties: false },
-);
-
-const commentSymbolSchema = Type.Object(
-  {
-    path: Type.String({ description: pathDescription }),
-    operation: StringEnum(["comment"] as const, {
-      description: "Replace one exact symbol doc comment",
-    }),
-    symbol_id: symbolId,
-    content: Type.String({ description: "New doc comment content (may be multiline)" }),
-  },
-  { additionalProperties: false },
-);
-
-/** The edit override is an explicit union with the live built-in branch. */
-export const editSchema = objectUnion([
-  builtInEditParameters,
-  replaceSymbolSchema,
-  insertSymbolSchema,
-  deleteSymbolSchema,
-  commentSymbolSchema,
-]);
 
 export type ReadInput = Static<typeof readSchema>;
 export type EditInput = Static<typeof editSchema>;
@@ -269,7 +206,99 @@ type SymbolEditInput =
   | { path: string; operation: "comment"; symbol_id: string; content: string };
 
 function isRecord(input: unknown): input is Record<string, unknown> {
-  return typeof input === "object" && input !== null;
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function validateReadInput(input: unknown): asserts input is ReadInput {
+  if (!isRecord(input) || typeof input.path !== "string") {
+    throw new Error("read input must contain a path");
+  }
+  for (const field of Object.keys(input)) {
+    if (!["path", "offset", "limit", "symbols", "symbol_id"].includes(field)) {
+      throw new Error(`read input does not accept field ${field}`);
+    }
+  }
+  const hasSymbols = Object.prototype.hasOwnProperty.call(input, "symbols");
+  const hasSymbolID = Object.prototype.hasOwnProperty.call(input, "symbol_id");
+  if (hasSymbols && input.symbols !== true) {
+    throw new Error("symbols must be true when present");
+  }
+  if (hasSymbols && hasSymbolID) {
+    throw new Error("read cannot combine symbols and symbol_id");
+  }
+  if (hasSymbols && ("offset" in input || "limit" in input)) {
+    throw new Error("read symbols mode does not accept offset or limit");
+  }
+  if (hasSymbolID && (typeof input.symbol_id !== "string" || input.symbol_id.length === 0)) {
+    throw new Error("symbol_id must not be empty");
+  }
+  if (hasSymbolID) {
+    for (const field of ["offset", "limit"] as const) {
+      const value = input[field];
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || !Number.isInteger(value) || value < 1)
+      ) {
+        throw new Error(`${field} must be a positive integer in symbol read mode`);
+      }
+    }
+  }
+}
+
+function validateEditInput(input: unknown): asserts input is EditInput {
+  if (!isRecord(input) || typeof input.path !== "string") {
+    throw new Error("edit input must contain a path");
+  }
+  for (const field of Object.keys(input)) {
+    if (!["path", "edits", "operation", "symbol_id", "position", "content"].includes(field)) {
+      throw new Error(`edit input does not accept field ${field}`);
+    }
+  }
+  const hasOperation = Object.prototype.hasOwnProperty.call(input, "operation");
+  if (!hasOperation) {
+    if (
+      Object.prototype.hasOwnProperty.call(input, "symbol_id") ||
+      Object.prototype.hasOwnProperty.call(input, "position") ||
+      Object.prototype.hasOwnProperty.call(input, "content")
+    ) {
+      throw new Error("exact edit cannot combine edits with symbol-operation fields");
+    }
+    if (!Array.isArray(input.edits)) {
+      throw new Error("edit input must contain edits or one symbol operation");
+    }
+    return;
+  }
+  if (
+    typeof input.operation !== "string" ||
+    !["replace", "insert", "delete", "comment"].includes(input.operation)
+  ) {
+    throw new Error("unsupported edit operation");
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "edits")) {
+    throw new Error("symbol edit cannot combine operation with edits");
+  }
+  if (typeof input.symbol_id !== "string" || input.symbol_id.length === 0) {
+    throw new Error("symbol_id must not be empty");
+  }
+  const operation = input.operation;
+  if (operation === "insert") {
+    if (input.position !== "before" && input.position !== "after") {
+      throw new Error("insert requires position before or after");
+    }
+    if (typeof input.content !== "string") throw new Error("insert requires content");
+  } else if (operation === "replace" || operation === "comment") {
+    if (typeof input.content !== "string") throw new Error(`${operation} requires content`);
+    if (Object.prototype.hasOwnProperty.call(input, "position")) {
+      throw new Error(`${operation} does not accept position`);
+    }
+  } else {
+    if (
+      Object.prototype.hasOwnProperty.call(input, "position") ||
+      Object.prototype.hasOwnProperty.call(input, "content")
+    ) {
+      throw new Error("delete does not accept position or content");
+    }
+  }
 }
 
 function isSymbolsRead(input: ReadInput): input is SymbolsReadInput {
@@ -543,6 +572,7 @@ export function readTool() {
       _onUpdate: undefined,
       ctx: { cwd: string; model?: { input?: string[] } },
     ): Promise<ReadExecutionResult> {
+      validateReadInput(params);
       const absolutePath = resolveSourcePath(params.path, ctx.cwd);
       return runRead(binary, params, absolutePath, signal, ctx.model);
     },
@@ -580,6 +610,7 @@ export function editTool() {
       _onUpdate: undefined,
       ctx: { cwd: string },
     ): Promise<EditExecutionResult> {
+      validateEditInput(params);
       const absolutePath = resolveSourcePath(params.path, ctx.cwd);
       const run = () => runEdit(binary, params, absolutePath, signal);
       return withFileMutationQueue(absolutePath, run);

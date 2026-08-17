@@ -1,8 +1,9 @@
 # @tta-lab/pi-og
 
 A [Pi](https://pi.dev) extension for guarded Organon Git and forge operations.
-It provides `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and
-`og_checks` through the package-local `og` binary, without MCP configuration.
+It provides `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks` through
+the package-local `og` binary, without MCP configuration. Authentication status
+remains available to CLI maintenance users but is not registered as a Pi tool.
 
 ## Install
 

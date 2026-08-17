@@ -96,27 +96,35 @@ describe("pi-src override schemas", () => {
     ).toBe(true);
   });
 
-  it("rejects incomplete, mixed, empty-ID, and unknown Organon forms", () => {
-    for (const input of [
-      { path: "a.go", symbols: false },
-      { path: "a.go", symbols: true, offset: 1 },
-      { path: "a.go", symbol_id: "" },
-      { path: "a.go", symbol_id: "bK", symbols: true },
-      { path: "a.go", symbols: true, bogus: true },
-    ]) {
-      expect(Value.Check(readSchema, input)).toBe(false);
-    }
-    for (const input of [
-      { path: "a.go", operation: "replace", symbol_id: "bK" },
-      { path: "a.go", operation: "insert", symbol_id: "bK", content: "x" },
-      { path: "a.go", operation: "delete", symbol_id: "", bogus: true },
-      { path: "a.go", operation: "comment", symbol_id: "bK", content: "x", edits: [] },
-      { path: "a.go", operation: "replace", symbol_id: "bK", content: "x", extra: true },
-      { path: "a.go", operation: "nope", symbol_id: "bK" },
-      { path: "a.go", edits: [{ oldText: "a", newText: "b" }], operation: "delete" },
-    ]) {
-      expect(Value.Check(editSchema, input)).toBe(false);
-    }
+  it("uses direct superset schemas and rejects incompatible modes at execution", async () => {
+    expect(Value.Check(readSchema, { path: "a.go", symbols: true, offset: 1 })).toBe(true);
+    expect(Value.Check(editSchema, { path: "a.go", operation: "replace", symbol_id: "bK" })).toBe(
+      true,
+    );
+    expect(Value.Check(readSchema, { path: "a.go", symbols: false })).toBe(false);
+    expect(Value.Check(readSchema, { path: "a.go", symbol_id: "" })).toBe(false);
+    expect(Value.Check(readSchema, { path: "a.go", symbols: true, bogus: true })).toBe(false);
+    expect(Value.Check(editSchema, { path: "a.go", operation: "nope" })).toBe(false);
+    expect(Value.Check(editSchema, { path: "a.go", operation: "replace", extra: true })).toBe(
+      false,
+    );
+
+    const { path, cwd } = makeFile(SAMPLE);
+    await expect(callRead({ path, symbols: true, offset: 1 }, cwd)).rejects.toThrow(
+      /does not accept offset or limit/,
+    );
+    await expect(callRead({ path, symbol_id: "bK", symbols: true }, cwd)).rejects.toThrow(
+      /combine symbols and symbol_id/,
+    );
+    await expect(callEdit({ path, operation: "replace", symbol_id: "bK" }, cwd)).rejects.toThrow(
+      /replace requires content/,
+    );
+    await expect(
+      callEdit({ path, operation: "insert", symbol_id: "bK", content: "x" }, cwd),
+    ).rejects.toThrow(/requires position/);
+    await expect(
+      callEdit({ path, edits: [], operation: "delete", symbol_id: "bK" }, cwd),
+    ).rejects.toThrow(/combine operation with edits/);
   });
 
   it("keeps built-in edit argument preparation before validation", () => {
