@@ -163,13 +163,196 @@ lockfile, and builds all four extension bundles. It recreates missing native
 `bin` directories and rejects unsupported hosts instead of staging a binary
 under the wrong platform name.
 
-Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to all sixteen
-manifests, `scripts/stage-natives.mjs` copies the cross-compiled Go binaries
-into the native packages (failing on a missing or wrong-platform artifact), and
-`scripts/publish-packages.mjs` supplies the one native-first publish plan
-consumed by the release workflow. `scripts/release-dry-run.mjs` validates that
-same plan together with exact-version and GoReleaser artifact invariants before
-publishing.
+Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to the single
+sixteen-package publish plan, `scripts/stage-natives.mjs` copies the
+cross-compiled Go binaries into the native packages (failing on a missing or
+wrong-platform artifact), and `scripts/publish-packages.mjs` supplies the one
+native-first plan consumed by both local bootstrap and the release workflow.
+`scripts/release-dry-run.mjs` validates that same plan together with exact-version
+and GoReleaser artifact invariants before publishing.
+
+## Publishing and releases
+
+Organon publishes four independently installable main packages and twelve
+platform packages. Every release uses one synchronized version and publishes
+all twelve native packages before the four main packages:
+
+| Main package          | Native optional packages                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@tta-lab/pi-src`     | `@tta-lab/pi-src-darwin-arm64`, `@tta-lab/pi-src-linux-x64`, `@tta-lab/pi-src-linux-arm64`             |
+| `@tta-lab/pi-web`     | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`             |
+| `@tta-lab/pi-project` | `@tta-lab/pi-project-darwin-arm64`, `@tta-lab/pi-project-linux-x64`, `@tta-lab/pi-project-linux-arm64` |
+| `@tta-lab/pi-og`      | `@tta-lab/pi-og-darwin-arm64`, `@tta-lab/pi-og-linux-x64`, `@tta-lab/pi-og-linux-arm64`                |
+
+Stable SemVer versions use the `latest` dist-tag. SemVer prereleases use
+`beta`, so a beta must be installed explicitly with (for example)
+`pi install npm:@tta-lab/pi-src@beta`. Before each package publish, the shared
+plan queries the public registry for the exact name and version; an exact
+existing version is skipped, while authentication, connectivity, malformed
+metadata, and ambiguous registry failures stop the release. Versions are never
+overwritten or unpublished.
+
+### One-time local npm bootstrap
+
+The first beta is a maintainer-only operation after this change has merged. Run
+it only from a clean temporary checkout of the intended release commit; do not
+bootstrap from a dirty development tree. The commands below use a temporary npm
+config so the login credential is removed with the checkout:
+
+```bash
+set -eu
+RELEASE_COMMIT=<intended-release-commit>
+RELEASE_VERSION=<next-version>-beta.1
+TMP_HOME="$(mktemp -d)"
+NPM_CONFIG_USERCONFIG="$(mktemp "${TMPDIR:-/tmp}/organon-npmrc.XXXXXX")"
+export HOME="$TMP_HOME"
+export NPM_CONFIG_USERCONFIG
+export NPM_CONFIG_PROVENANCE=false
+trap 'rm -f "$NPM_CONFIG_USERCONFIG"; rm -rf "$TMP_HOME"' EXIT
+
+# og derives the checkout under this disposable HOME; it is not registered in
+# the maintainer's normal project registry. The local tag below is never pushed.
+og clone https://github.com/tta-lab/organon.git
+cd "$HOME/code/projects/tta-lab/organon"
+git checkout --detach "$RELEASE_COMMIT"
+test -z "$(git status --porcelain)"
+
+case "$RELEASE_VERSION" in
+  *-*) ;;
+  *) echo "bootstrap version must be a beta prerelease" >&2; exit 1 ;;
+esac
+RELEASE_TAG="v$RELEASE_VERSION"
+# Use npm >= 11.10.0, log in to the account with account-level 2FA enabled,
+# and complete the interactive 2FA challenge when npm asks for it.
+npm login --registry=https://registry.npmjs.org
+npm whoami --registry=https://registry.npmjs.org
+# If account-level 2FA is not already enabled, do this once before publishing:
+# npm profile enable-2fa auth-and-writes --registry=https://registry.npmjs.org
+
+(cd pi && pnpm install --frozen-lockfile && pnpm -r --filter './packages/pi-*' run build)
+# GoReleaser reads the exact version from this ephemeral local tag. --skip=publish
+# creates dist artifacts and metadata without creating a GitHub release; never
+# run og push, git push, or a publish command against this checkout's tag.
+git tag --force "$RELEASE_TAG" "$RELEASE_COMMIT"
+goreleaser release --clean --skip=publish
+(cd pi && node scripts/stage-natives.mjs ../dist)
+for f in pi/packages/native/pi-*/bin/*; do
+  test -x "$f"
+done
+
+(cd pi && node scripts/test-release-invariants.mjs ../dist)
+(cd pi && node scripts/sync-version.mjs "$RELEASE_VERSION")
+(cd pi && node scripts/release-dry-run.mjs "$RELEASE_VERSION" ../dist)
+(cd pi && pnpm exec vitest run)
+(cd pi && node scripts/publish-packages.mjs)
+```
+
+The last command is the same native-first npm CLI publish plan used by the
+routine release. It uses `npm view` for exact-version resumability and
+`npm publish --access public --tag beta`; it does not use `pnpm publish`. If a
+publish is interrupted, rerun the checks and the same command: immutable
+versions already on the registry are skipped.
+
+### One-time npm Trusted Publisher setup
+
+After all sixteen packages exist, bind each package to the same GitHub workflow
+and protected Environment. npm trust commands require npm >= 11.10.0, package
+write permission, and account-level 2FA. Run this loop once from the repository
+root of the clean bootstrap checkout; the first request may ask for 2FA.
+The two-second delay avoids npm rate limiting:
+
+```bash
+set -eu
+cd pi
+for package in $(node --input-type=module -e '
+  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
+  for (const entry of packagePublishPlan()) console.log(entry.name);
+'); do
+  npm trust github "$package" \
+    --repository tta-lab/organon \
+    --file release.yaml \
+    --environment npm \
+    --allow-publish \
+    --yes \
+    --registry https://registry.npmjs.org
+  sleep 2
+done
+```
+
+Verify every relationship before enabling routine releases. Each command must
+report exactly one GitHub trusted publisher for `tta-lab/organon`, workflow
+`.github/workflows/release.yaml`, Environment `npm`, and publish permission:
+
+```bash
+cd pi
+for package in $(node --input-type=module -e '
+  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
+  for (const entry of packagePublishPlan()) console.log(entry.name);
+'); do
+  echo "--- $package ---"
+  npm trust list "$package" --json --registry=https://registry.npmjs.org
+done
+```
+
+Do not enable the normal release path until all sixteen outputs match those
+claims. If setup must be corrected, inspect the trust ID with `npm trust list`,
+revoke only the incorrect relationship, and configure that package again.
+
+Finally, configure the token restriction separately for each package in the npm
+website: open the package **Settings**, open **Publishing access**, and select
+**Require two-factor authentication and disallow tokens**. Verify that setting
+on every one of the sixteen package pages before enabling routine releases.
+This is the npm policy that blocks traditional publish tokens while retaining
+the configured OIDC Trusted Publishers; verify it in the package settings rather
+than relying on a CLI 2FA setting.
+
+### GitHub Environment and routine OIDC release
+
+Configure GitHub separately from npm:
+
+1. Create a repository Environment named `npm`.
+2. Add the required maintainer reviewer(s), leave maintainer self-approval
+   enabled, and restrict deployment branches/tags to release tags matching `v*`.
+3. Do not add an npm publish token to the Environment. The gated job uses a
+   GitHub-hosted runner, Node 24, npm >= 11.10.0, `contents: write`, and
+   `id-token: write`; npm Trusted Publishing supplies the OIDC identity.
+
+The tag workflow has two jobs. `preflight` is ungated and runs the Go gates, Pi
+format/typecheck/build/tests, GoReleaser snapshot, native staging, and release
+invariants. Its job summary shows the tag, commit, package version, sixteen
+package count, target dist-tag, and passed checks. Only after that job succeeds
+does the single `release` job enter the `npm` Environment and wait for one
+approval. Approving your own deployment is allowed; rejecting or leaving it
+unapproved publishes neither the GitHub/Homebrew release nor npm packages.
+
+After approval, that same job performs the real GoReleaser release, builds and
+stages the Pi packages, synchronizes the tag version, reruns release invariants
+against the real artifacts, and invokes the shared npm CLI plan. There are no
+per-package approvals and no token fallback.
+
+For a completed release, verify installation and dist-tags with the public
+registry:
+
+```bash
+VERSION=<release-version>
+for package in @tta-lab/pi-src @tta-lab/pi-web @tta-lab/pi-project @tta-lab/pi-og; do
+  npm view "$package@$VERSION" version dist-tags --json --registry=https://registry.npmjs.org
+  pi install "npm:$package@$VERSION"
+done
+```
+
+OIDC releases on the public repository and public packages automatically carry
+npm provenance. Verify each main package's attestation and inspect its npm
+package page's Provenance section:
+
+```bash
+for package in @tta-lab/pi-src @tta-lab/pi-web @tta-lab/pi-project @tta-lab/pi-og; do
+  npm view "$package@$VERSION" dist.attestations --json --registry=https://registry.npmjs.org
+done
+```
+
+The local bootstrap beta intentionally has no provenance; provenance begins
+with the gated Trusted Publishing release path.
 
 ### Local debugging
 

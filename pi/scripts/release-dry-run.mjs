@@ -11,14 +11,20 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertNativePackagesFirst, packagePublishPlan } from "./publish-packages.mjs";
+import {
+  assertNativePackagesFirst,
+  distTagForVersion,
+  packagePublishPlan,
+} from "./publish-packages.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
 const version = process.argv[2];
 const dist = process.argv[3];
 
-if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version ?? "")) {
+try {
+  distTagForVersion(version);
+} catch {
   console.error("usage: node scripts/release-dry-run.mjs <x.y.z> [goreleaserDistDir]");
   process.exit(2);
 }
@@ -29,6 +35,14 @@ const mainPackages = publishPlan.filter((entry) => entry.kind === "main");
 const nativePackages = publishPlan.filter((entry) => entry.kind === "native");
 const nativePackageDirs = new Set(nativePackages.map((entry) => entry.dir));
 const errors = [];
+if (publishPlan.length !== 16)
+  errors.push(`publish plan has ${publishPlan.length} packages; expected 16`);
+if (nativePackages.length !== 12) {
+  errors.push(`publish plan has ${nativePackages.length} native packages; expected 12`);
+}
+if (mainPackages.length !== 4) {
+  errors.push(`publish plan has ${mainPackages.length} main packages; expected 4`);
+}
 try {
   assertNativePackagesFirst(publishPlan);
 } catch (error) {
