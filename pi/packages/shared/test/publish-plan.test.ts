@@ -136,8 +136,8 @@ describe("release publish plan", () => {
     const publishes = calls.filter((call) => call.args[0] === "publish");
 
     expect(result).toEqual({
-      version: "0.1.0",
-      distTag: "latest",
+      version: existing.version,
+      distTag: distTagForVersion(existing.version),
       published: plan.slice(1).map((entry) => entry.name),
       skipped: [existing.name],
     });
@@ -157,7 +157,7 @@ describe("release publish plan", () => {
       "--access",
       "public",
       "--tag",
-      "latest",
+      distTagForVersion(existing.version),
       "--registry",
       NPM_REGISTRY,
     ]);
