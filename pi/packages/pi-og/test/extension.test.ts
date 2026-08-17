@@ -1,5 +1,6 @@
-import { readFileSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
@@ -32,6 +33,25 @@ function call(tool: ToolName, params: unknown) {
   return definitions[tool].execute("call-1", params, undefined, undefined, ctx);
 }
 
+async function expectOgRejectedBeforeBinary(
+  tool: ToolName,
+  params: unknown,
+  error: RegExp,
+): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "pi-og-invalid-"));
+  const invocationPath = join(directory, "invocations");
+  const priorInvocationPath = process.env.PI_OG_TEST_INVOCATIONS;
+  process.env.PI_OG_TEST_INVOCATIONS = invocationPath;
+  try {
+    await expect(call(tool, params)).rejects.toThrow(error);
+    expect(existsSync(invocationPath)).toBe(false);
+  } finally {
+    if (priorInvocationPath === undefined) delete process.env.PI_OG_TEST_INVOCATIONS;
+    else process.env.PI_OG_TEST_INVOCATIONS = priorInvocationPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 describe("pi-og extension", () => {
   it("registers exactly the five model-facing capabilities and no auth-status tool", () => {
     const registered: any[] = [];
@@ -43,7 +63,6 @@ describe("pi-og extension", () => {
       "og_pr",
       "og_checks",
     ]);
-    expect(registered.every((definition) => definition.name !== "og_auth_status")).toBe(true);
   });
 
   it("uses direct schemas and documents grouped action fields without a root union", () => {
@@ -98,6 +117,10 @@ describe("pi-og extension", () => {
       body: "line1\nline2",
     });
     expect((created.details as { pr: { title: string } }).pr.title).toBe("feat: x");
+    const found = await call("pr", { action: "find", project: "ko", state: "closed" });
+    expect((found.details as { pr: { state: string } }).pr.state).toBe("closed");
+    const current = await call("pr", { action: "get", project: "ko" });
+    expect((current.details as { pr: { index: number } }).pr.index).toBe(7);
     const modified = await call("pr", { action: "modify", project: "ko", body: "\nnew body\n" });
     expect((modified.details as { pr: { body: string } }).pr.body).toBe("\nnew body\n");
     const comment = await call("pr", {
@@ -112,28 +135,92 @@ describe("pi-og extension", () => {
     expect((status.details as { pr: { index: number } }).pr.index).toBe(41);
     const log = await call("checks", { action: "log", project: "ko", tail: 1 });
     expect((log.details as { lines: string[] }).lines).toHaveLength(1);
+    const failures = await call("checks", { action: "failures", project: "ko" });
+    expect((failures.details as { lines: string[] }).lines).toHaveLength(2);
   });
 
-  it("rejects invalid grouped combinations before execution", async () => {
-    await expect(call("pr", { action: "create", project: "ko" })).rejects.toThrow(
+  it("rejects grouped-action missing, irrelevant, malformed, and cross-action fields before the CLI", async () => {
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "create", project: "ko" },
       /title must not be blank/,
     );
-    await expect(call("pr", { action: "find", project: "ko", title: "wrong" })).rejects.toThrow(
-      /does not accept field title/,
-    );
-    await expect(call("pr", { action: "modify", project: "ko" })).rejects.toThrow(
-      /nothing to update/,
-    );
-    await expect(call("pr", { action: "comment", project: "ko", body: "  " })).rejects.toThrow(
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "comment", project: "ko" },
       /comment body must not be blank/,
     );
-    await expect(call("checks", { action: "status", project: "ko", tail: 1 })).rejects.toThrow(
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "modify", project: "ko" },
+      /nothing to update/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "find", project: "ko", title: "wrong" },
+      /does not accept field title/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "get", project: "ko", state: "closed" },
+      /does not accept field state/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "comment", project: "ko", title: "wrong", body: "comment" },
+      /does not accept field title/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "create", project: "ko", title: 42 },
+      /title must not be blank/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "find", project: "ko", state: "invalid" },
+      /state must be open, closed, or all/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "get", project: "ko", pr_id: 0 },
+      /pr_id must be a positive integer/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "pr",
+      { action: "comment", project: "ko", body: 42 },
+      /comment body must not be blank/,
+    );
+
+    await expectOgRejectedBeforeBinary("checks", { project: "ko" }, /action is required/);
+    await expectOgRejectedBeforeBinary(
+      "checks",
+      { action: "status" },
+      /project reference must not be empty/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "checks",
+      { action: "status", project: "ko", tail: 1 },
       /does not accept field tail/,
     );
-    await expect(call("checks", { action: "log", project: "ko", tail: 2001 })).rejects.toThrow(
-      /tail must be/,
+    await expectOgRejectedBeforeBinary(
+      "checks",
+      { action: "log", project: "ko", tail: 2001 },
+      /tail must be an integer between 0 and 1000/,
     );
-    await expect(call("push", { project: "" })).rejects.toThrow(
+    await expectOgRejectedBeforeBinary(
+      "checks",
+      { action: "failures", project: "ko", pr_id: 0 },
+      /pr_id must be a positive integer/,
+    );
+    await expectOgRejectedBeforeBinary(
+      "checks",
+      { action: "unknown", project: "ko" },
+      /action must be status, log, or failures/,
+    );
+
+    await expectOgRejectedBeforeBinary(
+      "push",
+      { project: "" },
       /project reference must not be empty/,
     );
   });

@@ -145,7 +145,7 @@ export function projectListTool() {
     async render(_params, stdout) {
       const data = parseSingleJsonDoc<ProjectListResult>(stdout);
       const lines = data.projects.map(
-        (p) => `${renderProject(p)}${p.archived ? " [archived]" : ""}`,
+        (p) => `- ${renderProject(p)}${p.archived ? " [archived]" : ""}`,
       );
       const raw =
         lines.length === 0 ? "No projects found." : "Available projects:\n" + lines.join("\n");
@@ -183,7 +183,7 @@ export function projectFindTool() {
     },
     async render(_params, stdout) {
       const data = parseSingleJsonDoc<ProjectListResult>(stdout);
-      const lines = data.projects.map(renderProject);
+      const lines = data.projects.map((p) => `- ${renderProject(p)}`);
       const raw =
         lines.length === 0
           ? "No active projects found."

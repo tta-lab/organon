@@ -29,6 +29,21 @@ function call(tool: ToolName, params: unknown, signal?: AbortSignal) {
   return definitions[tool].execute("call-1", params as any, signal, undefined, ctx);
 }
 
+async function expectDocsRejectedBeforeBinary(params: unknown, error: RegExp): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), "pi-web-invalid-"));
+  const invocationPath = join(directory, "invocations");
+  const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
+  process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+  try {
+    await expect(call("docs", params)).rejects.toThrow(error);
+    expect(existsSync(invocationPath)).toBe(false);
+  } finally {
+    if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
+    else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function startServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
   server: Server;
   url: string;
@@ -63,7 +78,6 @@ describe("pi-web extension", () => {
       "web_docs",
       "web_sgraph",
     ]);
-    expect(registered.every((definition) => definition.name !== "web")).toBe(true);
   });
 
   it("exposes direct object schemas and keeps grouped docs action fields runtime-strict", async () => {
@@ -101,13 +115,17 @@ describe("pi-web extension", () => {
     try {
       const fetched = await withTempHome(() => call("fetch", { url, tree: true }));
       expect((fetched.details as { mode: string }).mode).toBe("tree");
-      await call("docs", { action: "resolve", query: "dispatch-proof" });
-      await call("docs", {
+      const resolved = await call("docs", { action: "resolve", query: "dispatch-proof" });
+      expect((resolved.details as { libraries: Array<{ id: string }> }).libraries[0]!.id).toBe(
+        "/dispatch-proof",
+      );
+      const fetchedDocs = await call("docs", {
         action: "fetch",
         library_id: "/dispatch-proof",
         topic: "hooks",
         tokens: 500,
       });
+      expect((fetchedDocs.details as { content: string }).content).toContain("docs content");
       await call("sgraph", { query: "dispatch-proof", count: 14, context: 3, timeout: 9 });
       const invocations = readFileSync(invocationPath, "utf8");
       expect(invocations).toContain('["docs","resolve","dispatch-proof","--json"]');
@@ -124,6 +142,38 @@ describe("pi-web extension", () => {
       rmSync(directory, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it("rejects missing, irrelevant, malformed, and cross-action docs fields before the CLI", async () => {
+    await expectDocsRejectedBeforeBinary({ action: "resolve" }, /query must be a non-empty string/);
+    await expectDocsRejectedBeforeBinary(
+      { action: "fetch" },
+      /library_id must be a non-empty string/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "resolve", query: "x", library_id: "/wrong" },
+      /does not accept library_id/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "fetch", library_id: "/x", query: "wrong" },
+      /does not accept query/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "resolve", query: 42 },
+      /query must be a non-empty string/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "fetch", library_id: "/x", topic: 42 },
+      /topic must be a string/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "fetch", library_id: "/x", tokens: 1.5 },
+      /tokens must be an integer/,
+    );
+    await expectDocsRejectedBeforeBinary(
+      { action: "unknown", query: "x" },
+      /action must be "resolve" or "fetch"/,
+    );
   });
 
   it("preserves bounded fetch output and abort behavior", async () => {

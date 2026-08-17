@@ -32,7 +32,6 @@ describe("pi-project extension", () => {
       "project_find",
       "project_get",
     ]);
-    expect(registered.every((definition) => definition.name !== "project")).toBe(true);
   });
 
   it("uses closed direct schemas with the expected required fields", () => {
@@ -50,7 +49,9 @@ describe("pi-project extension", () => {
 
   it("lists active and archived projects with structured details", async () => {
     const active = await call("list", {});
-    expect((active.content[0] as { text: string }).text).toContain("len");
+    expect((active.content[0] as { text: string }).text).toContain(
+      "- len: Lenos CLI runtime (/home/neil/code/projects/tta-lab/lenos)",
+    );
     expect((active.content[0] as { text: string }).text).not.toContain("[archived]");
     expect(
       (active.details as { projects: Array<{ archived: boolean }> }).projects.every(
@@ -69,7 +70,9 @@ describe("pi-project extension", () => {
     expect(
       (found.details as { projects: Array<{ alias: string }> }).projects.map((p) => p.alias),
     ).toEqual(["len"]);
-    expect((found.content[0] as { text: string }).text).toContain("len");
+    expect((found.content[0] as { text: string }).text).toContain(
+      "- len: Lenos CLI runtime (/home/neil/code/projects/tta-lab/lenos)",
+    );
 
     const empty = await call("find", { query: "missing" });
     expect((empty.details as { projects: unknown[] }).projects).toEqual([]);
