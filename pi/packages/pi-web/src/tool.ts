@@ -4,6 +4,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
 import {
+  objectUnion,
   cliError,
   detectPlatform,
   parseSingleJsonDoc,
@@ -19,7 +20,7 @@ const require = createRequire(import.meta.url);
 
 const DEFAULT_TREE_THRESHOLD = 5000;
 
-export const webSchema = Type.Union([
+export const webSchema = objectUnion([
   Type.Object(
     {
       action: StringEnum(["search"] as const, { description: "Action to perform" }),

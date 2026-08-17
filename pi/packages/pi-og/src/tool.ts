@@ -4,6 +4,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static, type TSchema } from "typebox";
 
 import {
+  objectUnion,
   cliError,
   modelTextResult,
   parseSingleJsonDoc,
@@ -41,7 +42,7 @@ export const ogAuthStatusSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const ogCloneSchema = Type.Union([
+export const ogCloneSchema = objectUnion([
   Type.Object(
     {
       project: requiredProject,
@@ -88,7 +89,7 @@ export const ogPushSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const ogPrSchema = Type.Union([
+export const ogPrSchema = objectUnion([
   Type.Object(
     {
       action: StringEnum(["create"] as const, { description: "Pull request operation" }),
@@ -156,7 +157,7 @@ export const ogPrSchema = Type.Union([
   ),
 ]);
 
-export const ogChecksSchema = Type.Union([
+export const ogChecksSchema = objectUnion([
   Type.Object(
     {
       action: StringEnum(["status"] as const, { description: "CI inspection operation" }),

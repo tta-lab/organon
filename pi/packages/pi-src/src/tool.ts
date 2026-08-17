@@ -17,6 +17,7 @@ import {
 import { Type, type Static } from "typebox";
 
 import {
+  objectUnion,
   cliError,
   parseSingleJsonDoc,
   resolveBinaryPath,
@@ -79,7 +80,7 @@ const symbolReadSchema = Type.Object(
 );
 
 /** The read override is an explicit union with the live built-in branch. */
-export const readSchema = Type.Union([builtInReadParameters, symbolsReadSchema, symbolReadSchema]);
+export const readSchema = objectUnion([builtInReadParameters, symbolsReadSchema, symbolReadSchema]);
 
 const replaceSymbolSchema = Type.Object(
   {
@@ -132,7 +133,7 @@ const commentSymbolSchema = Type.Object(
 );
 
 /** The edit override is an explicit union with the live built-in branch. */
-export const editSchema = Type.Union([
+export const editSchema = objectUnion([
   builtInEditParameters,
   replaceSymbolSchema,
   insertSymbolSchema,

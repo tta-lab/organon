@@ -4,6 +4,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
 import {
+  objectUnion,
   resolveBinaryPath,
   runCli,
   parseSingleJsonDoc,
@@ -13,7 +14,7 @@ import {
 
 const require = createRequire(import.meta.url);
 
-export const projectSchema = Type.Union([
+export const projectSchema = objectUnion([
   Type.Object(
     {
       action: StringEnum(["list"] as const, { description: "Action to perform" }),

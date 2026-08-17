@@ -14,6 +14,7 @@ import { editSchema, readSchema } from "../../pi-src/src/tool.js";
 import { webSchema } from "../../pi-web/src/tool.js";
 
 interface JsonSchemaLike {
+  type?: unknown;
   const?: unknown;
   enum?: unknown[];
   properties?: Record<string, JsonSchemaLike>;
@@ -67,6 +68,11 @@ describe("tool schemas are Google-compatible", () => {
     ["og_pr", ogPrSchema],
     ["og_checks", ogChecksSchema],
   ];
+
+  it.each(tools)("%s: exposes an object schema at the provider boundary", (name, schema) => {
+    const root = schema as unknown as JsonSchemaLike;
+    expect(root.type, `${name}: provider tool schemas must have type object`).toBe("object");
+  });
 
   it.each(tools)("%s: contains no const fields at any schema depth", (name, schema) => {
     expect(constPaths(schema), `${name}: Type.Literal/const is not Google-compatible`).toEqual([]);

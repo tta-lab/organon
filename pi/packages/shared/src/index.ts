@@ -9,3 +9,4 @@ export {
   type TextContentBlock,
 } from "./model-text.js";
 export { truncateForModel, type ModelText, type TruncateForModelOptions } from "./truncate.js";
+export { objectUnion } from "./schema.js";
