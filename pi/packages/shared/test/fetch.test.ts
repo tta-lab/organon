@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,35 +20,30 @@ async function startServer(handler: (req: IncomingMessage, res: ServerResponse) 
 }
 
 async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
-  const prior = process.env.HOME;
+  const priorHome = process.env.HOME;
+  const priorXDG = process.env.XDG_CACHE_HOME;
+  const priorLocalAppData = process.env.LOCALAPPDATA;
   const home = mkdtempSync(join(tmpdir(), "pi-web-fetch-home-"));
   process.env.HOME = home;
+  delete process.env.XDG_CACHE_HOME;
+  delete process.env.LOCALAPPDATA;
   try {
     return await fn(home);
   } finally {
-    if (prior === undefined) delete process.env.HOME;
-    else process.env.HOME = prior;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
+    if (priorXDG === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = priorXDG;
+    if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = priorLocalAppData;
     rmSync(home, { recursive: true, force: true });
   }
 }
 
-function cachePath(home: string, url: string, date = new Date()): string {
-  const parsed = new URL(url);
-  let base = url.replaceAll("://", "___");
-  if (parsed.search) base = base.split("?", 1)[0]!;
-  base = base.replaceAll("/", "_").replace(/_$/, "").replaceAll("..", "__");
-  if (parsed.search) {
-    const queryHash = createHash("sha256").update(parsed.search.slice(1)).digest("hex").slice(0, 8);
-    base += `_q${queryHash}`;
-  }
-  if (base.length > 200) {
-    const hash = createHash("sha256").update(base).digest("hex").slice(0, 8);
-    base = base.slice(0, 191) + `_${hash}`;
-  }
-  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()]
-    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
-    .join("-");
-  return join(home, ".cache", "organon", "scrapes", `${base}__${day}.md`);
+function resolveCacheDirectory(home: string): string {
+  return process.platform === "win32"
+    ? join(home, "AppData", "Local", "organon", "scrapes")
+    : join(home, ".cache", "organon", "scrapes");
 }
 
 describe.sequential("native Pi fetch", () => {
@@ -111,7 +105,7 @@ describe.sequential("native Pi fetch", () => {
     }
   });
 
-  it("reuses compatible cache entries, expires stale entries, and separates queries", async () => {
+  it("hits same-day entries, misses stale entries, and hashes URL cache names", async () => {
     let requests = 0;
     const { server, url } = await startServer((req, res) => {
       requests++;
@@ -121,34 +115,47 @@ describe.sequential("native Pi fetch", () => {
     try {
       await withTempHome(async (home) => {
         const cachedURL = `${url}/cached`;
-        mkdirSync(join(home, ".cache", "organon", "scrapes"), { recursive: true });
-        writeFileSync(cachePath(home, cachedURL), "Go-compatible cache");
-        await expect(fetchWebPage({ url: cachedURL })).resolves.toMatchObject({
-          content: "Go-compatible cache",
-        });
-        expect(requests).toBe(0);
-
-        const staleURL = `${url}/stale`;
-        writeFileSync(
-          cachePath(home, staleURL, new Date(Date.now() - 24 * 60 * 60 * 1000)),
-          "stale cache",
-        );
-        await expect(fetchWebPage({ url: staleURL })).resolves.toMatchObject({
-          content: `network /stale`,
-        });
+        await fetchWebPage({ url: cachedURL });
+        await fetchWebPage({ url: cachedURL });
         expect(requests).toBe(1);
 
+        const cacheDirectory = resolveCacheDirectory(home);
+        let files = readdirSync(cacheDirectory);
+        expect(files).toHaveLength(1);
+        expect(files[0]).toMatch(/^[0-9a-f]{64}__[0-9]{4}-[0-9]{2}-[0-9]{2}[.]md$/);
+
+        const staleDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const staleDay = [staleDate.getFullYear(), staleDate.getMonth() + 1, staleDate.getDate()]
+          .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+          .join("-");
+        const currentPath = join(cacheDirectory, files[0]!);
+        const staleName = files[0]!.replace(
+          /__[0-9]{4}-[0-9]{2}-[0-9]{2}[.]md$/,
+          `__${staleDay}.md`,
+        );
+        renameSync(currentPath, join(cacheDirectory, staleName));
+        await fetchWebPage({ url: cachedURL });
+        expect(requests).toBe(2);
+
+        const windowsURL = `${url}/windows?value=%3C%3E%3A%22%7C%3F*`;
+        await fetchWebPage({ url: windowsURL });
+        await fetchWebPage({ url: `${url}/long?${"value=".repeat(400)}` });
         await fetchWebPage({ url: `${url}/query?value=one` });
         await fetchWebPage({ url: `${url}/query?value=two` });
         await fetchWebPage({ url: `${url}/query?value=one` });
-        expect(requests).toBe(3);
+        expect(requests).toBe(6);
+
+        files = readdirSync(cacheDirectory);
+        expect(
+          files.every((file) => /^[0-9a-f]{64}__[0-9]{4}-[0-9]{2}-[0-9]{2}[.]md$/.test(file)),
+        ).toBe(true);
+        expect(files.every((file) => file.length <= 80)).toBe(true);
       });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
-
-  it("continues without caching when setup, read, or write fails", async () => {
+  it("continues when cache setup, read, or write fails", async () => {
     let requests = 0;
     const { server, url } = await startServer((_req, res) => {
       requests++;
@@ -156,10 +163,14 @@ describe.sequential("native Pi fetch", () => {
       res.end("cache failure fallback");
     });
     const priorHome = process.env.HOME;
+    const priorXDG = process.env.XDG_CACHE_HOME;
+    const priorLocalAppData = process.env.LOCALAPPDATA;
     const homeFile = mkdtempSync(join(tmpdir(), "pi-web-cache-file-"));
     let cacheHome: string | undefined;
     const invalidHome = join(homeFile, "home-file");
     writeFileSync(invalidHome, "not a directory");
+    delete process.env.XDG_CACHE_HOME;
+    delete process.env.LOCALAPPDATA;
     try {
       process.env.HOME = invalidHome;
       await fetchWebPage({ url: `${url}/setup-failure` });
@@ -168,23 +179,30 @@ describe.sequential("native Pi fetch", () => {
 
       cacheHome = mkdtempSync(join(tmpdir(), "pi-web-cache-read-"));
       process.env.HOME = cacheHome;
-      const cacheDirectory = join(cacheHome, ".cache", "organon", "scrapes");
-      const brokenPath = cachePath(cacheHome, `${url}/read-write-failure`);
-      mkdirSync(cacheDirectory, { recursive: true });
+      const cacheDirectory = resolveCacheDirectory(cacheHome);
+      const brokenURL = `${url}/read-write-failure`;
+      await fetchWebPage({ url: brokenURL });
+      const cachedFile = readdirSync(cacheDirectory)[0];
+      if (!cachedFile) throw new Error("cache file was not created");
+      const brokenPath = join(cacheDirectory, cachedFile);
+      rmSync(brokenPath, { force: true });
       mkdirSync(brokenPath, { recursive: true });
-      await fetchWebPage({ url: `${url}/read-write-failure` });
-      await fetchWebPage({ url: `${url}/read-write-failure` });
-      expect(requests).toBe(4);
+      await fetchWebPage({ url: brokenURL });
+      await fetchWebPage({ url: brokenURL });
+      expect(requests).toBe(5);
     } finally {
       if (priorHome === undefined) delete process.env.HOME;
       else process.env.HOME = priorHome;
+      if (priorXDG === undefined) delete process.env.XDG_CACHE_HOME;
+      else process.env.XDG_CACHE_HOME = priorXDG;
+      if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = priorLocalAppData;
       rmSync(homeFile, { recursive: true, force: true });
       if (cacheHome) rmSync(cacheHome, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
-
-  it("preserves the Go HTML extraction trailing newline", async () => {
+  it("preserves the HTML extraction trailing newline", async () => {
     const { server, url } = await startServer((_req, res) => {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.end("<html><body><article><p>Extracted text.</p></article></body></html>");

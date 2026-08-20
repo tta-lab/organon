@@ -194,7 +194,13 @@ function errorMessage(error: unknown): string {
 
 function defaultCacheDir(): string {
   const home = process.env.HOME?.trim() || homedir();
-  return join(home, ".cache", "organon", "scrapes");
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA?.trim();
+    const root = localAppData || join(home, "AppData", "Local");
+    return join(root, "organon", "scrapes");
+  }
+  const root = process.env.XDG_CACHE_HOME?.trim() || join(home, ".cache");
+  return join(root, "organon", "scrapes");
 }
 
 class DailyCache {
@@ -204,7 +210,7 @@ class DailyCache {
 
   async prepare(): Promise<void> {
     try {
-      await mkdir(this.directory, { recursive: true, mode: 0o755 });
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
       this.enabled = true;
     } catch {
       this.enabled = false;
@@ -230,42 +236,16 @@ class DailyCache {
   }
 
   private path(url: string): string {
-    const now = new Date();
-    const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
-      .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
-      .join("-");
-    return join(this.directory, `${sanitizeURL(url)}__${date}.md`);
+    return join(this.directory, cacheFileName(url, new Date()));
   }
 }
 
-function sanitizeURL(rawURL: string): string {
-  let parsed: URL | undefined;
-  try {
-    parsed = new URL(rawURL);
-  } catch {
-    return rawURL
-      .replaceAll("://", "___")
-      .replaceAll("/", "_")
-      .replaceAll("?", "_")
-      .replaceAll("=", "_")
-      .replaceAll("&", "_")
-      .replaceAll("..", "__");
-  }
-
-  let base = rawURL.replaceAll("://", "___");
-  if (parsed.search) {
-    base = base.split("?", 1)[0]!;
-  }
-  base = base.replaceAll("/", "_").replace(/_$/, "").replaceAll("..", "__");
-  if (parsed.search) {
-    const queryHash = createHash("sha256").update(parsed.search.slice(1)).digest("hex").slice(0, 8);
-    base += `_q${queryHash}`;
-  }
-  if (base.length > 200) {
-    const hash = createHash("sha256").update(base).digest("hex").slice(0, 8);
-    base = base.slice(0, 191) + `_${hash}`;
-  }
-  return base;
+function cacheFileName(url: string, date: Date): string {
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+    .join("-");
+  const key = createHash("sha256").update(url).digest("hex");
+  return `${key}__${day}.md`;
 }
 
 function createRequestSignal(callerSignal: AbortSignal | undefined, timeoutMs: number) {

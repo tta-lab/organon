@@ -12,8 +12,8 @@ import {
   runCli,
 } from "@tta-lab/pi-shared";
 
-import { fetchWebPage, type FetchResult } from "./fetch.js";
-export type { FetchResult } from "./fetch.js";
+import { fetchWebPage, type FetchResult } from "@tta-lab/pi-shared/fetch";
+export type { FetchResult } from "@tta-lab/pi-shared/fetch";
 
 const require = createRequire(import.meta.url);
 const DEFAULT_TREE_THRESHOLD = 5000;

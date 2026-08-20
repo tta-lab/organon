@@ -56,14 +56,22 @@ async function startServer(handler: (req: IncomingMessage, res: ServerResponse) 
 }
 
 async function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
-  const prior = process.env.HOME;
+  const priorHome = process.env.HOME;
+  const priorXDG = process.env.XDG_CACHE_HOME;
+  const priorLocalAppData = process.env.LOCALAPPDATA;
   const home = mkdtempSync(join(tmpdir(), "pi-web-home-"));
   process.env.HOME = home;
+  delete process.env.XDG_CACHE_HOME;
+  delete process.env.LOCALAPPDATA;
   try {
     return await fn();
   } finally {
-    if (prior === undefined) delete process.env.HOME;
-    else process.env.HOME = prior;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
+    if (priorXDG === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = priorXDG;
+    if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = priorLocalAppData;
     rmSync(home, { recursive: true, force: true });
   }
 }
