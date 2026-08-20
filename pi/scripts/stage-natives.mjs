@@ -4,12 +4,14 @@
 //
 // Usage: node scripts/stage-natives.mjs <goreleaserDistDir>
 // Every tool/os/arch combination must resolve to an exact per-platform
-// artifact; a missing or cross-platform fallback is an error so a Darwin
-// binary can never be shipped inside a Linux package.
+// artifact; a missing or cross-platform fallback is an error so a binary can
+// never be shipped inside the wrong native package.
 import { copyFileSync, chmodSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { NATIVE_TARGETS } from "./release-targets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
@@ -19,19 +21,11 @@ if (!dist || !existsSync(dist)) {
   process.exit(2);
 }
 
-const TOOLS = ["src", "web", "project", "og"];
-const TARGETS = [
-  ["darwin", "arm64", "darwin-arm64", /Mach-O.*arm64/],
-  ["linux", "amd64", "linux-x64", /ELF.*x86-64/],
-  ["linux", "arm64", "linux-arm64", /ELF.*aarch64/],
-];
-
 /**
  * Reads goreleaser's artifacts.json for the exact per-build binary paths;
- * falls back to globbing version-suffixed build directories when the metadata
- * file is absent. Never resolves a same-named binary from another platform.
+ * never resolves a same-named binary from another platform.
  */
-function artifactFor(tool, os, arch) {
+function artifactFor(tool, target) {
   const metaPath = join(dist, "artifacts.json");
   if (existsSync(metaPath)) {
     let artifacts;
@@ -42,7 +36,11 @@ function artifactFor(tool, os, arch) {
     }
     const list = Array.isArray(artifacts) ? artifacts : (artifacts.artifacts ?? []);
     const match = list.find(
-      (a) => a.type === "Binary" && a.name === tool && a.goos === os && a.goarch === arch,
+      (a) =>
+        a.type === "Binary" &&
+        a.name === tool &&
+        a.goos === target.goos &&
+        a.goarch === target.goarch,
     );
     if (match?.path) {
       // artifacts.json paths are relative to the directory containing dist/.
@@ -52,7 +50,6 @@ function artifactFor(tool, os, arch) {
       }
     }
   }
-  // Fallback: dist/<tool>_<os>_<arch>_<version-suffix>/<tool>
   return undefined;
 }
 
@@ -65,22 +62,31 @@ function fileSignature(binary) {
 }
 
 let staged = 0;
-for (const tool of TOOLS) {
-  for (const [os, arch, suffix, marker] of TARGETS) {
-    const source = artifactFor(tool, os, arch);
+for (const target of NATIVE_TARGETS) {
+  for (const tool of target.tools) {
+    const source = artifactFor(tool, target);
     if (!source) {
-      console.error(`missing exact artifact for ${tool}_${os}_${arch}; refusing to fall back`);
+      console.error(
+        `missing exact artifact for ${tool}_${target.goos}_${target.goarch}; refusing to fall back`,
+      );
       process.exit(1);
     }
-    const destDir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`, "bin");
+    const destDir = join(
+      workspace,
+      "packages",
+      "native",
+      `pi-${tool}-${target.packageSuffix}`,
+      "bin",
+    );
     mkdirSync(destDir, { recursive: true });
-    const dest = join(destDir, tool);
+    const executable = target.goos === "windows" ? `${tool}.exe` : tool;
+    const dest = join(destDir, executable);
     copyFileSync(source, dest);
     chmodSync(dest, 0o755);
     const signature = fileSignature(dest);
-    if (!marker.test(signature)) {
+    if (!target.fileMarker.test(signature)) {
       console.error(
-        `staged ${tool} for ${os}/${arch} but file reports: ${signature || "unreadable"}`,
+        `staged ${tool} for ${target.goos}/${target.goarch} but file reports: ${signature || "unreadable"}`,
       );
       process.exit(1);
     }

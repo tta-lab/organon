@@ -16,14 +16,11 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import { NATIVE_TOOLS, nativeTargetsForTool } from "../../../scripts/release-targets.mjs";
+
 const workspace = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const testWorkspace = process.env.ORGANON_PI_TEST_WORKSPACE;
-const TOOLS = ["src", "web", "project", "og"];
-const TARGETS: Array<[string, string, string]> = [
-  ["darwin", "arm64", "darwin-arm64"],
-  ["linux", "x64", "linux-x64"],
-  ["linux", "arm64", "linux-arm64"],
-];
+const TOOLS = NATIVE_TOOLS;
 const tmp = mkdtempSync(join(tmpdir(), "pi-pack-all-"));
 const hostileNpmUserConfig = join(tmp, "hostile-npmrc");
 writeFileSync(hostileNpmUserConfig, "omit=optional\nignore-scripts=false\n");
@@ -81,9 +78,29 @@ function expectPublicMetadata(manifest: any, directory: string): void {
   });
 }
 
+function hostSuffix(): string {
+  const osName =
+    process.platform === "darwin"
+      ? "darwin"
+      : process.platform === "linux"
+        ? "linux"
+        : process.platform === "win32"
+          ? "win32"
+          : "";
+  if (!osName || !["arm64", "x64"].includes(process.arch)) {
+    throw new Error(`unsupported pack host ${process.platform}-${process.arch}`);
+  }
+  if (osName === "darwin" && process.arch !== "arm64") {
+    throw new Error(`unsupported pack host ${process.platform}-${process.arch}`);
+  }
+  if (osName === "win32" && process.arch !== "x64") {
+    throw new Error(`unsupported pack host ${process.platform}-${process.arch}`);
+  }
+  return `${osName}-${process.arch}`;
+}
+
 function nativePackageDir(tool: string, suffix: string): string {
-  const hostSuffix = `${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch}`;
-  const root = suffix === hostSuffix ? (testWorkspace ?? workspace) : workspace;
+  const root = suffix === hostSuffix() ? (testWorkspace ?? workspace) : workspace;
   return join(root, "packages", "native", `pi-${tool}-${suffix}`);
 }
 
@@ -109,20 +126,21 @@ afterAll(() => {
   // keep artifacts in the tmp dir for inspection; CI cleans /tmp
 });
 
-describe("all sixteen package manifests", () => {
+describe("all native package manifests", () => {
   it("packs every native package with os/cpu constraints, a bin entry, and one version", () => {
     const version = readManifest(
       pack(join(workspace, "packages", "pi-src"), "@tta-lab/pi-src"),
     ).version;
     for (const tool of TOOLS) {
-      for (const [os, cpu, suffix] of TARGETS) {
-        const dir = join(workspace, "packages", "native", `pi-${tool}-${suffix}`);
-        const manifest = readManifest(pack(dir, `@tta-lab/pi-${tool}-${suffix}`));
+      for (const target of nativeTargetsForTool(tool)) {
+        const dir = join(workspace, "packages", "native", `pi-${tool}-${target.packageSuffix}`);
+        const manifest = readManifest(pack(dir, `@tta-lab/pi-${tool}-${target.packageSuffix}`));
         expect(manifest.version).toBe(version);
-        expectPublicMetadata(manifest, `pi/packages/native/pi-${tool}-${suffix}`);
-        expect(manifest.os).toEqual([os]);
-        expect(manifest.cpu).toEqual([cpu]);
-        expect(manifest.bin).toEqual({ [tool]: `bin/${tool}` });
+        expectPublicMetadata(manifest, `pi/packages/native/pi-${tool}-${target.packageSuffix}`);
+        expect(manifest.os).toEqual([target.packageOS]);
+        expect(manifest.cpu).toEqual([target.packageCPU]);
+        const executable = target.goos === "windows" ? `${tool}.exe` : tool;
+        expect(manifest.bin).toEqual({ [tool]: `bin/${executable}` });
       }
     }
   }, 120000);
@@ -138,19 +156,19 @@ describe("all sixteen package manifests", () => {
       expectPublicMetadata(manifest, `pi/packages/pi-${tool}`);
       expect(packageFiles(tgz)).toContain("package/README.md");
       expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
-      for (const [, , suffix] of TARGETS) {
+      for (const { packageSuffix: suffix } of nativeTargetsForTool(tool)) {
         const dep = `@tta-lab/pi-${tool}-${suffix}`;
         expect(manifest.optionalDependencies[dep]).toBe(version);
         expect(manifest.optionalDependencies[dep]).not.toMatch(/[\^~]/);
       }
-      expect(Object.keys(manifest.optionalDependencies).length).toBe(3);
+      expect(Object.keys(manifest.optionalDependencies).length).toBe(
+        nativeTargetsForTool(tool).length,
+      );
     }
   });
 
   it("installs packed main and native tarballs offline and executes the src read/edit overrides", async () => {
-    const { platform, arch } = process;
-    const osName = platform === "darwin" ? "darwin" : "linux";
-    const archName = arch === "arm64" ? "arm64" : "x64";
+    const currentHostSuffix = hostSuffix();
 
     const smoke: Array<{
       tool: string;
@@ -197,10 +215,11 @@ describe("all sixteen package manifests", () => {
     ];
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
-    for (const { tool, publicTool = tool, action, assert } of smoke) {
-      const hostSuffix = `${osName}-${archName}`;
-      const nativePkgName = `@tta-lab/pi-${tool}-${hostSuffix}`;
-      const nativePkgDir = nativePackageDir(tool, hostSuffix);
+    const smokeTools =
+      currentHostSuffix === "win32-x64" ? smoke.filter(({ tool }) => tool === "web") : smoke;
+    for (const { tool, publicTool = tool, action, assert } of smokeTools) {
+      const nativePkgName = `@tta-lab/pi-${tool}-${currentHostSuffix}`;
+      const nativePkgDir = nativePackageDir(tool, currentHostSuffix);
       const nativeTgz = pack(nativePkgDir, nativePkgName);
       const mainTgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
 
@@ -208,7 +227,7 @@ describe("all sixteen package manifests", () => {
       rmSync(installRoot, { recursive: true, force: true });
       mkdirSync(installRoot, { recursive: true });
       const overrides: Record<string, string> = {};
-      for (const [, , suffix] of TARGETS) {
+      for (const { packageSuffix: suffix } of nativeTargetsForTool(tool)) {
         const platformDir = nativePackageDir(tool, suffix);
         const tgz = pack(platformDir, `@tta-lab/pi-${tool}-${suffix}`);
         overrides[`@tta-lab/pi-${tool}-${suffix}`] = `file:${tgz}`;
@@ -234,9 +253,10 @@ describe("all sixteen package manifests", () => {
       const pkg = join(installRoot, "node_modules", `@tta-lab/pi-${tool}`);
       expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
       const installedNative = join(installRoot, "node_modules", nativePkgName);
-      expect(existsSync(join(installedNative, "bin", tool))).toBe(true);
-      for (const [, , suffix] of TARGETS) {
-        if (suffix !== hostSuffix) {
+      const installedExecutable = currentHostSuffix === "win32-x64" ? `${tool}.exe` : tool;
+      expect(existsSync(join(installedNative, "bin", installedExecutable))).toBe(true);
+      for (const { packageSuffix: suffix } of nativeTargetsForTool(tool)) {
+        if (suffix !== currentHostSuffix) {
           expect(
             existsSync(join(installRoot, "node_modules", "@tta-lab", `pi-${tool}-${suffix}`)),
           ).toBe(false);

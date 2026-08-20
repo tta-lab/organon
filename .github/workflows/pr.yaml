@@ -127,3 +127,60 @@ jobs:
       - name: Verify tag-to-artifact release invariants
         working-directory: pi
         run: node scripts/test-release-invariants.mjs ../dist
+
+  windows-web:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+
+      - name: Install Pi workspace
+        working-directory: pi
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack, install, and run web.exe from paths with spaces
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "organon web smoke"
+          $packageRoot = Join-Path $env:RUNNER_TEMP "organon native package path"
+          $installRoot = Join-Path $env:RUNNER_TEMP "organon installed web path"
+          New-Item -ItemType Directory -Force $smokeRoot | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $packageRoot "bin") | Out-Null
+          Copy-Item pi/packages/native/pi-web-win32-x64/package.json (Join-Path $packageRoot "package.json")
+          $env:CGO_ENABLED = "0"
+          go build -o (Join-Path $packageRoot "bin/web.exe") ./cmd/web
+          Push-Location $packageRoot
+          npm pack --pack-destination $smokeRoot | Out-Null
+          Pop-Location
+          $tarball = (Get-ChildItem $smokeRoot -Filter "*.tgz").FullName
+          New-Item -ItemType Directory -Force $installRoot | Out-Null
+          Push-Location $installRoot
+          npm install --offline --ignore-scripts --no-audit --no-fund $tarball | Out-Null
+          $packagedExecutable = Join-Path $installRoot "node_modules/@tta-lab/pi-web-win32-x64/bin/web.exe"
+          $help = (& $packagedExecutable --help 2>&1 | Out-String)
+          $helpExitCode = $LASTEXITCODE
+          Pop-Location
+          if ($helpExitCode -ne 0 -or $help -notmatch "Search the web") {
+            Write-Error "packaged web.exe --help failed: $help"
+            exit 1
+          }
+
+      - name: Test Windows Pi Web resolver and cache
+        working-directory: pi
+        run: pnpm exec vitest run packages/shared/test/windows-web.test.ts packages/shared/test/fetch.test.ts

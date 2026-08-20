@@ -56,6 +56,8 @@ importers:
 
   packages/native/pi-web-linux-x64: {}
 
+  packages/native/pi-web-win32-x64: {}
+
   packages/pi-og:
     devDependencies:
       "@earendil-works/pi-ai":
@@ -167,6 +169,9 @@ importers:
       "@tta-lab/pi-web-linux-x64":
         specifier: workspace:*
         version: link:../native/pi-web-linux-x64
+      "@tta-lab/pi-web-win32-x64":
+        specifier: workspace:*
+        version: link:../native/pi-web-win32-x64
 
   packages/shared:
     devDependencies:

@@ -30,6 +30,16 @@ builds:
       - amd64
       - arm64
 
+  - id: web-windows
+    binary: web
+    main: ./cmd/web
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+
   - id: skill
     binary: skill
     main: ./cmd/skill
@@ -100,6 +110,7 @@ archives:
     builds:
       - src
       - web
+      - web-windows
       - skill
       - project
       - goal

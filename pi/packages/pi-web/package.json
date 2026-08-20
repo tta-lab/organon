@@ -36,7 +36,8 @@
   "optionalDependencies": {
     "@tta-lab/pi-web-darwin-arm64": "workspace:*",
     "@tta-lab/pi-web-linux-arm64": "workspace:*",
-    "@tta-lab/pi-web-linux-x64": "workspace:*"
+    "@tta-lab/pi-web-linux-x64": "workspace:*",
+    "@tta-lab/pi-web-win32-x64": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.84.1",

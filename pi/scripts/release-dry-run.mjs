@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // Verifies release invariants without network access:
-// - all sixteen manifests share one version matching the release tag
+// - all discovered public manifests share one version matching the release tag
 // - every main package pins its native optional dependencies to that exact version
-// - no manifest references latest or an unmatched version
-// - when a goreleaser dist dir is given, its metadata version matches the tag
-//   and its artifacts cover the four tools on the three supported platforms
+// - native packages are all referenced by a main package and no manifest references latest
+// - when a goreleaser dist dir is given, its metadata and configured artifacts match
 //
 // Usage: node scripts/release-dry-run.mjs <x.y.z> [goreleaserDistDir]
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { NATIVE_TARGETS } from "./release-targets.mjs";
 import {
   assertNativePackagesFirst,
   distTagForVersion,
@@ -34,14 +34,23 @@ const publishPlan = packagePublishPlan(workspace);
 const mainPackages = publishPlan.filter((entry) => entry.kind === "main");
 const nativePackages = publishPlan.filter((entry) => entry.kind === "native");
 const nativePackageDirs = new Set(nativePackages.map((entry) => entry.dir));
+const referencedNativeDirs = new Set();
 const errors = [];
-if (publishPlan.length !== 16)
-  errors.push(`publish plan has ${publishPlan.length} packages; expected 16`);
-if (nativePackages.length !== 12) {
-  errors.push(`publish plan has ${nativePackages.length} native packages; expected 12`);
+for (const entry of mainPackages) {
+  const manifest = read(join(entry.path, "package.json"));
+  for (const dep of Object.keys(manifest.optionalDependencies ?? {})) {
+    referencedNativeDirs.add(dep.replace("@tta-lab/pi-", "pi-"));
+  }
 }
-if (mainPackages.length !== 4) {
-  errors.push(`publish plan has ${mainPackages.length} main packages; expected 4`);
+for (const dir of referencedNativeDirs) {
+  if (!nativePackageDirs.has(dir)) {
+    errors.push(`main package references missing native package ${dir}`);
+  }
+}
+for (const dir of nativePackageDirs) {
+  if (!referencedNativeDirs.has(dir)) {
+    errors.push(`native package ${dir} is not referenced by a main package`);
+  }
 }
 try {
   assertNativePackagesFirst(publishPlan);
@@ -73,8 +82,8 @@ for (const entry of mainPackages) {
 }
 
 // Tag -> GoReleaser artifact mapping: the dist metadata version (tag without
-// the leading v) must equal the manifest version, and the binaries for the
-// four tools on the three supported platforms must all be present.
+// the leading v) must equal the manifest version, and every configured tool/
+// platform target must be present.
 if (dist) {
   const metaPath = join(dist, "metadata.json");
   if (!existsSync(metaPath)) {
@@ -95,17 +104,17 @@ if (dist) {
   const artifactsPath = join(dist, "artifacts.json");
   const artifacts = existsSync(artifactsPath) ? read(artifactsPath) : [];
   const list = Array.isArray(artifacts) ? artifacts : (artifacts.artifacts ?? []);
-  for (const tool of ["src", "web", "project", "og"]) {
-    for (const [os, arch] of [
-      ["darwin", "arm64"],
-      ["linux", "amd64"],
-      ["linux", "arm64"],
-    ]) {
+  for (const target of NATIVE_TARGETS) {
+    for (const tool of target.tools) {
       const found = list.some(
-        (a) => a.type === "Binary" && a.name === tool && a.goos === os && a.goarch === arch,
+        (a) =>
+          a.type === "Binary" &&
+          a.name === tool &&
+          a.goos === target.goos &&
+          a.goarch === target.goarch,
       );
       if (!found) {
-        errors.push(`goreleaser artifacts missing ${tool}_${os}_${arch}`);
+        errors.push(`goreleaser artifacts missing ${tool}_${target.goos}_${target.goarch}`);
       }
     }
   }
