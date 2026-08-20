@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Test-only fake web CLI: mirrors the documented JSON contract of the real
 // Go binary for search/fetch/docs_resolve/docs_fetch/sgraph with --json.
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 if (process.env.PI_WEB_TEST_INVOCATIONS) {
@@ -42,6 +42,23 @@ function recordSearchEvent(phase, query) {
   if (process.env.PI_WEB_TEST_SEARCH_EVENTS) {
     appendFileSync(process.env.PI_WEB_TEST_SEARCH_EVENTS, JSON.stringify({ phase, query }) + "\n");
   }
+}
+function waitForSearchPeers(barrierPath, query, finish) {
+  writeFileSync(`${barrierPath}.${query}`, "");
+  const deadline = Date.now() + 5000;
+  const poll = () => {
+    if (existsSync(`${barrierPath}.slow`) && existsSync(`${barrierPath}.fast`)) {
+      finish();
+      return;
+    }
+    if (Date.now() >= deadline) {
+      process.stderr.write("Error: search barrier timed out\n");
+      process.exit(2);
+      return;
+    }
+    setTimeout(poll, 1);
+  };
+  poll();
 }
 
 switch (cmd) {
@@ -85,7 +102,9 @@ switch (cmd) {
       }
       process.stdout.write(JSON.stringify({ provider: "DuckDuckGo", results }) + "\n");
     };
-    if (delay === 0) finish();
+    const barrierPath = process.env.PI_WEB_TEST_SEARCH_BARRIER;
+    if (barrierPath) waitForSearchPeers(barrierPath, query, finish);
+    else if (delay === 0) finish();
     else setTimeout(finish, delay);
     break;
   }

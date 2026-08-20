@@ -71,6 +71,10 @@ jobs:
         working-directory: pi
         run: pnpm build
 
+      - name: DSH Web rc.8 composition smoke
+        working-directory: pi
+        run: pnpm --filter @tta-lab/dsh-web run test:composition
+
       - name: Pi tests
         working-directory: pi
         run: pnpm exec vitest run

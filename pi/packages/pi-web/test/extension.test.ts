@@ -120,14 +120,17 @@ describe("pi-web extension", () => {
     }
   });
 
-  it("deduplicates exact queries, runs them concurrently, and merges round-robin", async () => {
+  it("deduplicates exact queries, coordinates concurrent searches, and merges round-robin", async () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-web-search-batch-"));
     const invocationPath = join(directory, "invocations");
     const eventsPath = join(directory, "events");
+    const barrierPath = join(directory, "search-barrier");
     const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
     const priorEventsPath = process.env.PI_WEB_TEST_SEARCH_EVENTS;
+    const priorBarrierPath = process.env.PI_WEB_TEST_SEARCH_BARRIER;
     process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
     process.env.PI_WEB_TEST_SEARCH_EVENTS = eventsPath;
+    process.env.PI_WEB_TEST_SEARCH_BARRIER = barrierPath;
     try {
       const result = await call("search", { queries: ["slow", "fast", "slow"] });
       const details = result.details as {
@@ -156,14 +159,17 @@ describe("pi-web extension", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { phase: string; query: string });
-      const firstEnd = events.findIndex((event) => event.phase === "end");
-      expect(events.slice(0, firstEnd).filter((event) => event.phase === "start")).toHaveLength(2);
+      expect(existsSync(`${barrierPath}.slow`)).toBe(true);
+      expect(existsSync(`${barrierPath}.fast`)).toBe(true);
+      expect(events.filter((event) => event.phase === "start")).toHaveLength(2);
       expect(events.filter((event) => event.phase === "end")).toHaveLength(2);
     } finally {
       if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
       else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
       if (priorEventsPath === undefined) delete process.env.PI_WEB_TEST_SEARCH_EVENTS;
       else process.env.PI_WEB_TEST_SEARCH_EVENTS = priorEventsPath;
+      if (priorBarrierPath === undefined) delete process.env.PI_WEB_TEST_SEARCH_BARRIER;
+      else process.env.PI_WEB_TEST_SEARCH_BARRIER = priorBarrierPath;
       rmSync(directory, { recursive: true, force: true });
     }
   });
