@@ -51,7 +51,8 @@ describe("DSH Web package composition", () => {
       getProvider: () => "duckduckgo",
       credentials: { resolve: async () => undefined },
       run: async (_binary, options) => {
-        calls.push({ query: options.args[1] ?? "", signal: options.signal });
+        const marker = options.args.indexOf("--");
+        calls.push({ query: options.args[marker + 1] ?? "", signal: options.signal });
         return {
           stdout: JSON.stringify({ provider: "DuckDuckGo", results: [] }),
           stderr: "",

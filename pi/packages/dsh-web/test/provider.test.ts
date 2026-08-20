@@ -41,17 +41,19 @@ describe("Organon DSH search provider", () => {
         registered.get(SEARCH_PROVIDER_ID)!.search(request, signal),
     };
     const controller = new AbortController();
+    const flagLikeQuery = "--flag-like query";
 
-    const results = await fakePtcSearch(web, ["typed query"], controller.signal);
+    const results = await fakePtcSearch(web, [flagLikeQuery], controller.signal);
     expect(provider.id).toBe(SEARCH_PROVIDER_ID);
     expect(provider.available()).toBe(true);
     expect(received?.binary).toContain("organon web binary");
     expect(received?.options.args).toEqual([
       "search",
-      "typed query",
       "--provider",
       "brave",
       "--json",
+      "--",
+      flagLikeQuery,
     ]);
     expect(received?.options.env).toEqual({ BRAVE_API_KEY: "dsh-secret" });
     expect(received?.options.signal).toBe(controller.signal);
@@ -85,7 +87,14 @@ describe("Organon DSH search provider", () => {
     });
 
     await provider.search({ query: "fallback" });
-    expect(receivedOptions.args).toEqual(["search", "fallback", "--provider", "exa", "--json"]);
+    expect(receivedOptions.args).toEqual([
+      "search",
+      "--provider",
+      "exa",
+      "--json",
+      "--",
+      "fallback",
+    ]);
     expect(receivedOptions.env).toBeUndefined();
     expect(childEnvironment?.EXA_API_KEY).toBe("inherited-value");
   });
@@ -112,6 +121,41 @@ describe("Organon DSH search provider", () => {
     await provider.search({ query: "cancel", maxResults: 1 }, controller.signal);
     expect(receivedSignal).toBe(controller.signal);
     expect(credentialCalls).toBe(0);
+  });
+
+  it("rejects malformed JSON and invalid source fields before returning an rc.8 result", async () => {
+    const malformed = createOrganonSearchProvider({
+      binaryPath: "web",
+      getProvider: () => "exa",
+      credentials: { resolve: async () => undefined },
+      run: async () => ({ stdout: "{not-json", stderr: "", exitCode: 0, killed: false }),
+    });
+    await expect(malformed.search({ query: "malformed" })).rejects.toThrow(/invalid JSON/);
+
+    for (const [field, value] of [
+      ["link", 42],
+      ["title", 42],
+      ["snippet", 42],
+    ] as const) {
+      const invalid = createOrganonSearchProvider({
+        binaryPath: "web",
+        getProvider: () => "exa",
+        credentials: { resolve: async () => undefined },
+        run: async () => ({
+          stdout: JSON.stringify({
+            results: [
+              { link: "https://example.com", title: "Title", snippet: "Snippet", [field]: value },
+            ],
+          }),
+          stderr: "",
+          exitCode: 0,
+          killed: false,
+        }),
+      });
+      await expect(invalid.search({ query: `invalid-${field}` })).rejects.toThrow(
+        new RegExp(`${field} must be a string`),
+      );
+    }
   });
 
   it("reports child failures without exposing credential values", async () => {

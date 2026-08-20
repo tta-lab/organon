@@ -31,6 +31,15 @@ func TestSearchCommandPassesExplicitProviderAndIgnoresLegacyWebConfig(t *testing
 	assert.Equal(t, "exa", gotProvider)
 }
 
+func TestSearchCommandAcceptsFlagLikeQuery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	service := &stubWebService{}
+	cmd := newSearchCmdWithFactory(fixedServiceFactory(service))
+	cmd.SetArgs([]string{"--provider", "exa", "--json", "--", "-flag-like-query"})
+
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, "-flag-like-query", service.searchInput)
+}
 func TestSearchCommandLeavesProviderEmptyForFallback(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var gotProvider string

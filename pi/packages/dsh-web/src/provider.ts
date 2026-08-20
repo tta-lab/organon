@@ -14,16 +14,6 @@ import {
   type SearchProviderName,
 } from "./contract.js";
 
-interface OrganonSearchResponse {
-  provider: string;
-  results: Array<{
-    title: string;
-    link: string;
-    snippet: string;
-    position: number;
-  }>;
-}
-
 export interface SearchProviderDependencies {
   binaryPath: string;
   getProvider: () => SearchProviderName;
@@ -44,6 +34,54 @@ function credentialFor(
     case "duckduckgo":
       return undefined;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateSearchResult(value: unknown, provider: SearchProviderName): WebSearchResult {
+  if (!isRecord(value) || !Array.isArray(value.results)) {
+    throw new Error(`${provider} search returned an invalid results array`);
+  }
+
+  const sources = value.results.map((raw, index) => {
+    if (!isRecord(raw)) {
+      throw new Error(
+        `${provider} search returned an invalid result at index ${index}: source must be an object`,
+      );
+    }
+    const link = raw.link;
+    const title = raw.title;
+    const snippet = raw.snippet;
+    if (typeof link !== "string") {
+      throw new Error(
+        `${provider} search returned an invalid result at index ${index}: link must be a string`,
+      );
+    }
+    if (link.length === 0) {
+      throw new Error(
+        `${provider} search returned an invalid result at index ${index}: link must be non-empty`,
+      );
+    }
+    if (title !== undefined && typeof title !== "string") {
+      throw new Error(
+        `${provider} search returned an invalid result at index ${index}: title must be a string`,
+      );
+    }
+    if (snippet !== undefined && typeof snippet !== "string") {
+      throw new Error(
+        `${provider} search returned an invalid result at index ${index}: snippet must be a string`,
+      );
+    }
+    return {
+      url: link,
+      ...(title === undefined ? {} : { title }),
+      ...(snippet === undefined ? {} : { snippet }),
+    };
+  });
+
+  return { sources, truncated: false };
 }
 
 function redactedMessage(error: unknown, secret?: string): string {
@@ -73,7 +111,8 @@ export function createOrganonSearchProvider(
       }
 
       const options: CliRunOptions = {
-        args: ["search", request.query, "--provider", provider, "--json"],
+        // Put all flags before `--`; a query beginning with `-` is positional.
+        args: ["search", "--provider", provider, "--json", "--", request.query],
         signal,
         ...(resolved !== undefined && credential !== undefined
           ? { env: { [credential.env]: resolved.value } }
@@ -96,25 +135,21 @@ export function createOrganonSearchProvider(
         throw new Error(`${provider} search failed: ${redactedMessage(error, resolved?.value)}`);
       }
 
-      let data: OrganonSearchResponse;
+      let data: unknown;
       try {
-        data = parseSingleJsonDoc<OrganonSearchResponse>(result.stdout);
+        data = parseSingleJsonDoc<unknown>(result.stdout);
       } catch (error) {
         throw new Error(
           `${provider} search returned invalid JSON: ${redactedMessage(error, resolved?.value)}`,
         );
       }
-      if (!Array.isArray(data.results)) {
-        throw new Error(`${provider} search returned an invalid results array`);
+      try {
+        return validateSearchResult(data, provider);
+      } catch (error) {
+        throw new Error(
+          `${provider} search result validation failed: ${redactedMessage(error, resolved?.value)}`,
+        );
       }
-      return {
-        sources: data.results.map((source) => ({
-          url: source.link,
-          title: source.title,
-          snippet: source.snippet,
-        })),
-        truncated: false,
-      };
     },
   };
 }

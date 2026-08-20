@@ -18,6 +18,7 @@ import (
 
 type stubWebService struct {
 	searchResult webcore.SearchResult
+	searchInput  string
 	fetchResult  webcore.FetchResult
 	resolve      webcore.DocsResolveResult
 	docs         webcore.DocsFetchResult
@@ -27,7 +28,8 @@ type stubWebService struct {
 	sgraphInput  webcore.SGraphInput
 }
 
-func (s *stubWebService) Search(context.Context, string) (webcore.SearchResult, error) {
+func (s *stubWebService) Search(_ context.Context, query string) (webcore.SearchResult, error) {
+	s.searchInput = query
 	return s.searchResult, nil
 }
 

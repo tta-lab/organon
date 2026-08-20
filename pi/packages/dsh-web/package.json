@@ -98,6 +98,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. packages/dsh-web/test"
+    "test": "vitest run --root ../.. packages/dsh-web/test",
+    "test:composition": "pnpm run build && vitest run --config vitest.composition.config.ts"
   }
 }
