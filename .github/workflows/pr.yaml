@@ -181,9 +181,11 @@ jobs:
           $nativeTarball = (Get-ChildItem $nativePackRoot -Filter "*.tgz").FullName
           $mainTarball = (Get-ChildItem $mainPackRoot -Filter "*.tgz").FullName
           New-Item -ItemType Directory -Force $installRoot | Out-Null
+          $peerAi = "link:" + (Resolve-Path "pi/node_modules/@earendil-works/pi-ai").Path
+          $peerAgent = "link:" + (Resolve-Path "pi/node_modules/@earendil-works/pi-coding-agent").Path
+          $peerTypebox = "link:" + (Resolve-Path "pi/node_modules/typebox").Path
           Push-Location $installRoot
-          npm install --offline --omit=optional --legacy-peer-deps --ignore-scripts --no-audit --no-fund $mainTarball | Out-Null
-          npm install --offline --ignore-scripts --no-audit --no-fund $nativeTarball | Out-Null
+          pnpm add --offline --ignore-scripts --no-optional $mainTarball $nativeTarball $peerAi $peerAgent $peerTypebox
           Pop-Location
           "PI_WINDOWS_WEB_INSTALL_ROOT=$installRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
