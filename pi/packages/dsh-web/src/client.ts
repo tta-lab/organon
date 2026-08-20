@@ -188,7 +188,12 @@ function SettingsCard({
       ),
     ),
     ...CREDENTIAL_REFS.map((ref) => {
-      const label = ref === EXA_CREDENTIAL_REF ? "Exa API key" : "Brave API key";
+      const label =
+        ref === EXA_CREDENTIAL_REF
+          ? "Exa API key"
+          : ref === BRAVE_CREDENTIAL_REF
+            ? "Brave API key"
+            : "Context7 API key";
       const current = status[ref] ?? { configured: false, writable: false };
       return createElement(
         "fieldset",

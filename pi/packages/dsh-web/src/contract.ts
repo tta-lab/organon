@@ -7,7 +7,12 @@ export type SearchProviderName = (typeof PROVIDERS)[number];
 /** DSH-owned references; these names never identify a value in settings. */
 export const EXA_CREDENTIAL_REF = "ORGANON_DSH_WEB_EXA_API_KEY" as const;
 export const BRAVE_CREDENTIAL_REF = "ORGANON_DSH_WEB_BRAVE_API_KEY" as const;
-export const CREDENTIAL_REFS = [EXA_CREDENTIAL_REF, BRAVE_CREDENTIAL_REF] as const;
+export const CONTEXT7_CREDENTIAL_REF = "ORGANON_DSH_WEB_CONTEXT7_API_KEY" as const;
+export const CREDENTIAL_REFS = [
+  EXA_CREDENTIAL_REF,
+  BRAVE_CREDENTIAL_REF,
+  CONTEXT7_CREDENTIAL_REF,
+] as const;
 
 export interface OrganonSettings {
   provider: SearchProviderName;

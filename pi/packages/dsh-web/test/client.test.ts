@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { BRAVE_CREDENTIAL_REF, EXA_CREDENTIAL_REF, SETTINGS_NAMESPACE } from "../src/contract.js";
+import {
+  BRAVE_CREDENTIAL_REF,
+  CONTEXT7_CREDENTIAL_REF,
+  EXA_CREDENTIAL_REF,
+  SETTINGS_NAMESPACE,
+} from "../src/contract.js";
 import {
   decodeSettings,
   describeCredentialStatus,
@@ -60,10 +65,15 @@ describe("DSH settings client credential surface", () => {
 
   it("returns only credential metadata and keeps refs package-namespaced", async () => {
     const api = fakeApi();
-    const status = await describeCredentialStatus(api, [EXA_CREDENTIAL_REF, BRAVE_CREDENTIAL_REF]);
+    const status = await describeCredentialStatus(api, [
+      EXA_CREDENTIAL_REF,
+      BRAVE_CREDENTIAL_REF,
+      CONTEXT7_CREDENTIAL_REF,
+    ]);
     expect(status).toEqual({
       [EXA_CREDENTIAL_REF]: { configured: true, source: "file", writable: true },
       [BRAVE_CREDENTIAL_REF]: { configured: false, source: "file", writable: true },
+      [CONTEXT7_CREDENTIAL_REF]: { configured: false, source: "file", writable: true },
     });
     expect(JSON.stringify(status)).not.toContain("secret-value");
   });

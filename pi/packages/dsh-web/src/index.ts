@@ -7,9 +7,10 @@ import { resolveBinaryPath } from "@tta-lab/pi-shared/binary";
 
 import { PROVIDERS, SETTINGS_NAMESPACE, type OrganonSettings } from "./contract.js";
 import { createOrganonSearchProvider } from "./provider.js";
+import { registerWebTools } from "./tools.js";
 
 export const name = "organon-dsh-web";
-export const inject = ["web", "credentials", "settings"] as const;
+export const inject = ["web", "credentials", "settings", "tools"] as const;
 
 export const SettingsSchema = z.object({
   provider: z.union(PROVIDERS).default("duckduckgo"),
@@ -27,4 +28,5 @@ export function apply(ctx: Context): void {
     credentials: ctx.credentials,
   });
   ctx.web.registerSearchProvider(provider);
+  registerWebTools(ctx, { binaryPath, credentials: ctx.credentials });
 }

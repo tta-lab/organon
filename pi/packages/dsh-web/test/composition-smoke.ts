@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { detectPlatform } from "@tta-lab/pi-shared";
+
 import { describe, expect, it } from "vitest";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -44,7 +46,8 @@ function testEnvironment(
     PHASE4_DSH_ARGS: argsPath,
     DSH_TELEMETRY_DISABLED: "1",
   };
-  for (const key of ["EXA_API_KEY", "BRAVE_API_KEY", "DEEPSEEK_API_KEY"]) delete env[key];
+  for (const key of ["EXA_API_KEY", "BRAVE_API_KEY", "CONTEXT7_API_KEY", "DEEPSEEK_API_KEY"])
+    delete env[key];
   return env;
 }
 
@@ -72,11 +75,17 @@ async function writeProbePackage(profile: string): Promise<void> {
       '    if (recordPath === undefined) throw new Error("PHASE4_DSH_RECORD missing");',
       '    const scope = await ctx.agentPresets.standingKeyFor("code");',
       '    const search = ctx.tools.get("web_search", scope);',
+      '    const globalSearch = ctx.tools.get("web_search");',
       '    const fetch = ctx.tools.get("web_fetch", scope);',
-      '    const rootFetch = ctx.tools.get("web_fetch");',
+      '    const globalFetch = ctx.tools.get("web_fetch");',
+      '    const docs = ctx.tools.get("web_docs", scope);',
+      '    const sgraph = ctx.tools.get("web_sgraph", scope);',
       '    if (search === undefined) throw new Error("stock code preset did not register web_search");',
+      '    if (globalSearch !== undefined) throw new Error("plugin replaced native web_search");',
+      '    if (fetch === undefined || globalFetch === undefined) throw new Error("plugin fetch tool is missing");',
+      '    if (docs === undefined || sgraph === undefined) throw new Error("plugin docs/source tools are missing");',
       '    const result = await search.execute({ queries: ["-flag-like query", "normal query"] }, { signal: new AbortController().signal });',
-      "    await writeFile(recordPath, JSON.stringify({ scopeSearch: true, scopeFetch: fetch !== undefined, rootFetch: rootFetch !== undefined, result }));",
+      "    await writeFile(recordPath, JSON.stringify({ scopeSearch: true, globalSearch: false, scopeFetch: fetch !== undefined, globalFetch: globalFetch !== undefined, docs: docs !== undefined, sgraph: sgraph !== undefined, fetchFields: Object.keys(fetch.parameters.properties ?? {}), result }));",
       "  } catch (error) {",
       "    if (recordPath !== undefined) await writeFile(recordPath, JSON.stringify({ error: String(error) }));",
       "    throw error;",
@@ -198,7 +207,16 @@ describe.sequential("actual DSH rc.8 normal Web profile composition", () => {
     const runnerWorkspace = join(home, "runner workspace");
     const recordPath = join(home, "probe.json");
     const argsPath = join(home, "args.jsonl");
-    const binary = join(runnerWorkspace, "packages", "native", "pi-web-darwin-arm64", "bin", "web");
+    const { os, arch } = detectPlatform("web");
+    const executable = os === "win32" ? "web.exe" : "web";
+    const binary = join(
+      runnerWorkspace,
+      "packages",
+      "native",
+      `pi-web-${os}-${arch}`,
+      "bin",
+      executable,
+    );
     const env = testEnvironment(home, runnerWorkspace, recordPath, argsPath);
     let child: ChildProcess | undefined;
     let stderr = "";
@@ -253,9 +271,14 @@ describe.sequential("actual DSH rc.8 normal Web profile composition", () => {
         stderr += String(chunk);
       });
       const probe = await waitForRecord(recordPath, child, () => stderr);
+      if (probe.error !== undefined) throw new Error(`${probe.error}\n${stderr}`);
       expect(probe.scopeSearch).toBe(true);
-      expect(probe.scopeFetch).toBe(false);
-      expect(probe.rootFetch).toBe(false);
+      expect(probe.globalSearch).toBe(false);
+      expect(probe.scopeFetch).toBe(true);
+      expect(probe.globalFetch).toBe(true);
+      expect(probe.docs).toBe(true);
+      expect(probe.sgraph).toBe(true);
+      expect(probe.fetchFields).toEqual(["url", "tree", "section_id", "full", "tree_threshold"]);
       expect(probe.result.sources).toHaveLength(2);
       expect(probe.result.sources.every((source: any) => source.title === "Organon")).toBe(true);
 

@@ -14,10 +14,11 @@ import { SEARCH_PROVIDER_ID, SETTINGS_NAMESPACE } from "../src/contract.js";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("DSH Web package composition", () => {
-  it("registers the Organon provider and does not register a model-facing root tool", () => {
+  it("registers the Organon provider and global Pi-compatible tools without replacing search", () => {
     let registered: any;
     let registeredNamespace = "";
     let registeredBase: unknown;
+    const registeredTools: any[] = [];
     const ctx = {
       settings: {
         register: (namespace: string, schema: unknown, options: { base: unknown }) => {
@@ -33,6 +34,9 @@ describe("DSH Web package composition", () => {
           registered = provider;
         },
       },
+      tools: {
+        register: (definition: unknown) => registeredTools.push(definition),
+      },
     };
 
     apply(ctx as any);
@@ -40,6 +44,15 @@ describe("DSH Web package composition", () => {
     expect(registeredBase).toEqual({ provider: "duckduckgo" });
     expect(registered.id).toBe(SEARCH_PROVIDER_ID);
     expect(registered.available()).toBe(true);
+    expect(registeredTools.map((definition) => definition.name)).toEqual([
+      "web_fetch",
+      "web_docs",
+      "web_sgraph",
+    ]);
+    expect(registeredTools.every((definition) => definition.presentCall === undefined)).toBe(true);
+    expect(registeredTools.every((definition) => definition.presentResult === undefined)).toBe(
+      true,
+    );
   });
 
   it("routes a PTC-shaped batch through the isolated rc.8 WebRuntime seam", async () => {
@@ -89,6 +102,7 @@ describe("DSH Web package composition", () => {
     const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     const patch = parse(readFileSync(join(root, "cordis.patch.yml"), "utf8")) as any[];
     expect(manifest.name).toBe("@tta-lab/dsh-web");
+    expect(manifest.peerDependencies["@deepseek-ai/dsh-tools"]).toBe("0.1.0-rc.8");
     expect(manifest.peerDependencies["@deepseek-ai/dsh-web"]).toBe("0.1.0-rc.8");
     expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
     expect(manifest.dsh.client.platform).toBe("web");
@@ -118,7 +132,7 @@ describe("DSH Web package composition", () => {
     expect(inserted).toContainEqual({
       id: "organon-dsh-web",
       name: "@tta-lab/dsh-web",
-      inject: ["web", "credentials", "settings"],
+      inject: ["web", "credentials", "settings", "tools"],
     });
     expect(JSON.stringify(patch)).not.toContain("web_search");
     expect(JSON.stringify(patch)).not.toContain("preset");

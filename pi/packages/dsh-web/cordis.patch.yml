@@ -13,4 +13,4 @@
 - insert:
     - id: organon-dsh-web
       name: "@tta-lab/dsh-web"
-      inject: [web, credentials, settings]
+      inject: [web, credentials, settings, tools]
