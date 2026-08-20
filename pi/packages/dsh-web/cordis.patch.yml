@@ -1,0 +1,16 @@
+# rc.8 stock Web has one configured search provider and no fetch provider.
+# Replace only that complete service config; the PTC preset remains untouched.
+- id: web
+  name: "@deepseek-ai/dsh-web"
+  config:
+    searchProvider: organon-web-search
+
+# The root model-facing tool is intentionally disabled. PTC owns its native
+# batched web_search surface and reaches the provider through ctx.web.
+- id: tool-web
+  disabled: true
+
+- insert:
+    - id: organon-dsh-web
+      name: "@tta-lab/dsh-web"
+      inject: [web, credentials, settings]

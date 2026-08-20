@@ -133,12 +133,14 @@ describe("subprocess adapter", () => {
     const result = await runCli(process.execPath, {
       args: [join(fixtures, "echo-args.mjs"), "list", "--json"],
       stdin: "hello\nworld",
+      env: { PI_TEST_CHILD_VALUE: "child-value" },
     });
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("diag\n");
     const out = JSON.parse(result.stdout);
     expect(out.argv).toEqual(["list", "--json"]);
     expect(out.stdin).toBe("hello\nworld");
+    expect(out.env).toBe("child-value");
   });
 
   it("rejects with Operation aborted when the signal fires", async () => {

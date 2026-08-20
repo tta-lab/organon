@@ -6,7 +6,10 @@
   "description": "Private fetch, Markdown navigation, cache, subprocess, truncation, result, and binary-resolution helpers bundled into each public Organon Pi extension.",
   "exports": {
     ".": "./src/index.ts",
-    "./fetch": "./src/fetch.ts"
+    "./binary": "./src/binary.ts",
+    "./fetch": "./src/fetch.ts",
+    "./parse": "./src/parse.ts",
+    "./process": "./src/process.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
