@@ -179,7 +179,7 @@ describe("all sixteen package manifests", () => {
       {
         tool: "web",
         publicTool: "web_search",
-        action: { query: "tree-sitter" },
+        action: { queries: ["tree-sitter"] },
         assert: (result: any) => expect(result.details.provider).toBe("DuckDuckGo"),
       },
       {
