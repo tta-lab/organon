@@ -20,7 +20,14 @@ const DEFAULT_TREE_THRESHOLD = 5000;
 
 export const webSearchSchema = Type.Object(
   {
-    query: Type.String({ description: "Web search query" }),
+    queries: Type.Array(
+      Type.String({ description: "Web search query", minLength: 1, pattern: "\\S" }),
+      {
+        description: "One to four web search queries",
+        minItems: 1,
+        maxItems: 4,
+      },
+    ),
   },
   { additionalProperties: false },
 );
@@ -145,6 +152,42 @@ function requireString(input: unknown, field: string): string {
   return input[field] as string;
 }
 
+function requireQueries(input: unknown): string[] {
+  if (!isRecord(input)) {
+    throw new Error("queries must be an array of 1 to 4 non-empty strings");
+  }
+  for (const field of Object.keys(input)) {
+    if (field !== "queries") {
+      throw new Error(`web_search input does not accept field ${field}`);
+    }
+  }
+  const queries = input.queries;
+  if (
+    !Array.isArray(queries) ||
+    queries.length < 1 ||
+    queries.length > 4 ||
+    queries.some((query) => typeof query !== "string" || query.trim().length === 0)
+  ) {
+    throw new Error("queries must be an array of 1 to 4 non-empty strings");
+  }
+  return [...new Set(queries as string[])];
+}
+
+function mergeSearchResults(responses: SearchResult[]): SearchResult {
+  const results: SearchResult["results"] = [];
+  for (let resultIndex = 0; ; resultIndex++) {
+    let added = false;
+    for (const response of responses) {
+      const result = response.results[resultIndex];
+      if (result === undefined) continue;
+      results.push({ ...result, position: results.length + 1 });
+      added = true;
+    }
+    if (!added) break;
+  }
+  return { provider: responses[0]?.provider ?? "", results };
+}
+
 function normalizeDocs(input: unknown): DocsInput {
   if (!isRecord(input)) {
     throw new Error("web_docs input must be an object");
@@ -190,15 +233,24 @@ export function webSearchTool() {
     name: "web_search",
     label: "Web search",
     description:
-      "Search the web for current facts through the native Organon web search backends. Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
+      "Search the web for current facts through the native Organon web search backends. Provide one to four queries; text output is limited to 2,000 lines or 50KB.",
     promptSnippet: "Search the web with web_search",
     promptGuidelines: SEARCH_PROMPT_GUIDELINES,
     parameters: webSearchSchema,
     execute: async (params: WebSearchInput, signal) => {
-      const query = requireString(params, "query");
-      const result = await runCli(binary, { args: ["search", query, "--json"], signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
-      const data = parseSingleJsonDoc<SearchResult>(result.stdout);
+      const queries = requireQueries(params);
+      const settled = await Promise.allSettled(
+        queries.map(async (query) => {
+          const result = await runCli(binary, { args: ["search", query, "--json"], signal });
+          if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
+          return parseSingleJsonDoc<SearchResult>(result.stdout);
+        }),
+      );
+      const responses = settled.map((result) => {
+        if (result.status !== "fulfilled") throw result.reason;
+        return result.value;
+      });
+      const data = mergeSearchResults(responses);
       const lines = data.results.map(
         (r) => `${r.position}. ${r.title}\n   URL: ${r.link}\n   ${r.snippet}`,
       );

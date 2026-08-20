@@ -27,13 +27,15 @@ for (let i = 0; i < args.length; i++) {
 const positional = args.filter((a) => !a.startsWith("--"));
 const cmd = positional[0];
 const target = positional[1] ?? positional[0];
+function recordSearchEvent(phase, query) {
+  if (process.env.PI_WEB_TEST_SEARCH_EVENTS) {
+    appendFileSync(process.env.PI_WEB_TEST_SEARCH_EVENTS, JSON.stringify({ phase, query }) + "\n");
+  }
+}
+
 switch (cmd) {
   case "search": {
     const query = positional.slice(1).join(" ");
-    if (query === "boom") {
-      process.stderr.write("Error: search backend failed: rate limited\n");
-      process.exit(1);
-    }
     if (query === "wait-for-abort") {
       const pidPath = process.env.PI_WEB_TEST_PID_FILE;
       if (!pidPath) {
@@ -41,22 +43,39 @@ switch (cmd) {
         process.exit(2);
       }
       writeFileSync(pidPath, String(process.pid));
+      recordSearchEvent("start", query);
       setInterval(() => {}, 1000);
       break;
     }
-    process.stdout.write(
-      JSON.stringify({
-        provider: "DuckDuckGo",
-        results: [
-          {
-            title: "Result for " + query,
-            link: "https://example.com/" + encodeURIComponent(query),
-            snippet: "snippet",
-            position: 1,
-          },
-        ],
-      }) + "\n",
-    );
+
+    recordSearchEvent("start", query);
+    const delay = query === "slow" ? 120 : query === "fast" || query === "boom" ? 20 : 0;
+    const finish = () => {
+      recordSearchEvent("end", query);
+      if (query === "boom") {
+        process.stderr.write("Error: search backend failed: rate limited\n");
+        process.exit(1);
+      }
+      const results = [
+        {
+          title: "Result 1 for " + query,
+          link: "https://example.com/" + encodeURIComponent(query) + "/1",
+          snippet: "snippet 1",
+          position: 1,
+        },
+      ];
+      if (query === "slow" || query === "fast") {
+        results.push({
+          title: "Result 2 for " + query,
+          link: "https://example.com/" + encodeURIComponent(query) + "/2",
+          snippet: "snippet 2",
+          position: 2,
+        });
+      }
+      process.stdout.write(JSON.stringify({ provider: "DuckDuckGo", results }) + "\n");
+    };
+    if (delay === 0) finish();
+    else setTimeout(finish, delay);
     break;
   }
   case "fetch": {

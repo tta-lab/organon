@@ -3,8 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,17 +42,13 @@ func (s *stubDocsClient) Docs(_ context.Context, id, topic string, tokens int) (
 }
 
 func TestServiceSearchReturnsProviderAndTypedResults(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "web.toml")
-	require.NoError(t, os.WriteFile(path, []byte("[search]\nprovider = \"brave\"\n"), 0o600))
-
 	var gotProvider string
 	svc, err := NewService(Options{
-		SearchConfigPath: path,
+		SearchProvider: "brave",
 		Dependencies: Dependencies{
 			Search: func(_ context.Context, query string, cfg search.Config) (search.Response, error) {
 				assert.Equal(t, "typed mcp", query)
-				gotProvider = cfg.Search.Provider
+				gotProvider = cfg.Provider
 				return search.Response{
 					Provider: "Brave",
 					Results:  []search.SearchResult{{Title: "Result", Link: "https://example.com", Position: 1}},
@@ -72,13 +66,10 @@ func TestServiceSearchReturnsProviderAndTypedResults(t *testing.T) {
 	assert.Equal(t, "Result", got.Results[0].Title)
 }
 
-func TestNewServiceRejectsInvalidSearchConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "web.toml")
-	require.NoError(t, os.WriteFile(path, []byte("[search\nprovider = \"brave\"\n"), 0o600))
-
-	_, err := NewService(Options{SearchConfigPath: path})
+func TestNewServiceRejectsUnsupportedSearchProvider(t *testing.T) {
+	_, err := NewService(Options{SearchProvider: "google"})
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "read web config")
+	assert.ErrorContains(t, err, "unsupported search provider")
 }
 
 func TestServiceFetchReturnsRenderedMode(t *testing.T) {

@@ -84,8 +84,11 @@ describe("pi-web extension", () => {
     expect((webSearchSchema as any).type).toBe("object");
     expect((webDocsSchema as any).type).toBe("object");
     expect((webSgraphSchema as any).type).toBe("object");
-    expect(Value.Check(webSearchSchema, { query: "x" })).toBe(true);
-    expect(Value.Check(webSearchSchema, {})).toBe(false);
+    expect(Value.Check(webSearchSchema, { queries: ["x"] })).toBe(true);
+    expect(Value.Check(webSearchSchema, { queries: [] })).toBe(false);
+    expect(Value.Check(webSearchSchema, { queries: ["x", "y", "z", "w", "v"] })).toBe(false);
+    expect(Value.Check(webSearchSchema, { queries: [" "] })).toBe(false);
+    expect(Value.Check(webSearchSchema, { query: "x" })).toBe(false);
     expect(Value.Check(webDocsSchema, { action: "resolve", query: "x" })).toBe(true);
     expect(Value.Check(webDocsSchema, { action: "fetch", library_id: "/x" })).toBe(true);
     expect(Value.Check(webDocsSchema, { action: "fetch", library_id: "/x", tokens: 1.5 })).toBe(
@@ -100,8 +103,105 @@ describe("pi-web extension", () => {
     ).rejects.toThrow(/does not accept query/);
   });
 
+  it("validates batched search before launching the binary", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-search-invalid-"));
+    const invocationPath = join(directory, "invocations");
+    const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
+    process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+    try {
+      await expect(call("search", { queries: [] })).rejects.toThrow(/1 to 4 non-empty strings/);
+      await expect(call("search", { queries: ["", "valid"] })).rejects.toThrow(
+        /1 to 4 non-empty strings/,
+      );
+      await expect(call("search", { queries: [" "] })).rejects.toThrow(/1 to 4 non-empty strings/);
+      await expect(call("search", { queries: ["x", "y", "z", "w", "v"] })).rejects.toThrow(
+        /1 to 4 non-empty strings/,
+      );
+      await expect(call("search", { query: "legacy" })).rejects.toThrow(
+        /does not accept field query/,
+      );
+      expect(existsSync(invocationPath)).toBe(false);
+    } finally {
+      if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
+      else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates exact queries, runs them concurrently, and merges round-robin", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-search-batch-"));
+    const invocationPath = join(directory, "invocations");
+    const eventsPath = join(directory, "events");
+    const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
+    const priorEventsPath = process.env.PI_WEB_TEST_SEARCH_EVENTS;
+    process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+    process.env.PI_WEB_TEST_SEARCH_EVENTS = eventsPath;
+    try {
+      const result = await call("search", { queries: ["slow", "fast", "slow"] });
+      const details = result.details as {
+        provider: string;
+        results: Array<{ title: string; position: number }>;
+      };
+      expect(details.provider).toBe("DuckDuckGo");
+      expect(details.results.map((item) => item.title)).toEqual([
+        "Result 1 for slow",
+        "Result 1 for fast",
+        "Result 2 for slow",
+        "Result 2 for fast",
+      ]);
+      expect(details.results.map((item) => item.position)).toEqual([1, 2, 3, 4]);
+
+      const invocations = readFileSync(invocationPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(invocations).toHaveLength(2);
+      expect(invocations.map((args) => args[1])).toEqual(expect.arrayContaining(["slow", "fast"]));
+
+      const events = readFileSync(eventsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { phase: string; query: string });
+      const firstEnd = events.findIndex((event) => event.phase === "end");
+      expect(events.slice(0, firstEnd).filter((event) => event.phase === "start")).toHaveLength(2);
+      expect(events.filter((event) => event.phase === "end")).toHaveLength(2);
+    } finally {
+      if (priorInvocationPath === undefined) delete process.env.PI_WEB_TEST_INVOCATIONS;
+      else process.env.PI_WEB_TEST_INVOCATIONS = priorInvocationPath;
+      if (priorEventsPath === undefined) delete process.env.PI_WEB_TEST_SEARCH_EVENTS;
+      else process.env.PI_WEB_TEST_SEARCH_EVENTS = priorEventsPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for every started search before reporting a batch failure", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-web-search-failure-"));
+    const eventsPath = join(directory, "events");
+    const priorEventsPath = process.env.PI_WEB_TEST_SEARCH_EVENTS;
+    process.env.PI_WEB_TEST_SEARCH_EVENTS = eventsPath;
+    try {
+      await expect(call("search", { queries: ["boom", "slow"] })).rejects.toThrow(
+        /search backend failed/,
+      );
+      const events = readFileSync(eventsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { phase: string; query: string });
+      expect(events.filter((event) => event.phase === "start").map((event) => event.query)).toEqual(
+        expect.arrayContaining(["boom", "slow"]),
+      );
+      expect(events.filter((event) => event.phase === "end").map((event) => event.query)).toEqual(
+        expect.arrayContaining(["boom", "slow"]),
+      );
+    } finally {
+      if (priorEventsPath === undefined) delete process.env.PI_WEB_TEST_SEARCH_EVENTS;
+      else process.env.PI_WEB_TEST_SEARCH_EVENTS = priorEventsPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("searches, fetches natively, resolves and fetches docs, and searches source", async () => {
-    const search = await call("search", { query: "tree-sitter" });
+    const search = await call("search", { queries: ["tree-sitter"] });
     expect((search.content[0] as { text: string }).text).toContain("tree-sitter");
 
     const { server, url } = await startServer((_req, res) => {
@@ -194,9 +294,9 @@ describe("pi-web extension", () => {
 
     const controller = new AbortController();
     controller.abort();
-    await expect(call("search", { query: "wait-for-abort" }, controller.signal)).rejects.toThrow(
-      "Operation aborted",
-    );
+    await expect(
+      call("search", { queries: ["wait-for-abort"] }, controller.signal),
+    ).rejects.toThrow("Operation aborted");
     expect(existsSync("/nonexistent/pi-web-test")).toBe(false);
   });
 });

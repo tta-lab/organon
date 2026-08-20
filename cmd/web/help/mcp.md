@@ -1,9 +1,15 @@
 Run a typed MCP server over stdin/stdout for web search, page fetches,
 Context7 documentation, and Sourcegraph code search.
 
-The server loads `~/.config/ttal/web.toml` and the ttal environment once at
-startup. Restart it after changing configuration or environment variables.
-Every tool is read-only but performs open-world network access.
+Select the provider used by every search call with `--provider`:
+
+  web mcp --provider brave
+
+Supported providers are `exa`, `brave`, and `duckduckgo`. Without the flag,
+search backends use the `EXA_API_KEY` → `BRAVE_API_KEY` → DuckDuckGo fallback.
+The server loads the ttal environment once at startup; restart it after changing
+environment variables. Every tool is read-only but performs open-world network
+access.
 
 Tools:
 
@@ -20,7 +26,7 @@ Example MCP client configuration:
   "mcpServers": {
     "organon-web": {
       "command": "web",
-      "args": ["mcp"]
+      "args": ["mcp", "--provider", "brave"]
     }
   }
 }

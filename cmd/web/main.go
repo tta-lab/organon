@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/docs"
 	"github.com/tta-lab/organon/internal/search"
 	webcore "github.com/tta-lab/organon/internal/web"
@@ -23,10 +22,10 @@ type webService interface {
 	SGraphSearch(context.Context, webcore.SGraphInput) (webcore.SGraphResult, error)
 }
 
-type serviceFactory func(searchConfigPath string) (webService, error)
+type serviceFactory func(searchProvider string) (webService, error)
 
-func defaultServiceFactory(searchConfigPath string) (webService, error) {
-	return webcore.NewService(webcore.Options{SearchConfigPath: searchConfigPath})
+func defaultServiceFactory(searchProvider string) (webService, error) {
+	return webcore.NewService(webcore.Options{SearchProvider: searchProvider})
 }
 
 func main() {
@@ -99,7 +98,11 @@ func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
 		Long:  helpSearch,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			service, err := factory(config.WebConfigPath())
+			provider, err := cmd.Flags().GetString("provider")
+			if err != nil {
+				return fmt.Errorf("read --provider: %w", err)
+			}
+			service, err := factory(provider)
 			if err != nil {
 				return err
 			}
@@ -116,6 +119,7 @@ func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
+	cmd.Flags().String("provider", "", "Search provider: exa, brave, or duckduckgo")
 	return cmd
 }
 

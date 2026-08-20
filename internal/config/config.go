@@ -31,11 +31,6 @@ func ProjectsPath() string {
 	return filepath.Join(DefaultConfigDir(), "projects.toml")
 }
 
-// WebConfigPath returns the path to web.toml.
-func WebConfigPath() string {
-	return filepath.Join(DefaultConfigDir(), "web.toml")
-}
-
 // OGConfigPath returns the path to og.toml.
 func OGConfigPath() string {
 	return filepath.Join(DefaultConfigDir(), "og.toml")

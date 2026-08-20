@@ -54,20 +54,29 @@ func fixedServiceFactory(service webService) serviceFactory {
 	return func(string) (webService, error) { return service, nil }
 }
 
+func capturingServiceFactory(service webService, captured *string) serviceFactory {
+	return func(provider string) (webService, error) {
+		*captured = provider
+		return service, nil
+	}
+}
+
 func TestSearchCLIFormatsTypedServiceResult(t *testing.T) {
 	service := &stubWebService{searchResult: webcore.SearchResult{
 		Provider: "Brave",
 		Results:  []search.SearchResult{{Title: "One", Link: "https://example.com", Snippet: "Summary", Position: 1}},
 	}}
-	cmd := newSearchCmdWithFactory(fixedServiceFactory(service))
+	var provider string
+	cmd := newSearchCmdWithFactory(capturingServiceFactory(service, &provider))
 	var output bytes.Buffer
 	cmd.SetOut(&output)
-	cmd.SetArgs([]string{"query"})
+	cmd.SetArgs([]string{"query", "--provider", "brave"})
 
 	require.NoError(t, cmd.Execute())
 	want := "Found 1 search results:\n\n" +
 		"1. One\n   URL: https://example.com\n   Summary: Summary\n\n"
 	assert.Equal(t, want, output.String())
+	assert.Equal(t, "brave", provider)
 }
 
 func TestFetchCLIMapsFlagsAndPrintsContent(t *testing.T) {
