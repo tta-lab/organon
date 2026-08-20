@@ -154,32 +154,38 @@ jobs:
         working-directory: pi
         run: pnpm install --frozen-lockfile
 
-      - name: Pack, install, and run web.exe from paths with spaces
+      - name: Build Pi Web package
+        working-directory: pi
+        run: pnpm --filter @tta-lab/pi-web run build
+
+      - name: Pack, install, and run resolved web.exe from paths with spaces
         shell: pwsh
         run: |
           $smokeRoot = Join-Path $env:RUNNER_TEMP "organon web smoke"
-          $packageRoot = Join-Path $env:RUNNER_TEMP "organon native package path"
+          $nativePackageRoot = Join-Path $env:RUNNER_TEMP "organon native package path"
+          $nativePackRoot = Join-Path $smokeRoot "native"
+          $mainPackRoot = Join-Path $smokeRoot "main"
           $installRoot = Join-Path $env:RUNNER_TEMP "organon installed web path"
-          New-Item -ItemType Directory -Force $smokeRoot | Out-Null
-          New-Item -ItemType Directory -Force (Join-Path $packageRoot "bin") | Out-Null
-          Copy-Item pi/packages/native/pi-web-win32-x64/package.json (Join-Path $packageRoot "package.json")
+          New-Item -ItemType Directory -Force (Join-Path $nativePackageRoot "bin") | Out-Null
+          New-Item -ItemType Directory -Force $nativePackRoot | Out-Null
+          New-Item -ItemType Directory -Force $mainPackRoot | Out-Null
+          Copy-Item pi/packages/native/pi-web-win32-x64/package.json (Join-Path $nativePackageRoot "package.json")
           $env:CGO_ENABLED = "0"
-          go build -o (Join-Path $packageRoot "bin/web.exe") ./cmd/web
-          Push-Location $packageRoot
-          npm pack --pack-destination $smokeRoot | Out-Null
+          go build -o (Join-Path $nativePackageRoot "bin/web.exe") ./cmd/web
+          Push-Location $nativePackageRoot
+          npm pack --pack-destination $nativePackRoot | Out-Null
           Pop-Location
-          $tarball = (Get-ChildItem $smokeRoot -Filter "*.tgz").FullName
+          Push-Location pi/packages/pi-web
+          pnpm pack --pack-destination $mainPackRoot | Out-Null
+          Pop-Location
+          $nativeTarball = (Get-ChildItem $nativePackRoot -Filter "*.tgz").FullName
+          $mainTarball = (Get-ChildItem $mainPackRoot -Filter "*.tgz").FullName
           New-Item -ItemType Directory -Force $installRoot | Out-Null
           Push-Location $installRoot
-          npm install --offline --ignore-scripts --no-audit --no-fund $tarball | Out-Null
-          $packagedExecutable = Join-Path $installRoot "node_modules/@tta-lab/pi-web-win32-x64/bin/web.exe"
-          $help = (& $packagedExecutable --help 2>&1 | Out-String)
-          $helpExitCode = $LASTEXITCODE
+          npm install --offline --omit=optional --legacy-peer-deps --ignore-scripts --no-audit --no-fund $mainTarball | Out-Null
+          npm install --offline --ignore-scripts --no-audit --no-fund $nativeTarball | Out-Null
           Pop-Location
-          if ($helpExitCode -ne 0 -or $help -notmatch "Search the web") {
-            Write-Error "packaged web.exe --help failed: $help"
-            exit 1
-          }
+          "PI_WINDOWS_WEB_INSTALL_ROOT=$installRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Test Windows Pi Web resolver and cache
         working-directory: pi
