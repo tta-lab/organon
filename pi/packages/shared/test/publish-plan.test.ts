@@ -92,6 +92,12 @@ describe("release publish plan", () => {
     expect(plan.slice(0, nativeCount).every((entry) => entry.kind === "native")).toBe(true);
     expect(plan.slice(nativeCount).every((entry) => entry.kind === "main")).toBe(true);
     expect(plan.some((entry) => entry.name === "@tta-lab/pi-web-win32-x64")).toBe(true);
+    expect(plan.some((entry) => entry.name === "@tta-lab/dsh-web" && entry.kind === "main")).toBe(
+      true,
+    );
+    expect(
+      plan.filter((entry) => entry.kind === "native").some((entry) => entry.name.includes("dsh")),
+    ).toBe(false);
     expect(() => assertNativePackagesFirst([...plan].reverse())).toThrow(
       "native packages must be published before main packages",
     );

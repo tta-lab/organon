@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.26.2",
   "scripts": {
-    "build": "pnpm -r --filter './packages/pi-*' run build",
+    "build": "pnpm -r --filter './packages/*' --if-present run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",

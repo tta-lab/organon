@@ -33,23 +33,23 @@ const read = (p) => JSON.parse(readFileSync(p, "utf8"));
 const publishPlan = packagePublishPlan(workspace);
 const mainPackages = publishPlan.filter((entry) => entry.kind === "main");
 const nativePackages = publishPlan.filter((entry) => entry.kind === "native");
-const nativePackageDirs = new Set(nativePackages.map((entry) => entry.dir));
-const referencedNativeDirs = new Set();
+const nativePackageNames = new Set(nativePackages.map((entry) => entry.name));
+const referencedNativeNames = new Set();
 const errors = [];
 for (const entry of mainPackages) {
   const manifest = read(join(entry.path, "package.json"));
   for (const dep of Object.keys(manifest.optionalDependencies ?? {})) {
-    referencedNativeDirs.add(dep.replace("@tta-lab/pi-", "pi-"));
+    referencedNativeNames.add(dep);
   }
 }
-for (const dir of referencedNativeDirs) {
-  if (!nativePackageDirs.has(dir)) {
-    errors.push(`main package references missing native package ${dir}`);
+for (const name of referencedNativeNames) {
+  if (!nativePackageNames.has(name)) {
+    errors.push(`main package references missing native package ${name}`);
   }
 }
-for (const dir of nativePackageDirs) {
-  if (!referencedNativeDirs.has(dir)) {
-    errors.push(`native package ${dir} is not referenced by a main package`);
+for (const name of nativePackageNames) {
+  if (!referencedNativeNames.has(name)) {
+    errors.push(`native package ${name} is not referenced by a main package`);
   }
 }
 try {
@@ -74,8 +74,7 @@ for (const entry of mainPackages) {
     if (spec !== version) {
       errors.push(`${manifest.name}: optional dep ${dep}@${spec} != ${version}`);
     }
-    const nativeName = dep.replace("@tta-lab/pi-", "pi-");
-    if (!nativePackageDirs.has(nativeName)) {
+    if (!nativePackageNames.has(dep)) {
       errors.push(`${manifest.name}: optional dep ${dep} is not a workspace native package`);
     }
   }

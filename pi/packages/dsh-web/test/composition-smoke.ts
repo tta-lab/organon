@@ -28,36 +28,98 @@ async function packLocalPackage(destination: string): Promise<string> {
   const files = await readdir(destination);
   const tarball = files.find((file) => file.endsWith(".tgz"));
   if (tarball === undefined) throw new Error("local dsh-web pack produced no tarball");
-  return join(destination, tarball);
+  const path = join(destination, tarball);
+  const packedFiles = execFileSync("tar", ["-tzf", path], { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  expect(packedFiles).toEqual(
+    expect.arrayContaining([
+      "package/dist/index.js",
+      "package/dist/index.d.ts",
+      "package/dist/client.js",
+      "package/dist/client.d.cts",
+      "package/cordis.patch.yml",
+      "package/README.md",
+    ]),
+  );
+  const manifest = JSON.parse(
+    execFileSync("tar", ["-xOf", path, "package/package.json"], { encoding: "utf8" }),
+  );
+  expect(manifest.main).toBe("dist/index.js");
+  expect(manifest.exports["./client"]).toEqual({
+    types: "./dist/client.d.cts",
+    default: "./dist/client.js",
+  });
+  expect(Object.keys(manifest.optionalDependencies).sort()).toEqual(
+    [
+      "@tta-lab/pi-web-darwin-arm64",
+      "@tta-lab/pi-web-linux-arm64",
+      "@tta-lab/pi-web-linux-x64",
+      "@tta-lab/pi-web-win32-x64",
+    ].sort(),
+  );
+  expect(new Set(Object.values(manifest.optionalDependencies))).toEqual(
+    new Set([manifest.version]),
+  );
+  return path;
 }
 
-function testEnvironment(
-  home: string,
-  runnerWorkspace: string,
-  recordPath: string,
+async function packLocalNativePackage(
+  destination: string,
+  os: string,
+  arch: string,
+  executable: string,
   argsPath: string,
-) {
+): Promise<string> {
+  const packageDir = join(destination, `pi-web-${os}-${arch}`);
+  await mkdir(join(packageDir, "bin"), { recursive: true });
+  const sourceManifest = JSON.parse(
+    await readFile(
+      join(workspaceRoot, "packages", "native", `pi-web-${os}-${arch}`, "package.json"),
+      "utf8",
+    ),
+  );
+  await writeFile(join(packageDir, "package.json"), JSON.stringify(sourceManifest) + "\n");
+  await writeFakeWebBinary(join(packageDir, "bin", executable), argsPath);
+  const packDestination = join(destination, "tarball");
+  await mkdir(packDestination, { recursive: true });
+  execFileSync("pnpm", ["pack", "--pack-destination", packDestination], {
+    cwd: packageDir,
+    stdio: "ignore",
+  });
+  const files = (await readdir(packDestination)).filter((file) => file.endsWith(".tgz"));
+  if (files.length !== 1)
+    throw new Error("test-owned web native pack produced an invalid tarball set");
+  return join(packDestination, files[0]!);
+}
+
+function testEnvironment(home: string, recordPath: string, argsPath: string) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     DSH_HOME: home,
-    VITEST: "true",
-    ORGANON_PI_TEST_WORKSPACE: runnerWorkspace,
-    PHASE4_DSH_RECORD: recordPath,
-    PHASE4_DSH_ARGS: argsPath,
+    PHASE6_DSH_RECORD: recordPath,
+    PHASE6_DSH_ARGS: argsPath,
     DSH_TELEMETRY_DISABLED: "1",
   };
-  for (const key of ["EXA_API_KEY", "BRAVE_API_KEY", "CONTEXT7_API_KEY", "DEEPSEEK_API_KEY"])
+  for (const key of [
+    "EXA_API_KEY",
+    "BRAVE_API_KEY",
+    "CONTEXT7_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "VITEST",
+    "ORGANON_PI_TEST_WORKSPACE",
+  ])
     delete env[key];
   return env;
 }
 
 async function writeProbePackage(profile: string): Promise<void> {
-  const packageDir = join(profile, "node_modules", "phase4-dsh-probe");
+  const packageDir = join(profile, "node_modules", "phase6-dsh-probe");
   await mkdir(packageDir, { recursive: true });
   await writeFile(
     join(packageDir, "package.json"),
     JSON.stringify({
-      name: "phase4-dsh-probe",
+      name: "phase6-dsh-probe",
       version: "0.0.0",
       type: "module",
       main: "index.js",
@@ -67,12 +129,12 @@ async function writeProbePackage(profile: string): Promise<void> {
     join(packageDir, "index.js"),
     [
       'import { writeFile } from "node:fs/promises";',
-      'export const name = "phase4-dsh-probe";',
+      'export const name = "phase6-dsh-probe";',
       'export const inject = ["agentPresets", "tools"];',
       "export async function apply(ctx) {",
-      "  const recordPath = process.env.PHASE4_DSH_RECORD;",
+      "  const recordPath = process.env.PHASE6_DSH_RECORD;",
       "  try {",
-      '    if (recordPath === undefined) throw new Error("PHASE4_DSH_RECORD missing");',
+      '    if (recordPath === undefined) throw new Error("PHASE6_DSH_RECORD missing");',
       '    const scope = await ctx.agentPresets.standingKeyFor("code");',
       '    const search = ctx.tools.get("web_search", scope);',
       '    const globalSearch = ctx.tools.get("web_search");',
@@ -95,7 +157,7 @@ async function writeProbePackage(profile: string): Promise<void> {
   );
   await writeFile(
     join(profile, "cordis.patch.yml"),
-    "- insert:\n    - id: phase4-dsh-probe\n      name: phase4-dsh-probe\n",
+    "- insert:\n    - id: phase6-dsh-probe\n      name: phase6-dsh-probe\n",
   );
 }
 
@@ -108,7 +170,7 @@ async function writeFakeWebBinary(binary: string, argsPath: string): Promise<voi
       'import { appendFileSync } from "node:fs";',
       "const args = process.argv.slice(2);",
       'const query = args[args.indexOf("--") + 1];',
-      "appendFileSync(process.env.PHASE4_DSH_ARGS, JSON.stringify({ args, key: process.env.BRAVE_API_KEY ?? null, exa: process.env.EXA_API_KEY ?? null }) + String.fromCharCode(10));",
+      "appendFileSync(process.env.PHASE6_DSH_ARGS, JSON.stringify({ args, key: process.env.BRAVE_API_KEY ?? null, exa: process.env.EXA_API_KEY ?? null }) + String.fromCharCode(10));",
       'process.stdout.write(JSON.stringify({ provider: args[args.indexOf("--provider") + 1], results: [{ link: "https://example.test/" + encodeURIComponent(query), title: "Organon", snippet: "fake", position: 1 }] }));',
     ].join("\n"),
     { mode: 0o755 },
@@ -179,9 +241,9 @@ async function loadWithRealClientModuleSystem(clientPath: string): Promise<void>
       { id: registration.id, exports: bootstrap },
       {
         boot: {
-          rev: "phase4",
+          rev: "phase6",
           entries: [
-            { id: "@tta-lab/dsh-web", url: "/plugins/@tta-lab/dsh-web/client.js", rev: "phase4" },
+            { id: "@tta-lab/dsh-web", url: "/plugins/@tta-lab/dsh-web/client.js", rev: "phase6" },
           ],
         },
         staticModules: { react },
@@ -202,33 +264,37 @@ async function loadWithRealClientModuleSystem(clientPath: string): Promise<void>
 
 describe.sequential("actual DSH rc.8 normal Web profile composition", () => {
   it("installs through dsh, boots the stock code/PTC preset, and loads the client factory", async () => {
+    // This executes the current host only. Windows web.exe execution is proven by
+    // the Phase 3 Windows CI job; this smoke retains Windows package invariants.
+
     const home = await mkdtemp(join(tmpdir(), "dsh rc8 actual "));
     const packs = join(home, "packs");
-    const runnerWorkspace = join(home, "runner workspace");
     const recordPath = join(home, "probe.json");
     const argsPath = join(home, "args.jsonl");
     const { os, arch } = detectPlatform("web");
     const executable = os === "win32" ? "web.exe" : "web";
-    const binary = join(
-      runnerWorkspace,
-      "packages",
-      "native",
-      `pi-web-${os}-${arch}`,
-      "bin",
-      executable,
-    );
-    const env = testEnvironment(home, runnerWorkspace, recordPath, argsPath);
+    const env = testEnvironment(home, recordPath, argsPath);
     let child: ChildProcess | undefined;
     let stderr = "";
     try {
       await mkdir(packs, { recursive: true });
-      await writeFakeWebBinary(binary, argsPath);
       const tarball = await packLocalPackage(packs);
-      execFileSync(dshBinary, ["plugin", "--profile", "web", "add", "--offline", tarball], {
-        cwd: workspaceRoot,
-        env,
-        stdio: "ignore",
-      });
+      const nativeTarball = await packLocalNativePackage(
+        join(packs, "native"),
+        os,
+        arch,
+        executable,
+        argsPath,
+      );
+      execFileSync(
+        dshBinary,
+        ["plugin", "--profile", "web", "add", "--offline", tarball, nativeTarball],
+        {
+          cwd: workspaceRoot,
+          env,
+          stdio: "ignore",
+        },
+      );
       const profile = join(home, "profiles", "web");
       const profileManifest = JSON.parse(
         await readFile(join(profile, "package.json"), "utf8"),
@@ -238,6 +304,9 @@ describe.sequential("actual DSH rc.8 normal Web profile composition", () => {
         "@deepseek-ai/dsh-web-app",
         "@tta-lab/dsh-web",
       ]);
+      const installedNative = join(profile, "node_modules", "@tta-lab", `pi-web-${os}-${arch}`);
+      expect(existsSync(join(installedNative, "package.json"))).toBe(true);
+      expect(existsSync(join(installedNative, "bin", executable))).toBe(true);
       await writeFile(join(home, "settings.yaml"), "organon-web:\n  provider: duckduckgo\n");
       await writeProbePackage(profile);
 
@@ -251,7 +320,7 @@ describe.sequential("actual DSH rc.8 normal Web profile composition", () => {
       );
       expect(dump).toMatch(/- id: tool-web[\s\S]*?disabled: true/);
       expect(dump).toContain("- id: organon-dsh-web");
-      expect(dump).toContain("- id: phase4-dsh-probe");
+      expect(dump).toContain("- id: phase6-dsh-probe");
 
       const codePreset = await readFile(
         join(dshRoot, "config", "agent-presets", "code", "agent.cordis.yml"),

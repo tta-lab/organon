@@ -69,7 +69,7 @@ jobs:
 
       - name: Pi build
         working-directory: pi
-        run: pnpm -r --filter './packages/pi-*' run build
+        run: pnpm build
 
       - name: Pi tests
         working-directory: pi
@@ -107,7 +107,7 @@ jobs:
 
       - name: Build Pi extensions
         working-directory: pi
-        run: pnpm -r --filter './packages/pi-*' run build
+        run: pnpm build
 
       - name: Snapshot release
         uses: goreleaser/goreleaser-action@v7

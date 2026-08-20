@@ -26,11 +26,7 @@ describe("native Pi fetch parser failures", () => {
     const cacheDirectory = mkdtempSync(join(tmpdir(), "pi-web-parse-failure-cache-"));
     try {
       await expect(
-        fetchWebPage(
-          { url: `http://127.0.0.1:${address.port}` },
-          undefined,
-          { cacheDirectory },
-        ),
+        fetchWebPage({ url: `http://127.0.0.1:${address.port}` }, undefined, { cacheDirectory }),
       ).rejects.toThrow(/defuddle parse failed: synthetic parser failure/);
     } finally {
       rmSync(cacheDirectory, { recursive: true, force: true });

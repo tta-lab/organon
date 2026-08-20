@@ -17,10 +17,16 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { NATIVE_TOOLS, nativeTargetsForTool } from "../../../scripts/release-targets.mjs";
+import { packagePublishPlan } from "../../../scripts/publish-packages.mjs";
 
 const workspace = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const testWorkspace = process.env.ORGANON_PI_TEST_WORKSPACE;
 const TOOLS = NATIVE_TOOLS;
+const publishPlan = packagePublishPlan(workspace);
+const mainPackages = publishPlan.filter((entry) => entry.kind === "main");
+const nativePackageNames = new Set(
+  publishPlan.filter((entry) => entry.kind === "native").map((entry) => entry.name),
+);
 const tmp = mkdtempSync(join(tmpdir(), "pi-pack-all-"));
 const hostileNpmUserConfig = join(tmp, "hostile-npmrc");
 writeFileSync(hostileNpmUserConfig, "omit=optional\nignore-scripts=false\n");
@@ -104,6 +110,10 @@ function nativePackageDir(tool: string, suffix: string): string {
   return join(root, "packages", "native", `pi-${tool}-${suffix}`);
 }
 
+function packageRepositoryDirectory(entry: { kind: string; dir: string }): string {
+  return entry.kind === "native" ? `pi/packages/native/${entry.dir}` : `pi/packages/${entry.dir}`;
+}
+
 let packCount = 0;
 function pack(dir: string, name: string): string {
   // Pack into a fresh per-call directory so stale tarballs from earlier calls
@@ -145,25 +155,57 @@ describe("all native package manifests", () => {
     }
   }, 120000);
 
-  it("packs every main package with public metadata, a README, and exact-version optional native dependencies", () => {
-    const version = readManifest(
-      pack(join(workspace, "packages", "pi-src"), "@tta-lab/pi-src"),
+  it("packs every discovered main package with exact native dependencies and complete public artifacts", () => {
+    const version = JSON.parse(
+      readFileSync(join(mainPackages[0]!.path, "package.json"), "utf8"),
     ).version;
-    for (const tool of TOOLS) {
-      const tgz = pack(join(workspace, "packages", `pi-${tool}`), `@tta-lab/pi-${tool}`);
+    for (const entry of mainPackages) {
+      const tgz = pack(entry.path, entry.name);
       const manifest = readManifest(tgz);
       expect(manifest.version).toBe(version);
-      expectPublicMetadata(manifest, `pi/packages/pi-${tool}`);
+      expectPublicMetadata(manifest, packageRepositoryDirectory(entry));
       expect(packageFiles(tgz)).toContain("package/README.md");
-      expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
-      for (const { packageSuffix: suffix } of nativeTargetsForTool(tool)) {
-        const dep = `@tta-lab/pi-${tool}-${suffix}`;
+
+      const piTool = entry.name.match(/^@tta-lab\/pi-(src|web|project|og)$/)?.[1];
+      const expectedTargets =
+        entry.name === "@tta-lab/dsh-web"
+          ? nativeTargetsForTool("web")
+          : piTool === undefined
+            ? []
+            : nativeTargetsForTool(piTool);
+      const expectedDependencies = expectedTargets.map(
+        ({ packageSuffix: suffix }) => `@tta-lab/pi-${piTool ?? "web"}-${suffix}`,
+      );
+      expect(Object.keys(manifest.optionalDependencies ?? {})).toHaveLength(
+        expectedDependencies.length,
+      );
+      for (const dep of expectedDependencies) {
+        expect(nativePackageNames.has(dep)).toBe(true);
         expect(manifest.optionalDependencies[dep]).toBe(version);
         expect(manifest.optionalDependencies[dep]).not.toMatch(/[\^~]/);
       }
-      expect(Object.keys(manifest.optionalDependencies).length).toBe(
-        nativeTargetsForTool(tool).length,
-      );
+
+      if (entry.name === "@tta-lab/dsh-web") {
+        expect(expectedDependencies).toContain("@tta-lab/pi-web-win32-x64");
+        expect(packageFiles(tgz)).toEqual(
+          expect.arrayContaining([
+            "package/dist/index.js",
+            "package/dist/index.d.ts",
+            "package/dist/client.js",
+            "package/dist/client.d.cts",
+            "package/cordis.patch.yml",
+          ]),
+        );
+        expect(manifest.main).toBe("dist/index.js");
+        expect(manifest.exports["./client"]).toEqual({
+          types: "./dist/client.d.cts",
+          default: "./dist/client.js",
+        });
+        expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
+        expect(manifest.dsh.client.platform).toBe("web");
+      } else {
+        expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
+      }
     }
   });
 
