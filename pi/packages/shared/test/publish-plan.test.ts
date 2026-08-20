@@ -11,6 +11,7 @@ import {
   packagePublishPlan,
   publishReleasePackages,
 } from "../../../scripts/publish-packages.mjs";
+import { artifactMatchesTool } from "../../../scripts/release-targets.mjs";
 
 const tmp = mkdtempSync(join(tmpdir(), "organon-publish-plan-"));
 
@@ -94,6 +95,12 @@ describe("release publish plan", () => {
     expect(() => assertNativePackagesFirst([...plan].reverse())).toThrow(
       "native packages must be published before main packages",
     );
+  });
+
+  it("normalizes Windows executable artifact names", () => {
+    expect(artifactMatchesTool("web", "web")).toBe(true);
+    expect(artifactMatchesTool("web.exe", "web")).toBe(true);
+    expect(artifactMatchesTool("web.exe", "src")).toBe(false);
   });
 
   it("selects beta for prereleases and latest for stable versions", () => {

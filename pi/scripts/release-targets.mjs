@@ -46,3 +46,7 @@ export const NATIVE_TARGETS = [
 export function nativeTargetsForTool(tool) {
   return NATIVE_TARGETS.filter((target) => target.tools.includes(tool));
 }
+
+export function artifactMatchesTool(name, tool) {
+  return String(name).replace(/[.]exe$/i, "") === tool;
+}

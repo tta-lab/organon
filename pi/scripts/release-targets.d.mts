@@ -11,3 +11,4 @@ export interface NativeTarget {
 export const NATIVE_TOOLS: string[];
 export const NATIVE_TARGETS: NativeTarget[];
 export function nativeTargetsForTool(tool: string): NativeTarget[];
+export function artifactMatchesTool(name: string, tool: string): boolean;

@@ -11,7 +11,7 @@ import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NATIVE_TARGETS } from "./release-targets.mjs";
+import { artifactMatchesTool, NATIVE_TARGETS } from "./release-targets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
@@ -38,7 +38,7 @@ function artifactFor(tool, target) {
     const match = list.find(
       (a) =>
         a.type === "Binary" &&
-        a.name === tool &&
+        artifactMatchesTool(a.name, tool) &&
         a.goos === target.goos &&
         a.goarch === target.goarch,
     );

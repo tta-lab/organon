@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NATIVE_TARGETS } from "./release-targets.mjs";
+import { artifactMatchesTool, NATIVE_TARGETS } from "./release-targets.mjs";
 import {
   assertNativePackagesFirst,
   distTagForVersion,
@@ -109,7 +109,7 @@ if (dist) {
       const found = list.some(
         (a) =>
           a.type === "Binary" &&
-          a.name === tool &&
+          artifactMatchesTool(a.name, tool) &&
           a.goos === target.goos &&
           a.goarch === target.goarch,
       );
