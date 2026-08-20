@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   formatSize,
   truncateHead,
+  type TruncationOptions,
   type TruncationResult,
-} from "@earendil-works/pi-coding-agent";
+} from "./truncate-core.js";
+
+export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate-core.js";
+export type { TruncationOptions, TruncationResult } from "./truncate-core.js";
 
 export interface ModelText {
   text: string;
@@ -16,13 +18,9 @@ export interface ModelText {
   fullOutputPath?: string;
 }
 
-export interface TruncateForModelOptions {
+export interface TruncateForModelOptions extends TruncationOptions {
   /** Action-specific guidance for retrieving or narrowing the remaining output. */
   hint?: string;
-  /** Override the standard line cap when a result needs a smaller concise preview. */
-  maxLines?: number;
-  /** Override the standard byte cap when a result needs a smaller concise preview. */
-  maxBytes?: number;
   /** Complete original output to retain when the rendered text is normalized first. */
   fullOutput?: string;
 }
@@ -36,10 +34,7 @@ export async function truncateForModel(
   content: string,
   options?: TruncateForModelOptions,
 ): Promise<ModelText> {
-  const truncation = truncateHead(content, {
-    maxLines: options?.maxLines ?? DEFAULT_MAX_LINES,
-    maxBytes: options?.maxBytes ?? DEFAULT_MAX_BYTES,
-  });
+  const truncation = truncateHead(content, options);
   if (!truncation.truncated) {
     return { text: content };
   }

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { fetchWebPage } from "@tta-lab/pi-shared/fetch";
 import { describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 import {
@@ -55,25 +56,8 @@ async function startServer(handler: (req: IncomingMessage, res: ServerResponse) 
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-async function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
-  const priorHome = process.env.HOME;
-  const priorXDG = process.env.XDG_CACHE_HOME;
-  const priorLocalAppData = process.env.LOCALAPPDATA;
-  const home = mkdtempSync(join(tmpdir(), "pi-web-home-"));
-  process.env.HOME = home;
-  delete process.env.XDG_CACHE_HOME;
-  delete process.env.LOCALAPPDATA;
-  try {
-    return await fn();
-  } finally {
-    if (priorHome === undefined) delete process.env.HOME;
-    else process.env.HOME = priorHome;
-    if (priorXDG === undefined) delete process.env.XDG_CACHE_HOME;
-    else process.env.XDG_CACHE_HOME = priorXDG;
-    if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
-    else process.env.LOCALAPPDATA = priorLocalAppData;
-    rmSync(home, { recursive: true, force: true });
-  }
+function callDefinition(definition: any, params: unknown, signal?: AbortSignal) {
+  return definition.execute("call-1", params as any, signal, undefined, ctx);
 }
 
 describe("pi-web extension", () => {
@@ -164,7 +148,9 @@ describe("pi-web extension", () => {
         .split("\n")
         .map((line) => JSON.parse(line) as string[]);
       expect(invocations).toHaveLength(2);
-      expect(invocations.map((args) => args[1])).toEqual(expect.arrayContaining(["slow", "fast"]));
+      expect(invocations.map((args) => args[args.indexOf("--") + 1])).toEqual(
+        expect.arrayContaining(["slow", "fast"]),
+      );
 
       const events = readFileSync(eventsPath, "utf8")
         .trim()
@@ -220,28 +206,32 @@ describe("pi-web extension", () => {
     const invocationPath = join(directory, "invocations");
     const priorInvocationPath = process.env.PI_WEB_TEST_INVOCATIONS;
     process.env.PI_WEB_TEST_INVOCATIONS = invocationPath;
+    const cacheDirectory = join(directory, "cache");
     try {
-      const fetched = await withTempHome(() => call("fetch", { url, tree: true }));
+      const fetchDefinition = webFetchTool({
+        fetch: (input, signal) => fetchWebPage(input, signal, { cacheDirectory }),
+      });
+      const fetched = await callDefinition(fetchDefinition, { url, tree: true });
       expect((fetched.details as { mode: string }).mode).toBe("tree");
-      const resolved = await call("docs", { action: "resolve", query: "dispatch-proof" });
+      const resolved = await call("docs", { action: "resolve", query: "-dispatch-proof" });
       expect((resolved.details as { libraries: Array<{ id: string }> }).libraries[0]!.id).toBe(
-        "/dispatch-proof",
+        "/-dispatch-proof",
       );
       const fetchedDocs = await call("docs", {
         action: "fetch",
-        library_id: "/dispatch-proof",
-        topic: "hooks",
+        library_id: "/-dispatch-proof",
+        topic: "-hooks",
         tokens: 500,
       });
       expect((fetchedDocs.details as { content: string }).content).toContain("docs content");
-      await call("sgraph", { query: "dispatch-proof", count: 14, context: 3, timeout: 9 });
+      await call("sgraph", { query: "-dispatch-proof", count: 14, context: 3, timeout: 9 });
       const invocations = readFileSync(invocationPath, "utf8");
-      expect(invocations).toContain('["docs","resolve","dispatch-proof","--json"]');
+      expect(invocations).toContain('["docs","resolve","--json","--","-dispatch-proof"]');
       expect(invocations).toContain(
-        '["docs","fetch","/dispatch-proof","hooks","--tokens","500","--json"]',
+        '["docs","fetch","--tokens","500","--json","--","/-dispatch-proof","-hooks"]',
       );
       expect(invocations).toContain(
-        '["sgraph","dispatch-proof","--json","--count","14","--context","3","--timeout","9"]',
+        '["sgraph","--json","--count","14","--context","3","--timeout","9","--","-dispatch-proof"]',
       );
       expect(invocations).not.toContain('["fetch"');
     } finally {
@@ -284,19 +274,51 @@ describe("pi-web extension", () => {
     );
   });
 
+  it("bounds tree and section navigation output", async () => {
+    const treeSource = Array.from({ length: 3000 }, (_, index) => `## Heading ${index}`).join("\n");
+    const sectionSource = `## Install\n${Array.from({ length: 3000 }, (_, index) => `line ${index}`).join("\n")}\n\n## Next\n`;
+    const { server, url } = await startServer((request, response) => {
+      response.setHeader("Content-Type", "text/plain");
+      response.end(request.url === "/tree" ? treeSource : sectionSource);
+    });
+    const cacheDirectory = mkdtempSync(join(tmpdir(), "pi-web-navigation-cache-"));
+    try {
+      const definition = webFetchTool({
+        fetch: (input, signal) => fetchWebPage(input, signal, { cacheDirectory }),
+      });
+      const tree = await callDefinition(definition, { url: `${url}/tree`, tree: true });
+      const section = await callDefinition(definition, {
+        url: `${url}/section`,
+        section_id: "7i",
+      });
+      for (const result of [tree, section]) {
+        const text = (result.content[0] as { text: string }).text;
+        expect(text).toContain("[Truncated:");
+        expect(text).not.toContain("line 2999");
+      }
+    } finally {
+      rmSync(cacheDirectory, { recursive: true, force: true });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
   it("preserves bounded fetch output and abort behavior", async () => {
     const { server, url } = await startServer((_req, res) => {
       res.setHeader("Content-Type", "text/plain");
       res.end(Array.from({ length: 3000 }, (_, index) => `line ${index}`).join("\n"));
     });
+    const cacheDirectory = mkdtempSync(join(tmpdir(), "pi-web-fetch-cache-"));
     try {
-      const result = await withTempHome(() => call("fetch", { url }));
+      const fetchDefinition = webFetchTool({
+        fetch: (input, signal) => fetchWebPage(input, signal, { cacheDirectory }),
+      });
+      const result = await callDefinition(fetchDefinition, { url });
       const details = result.details as { fullOutputPath?: string; content: string };
       expect(details.fullOutputPath).toBeTruthy();
       expect((result.content[0] as { text: string }).text).toContain("section_id");
       expect(readFileSync(details.fullOutputPath!, "utf8")).toBe(details.content);
       rmSync(dirname(details.fullOutputPath!), { recursive: true, force: true });
     } finally {
+      rmSync(cacheDirectory, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
 

@@ -1,4 +1,4 @@
-import type { TruncationResult } from "@earendil-works/pi-coding-agent";
+import type { TruncationResult } from "./truncate-core.js";
 
 import { truncateForModel, type ModelText, type TruncateForModelOptions } from "./truncate.js";
 

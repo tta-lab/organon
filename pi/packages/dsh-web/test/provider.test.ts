@@ -174,4 +174,34 @@ describe("Organon DSH search provider", () => {
     await expect(provider.search({ query: "failed" })).rejects.toThrow(/exa search failed/);
     await expect(provider.search({ query: "failed" })).rejects.not.toThrow("never-returned");
   });
+
+  it("does not expose inherited fallback secrets in search failures", async () => {
+    const secret = "exa-inherited-secret";
+    const failed = createOrganonSearchProvider({
+      binaryPath: "web",
+      getProvider: () => "exa",
+      credentials: { resolve: async () => undefined },
+      run: async () => ({
+        stdout: `child output ${secret}`,
+        stderr: `provider failed ${secret}`,
+        exitCode: 1,
+        killed: false,
+      }),
+    });
+    await expect(failed.search({ query: "failed" })).rejects.toThrow(/exa search failed/);
+    await expect(failed.search({ query: "failed" })).rejects.not.toThrow(secret);
+
+    const malformed = createOrganonSearchProvider({
+      binaryPath: "web",
+      getProvider: () => "exa",
+      credentials: { resolve: async () => undefined },
+      run: async () => ({
+        stdout: `not-json ${secret}`,
+        stderr: "",
+        exitCode: 0,
+        killed: false,
+      }),
+    });
+    await expect(malformed.search({ query: "malformed" })).rejects.not.toThrow(secret);
+  });
 });

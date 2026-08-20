@@ -148,6 +148,20 @@ func TestFetchCLIJSONOutputMatchesStructuredResult(t *testing.T) {
 	assert.Equal(t, webcore.FetchResult{URL: "https://example.com", Mode: "full", Content: "rendered"}, got)
 }
 
+func TestDocsAndSGraphCLISeparateHyphenArguments(t *testing.T) {
+	service := &stubWebService{}
+
+	fetchCmd := newDocsFetchCmdWithFactory(fixedServiceFactory(service))
+	fetchCmd.SetArgs([]string{"--json", "--tokens", "500", "--", "-org/lib", "-topic"})
+	require.NoError(t, fetchCmd.Execute())
+	assert.Equal(t, webcore.DocsFetchInput{LibraryID: "-org/lib", Topic: "-topic", Tokens: 500}, service.docsInput)
+
+	sgraphCmd := newSgraphCmdWithFactory(fixedServiceFactory(service))
+	sgraphCmd.SetArgs([]string{"--json", "--count", "14", "--", "-repo:test"})
+	require.NoError(t, sgraphCmd.Execute())
+	assert.Equal(t, webcore.SGraphInput{Query: "-repo:test", Count: 14, ContextWindow: 10}, service.sgraphInput)
+}
+
 func TestDocsResolveCLIJSONOutputMatchesStructuredResult(t *testing.T) {
 	service := &stubWebService{resolve: webcore.DocsResolveResult{
 		Query:     "library",

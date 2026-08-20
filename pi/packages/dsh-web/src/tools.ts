@@ -9,6 +9,7 @@ import { defineTool, type ToolDefinition } from "@deepseek-ai/dsh-tools";
 import { fetchWebPage, type FetchInput, type FetchResult } from "@tta-lab/pi-shared/fetch";
 import { parseSingleJsonDoc } from "@tta-lab/pi-shared/parse";
 import { runCli, type CliRunOptions, type CliRunResult } from "@tta-lab/pi-shared/process";
+import { formatSize, truncateHead } from "@tta-lab/pi-shared/truncate-core";
 
 import { CONTEXT7_CREDENTIAL_REF } from "./contract.js";
 
@@ -101,7 +102,15 @@ const fetchOutput = {
       content: { type: "string", required: true },
     },
   } as const,
-  render: (_args: unknown, value: FetchResult) => [{ type: "text" as const, text: value.content }],
+  render: (_args: unknown, value: FetchResult) => [
+    {
+      type: "text" as const,
+      text: boundedToolText(
+        value.content,
+        "Use web_fetch with tree or section_id to navigate the document.",
+      ),
+    },
+  ],
 };
 
 const docsOutput = {
@@ -144,7 +153,16 @@ const docsOutput = {
   render: (_args: unknown, value: DocsResolveResult | DocsFetchResult) => [
     {
       type: "text" as const,
-      text: "libraries" in value ? formatDocsResolve(value) : value.content,
+      text:
+        "libraries" in value
+          ? boundedToolText(
+              formatDocsResolve(value),
+              "Use web_docs action fetch with a library_id from the results.",
+            )
+          : boundedToolText(
+              value.content,
+              "Refetch with a narrower topic or tokens budget for the remainder.",
+            ),
     },
   ],
 };
@@ -155,11 +173,35 @@ const sgraphOutput = {
     additionalProperties: false,
     properties: { content: { type: "string", required: true } },
   } as const,
-  render: (_args: unknown, value: SGraphResult) => [{ type: "text" as const, text: value.content }],
+  render: (_args: unknown, value: SGraphResult) => [
+    {
+      type: "text" as const,
+      text: boundedToolText(
+        value.content,
+        "Use a narrower Sourcegraph query or lower count and context.",
+      ),
+    },
+  ],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function rejectUnknownFields(input: unknown, fields: readonly string[], toolName: string): void {
+  if (!isRecord(input)) return;
+  for (const field of Object.keys(input)) {
+    if (!fields.includes(field)) {
+      throw new Error(`${toolName} input does not accept field ${field}`);
+    }
+  }
+}
+
+function strictDefinition(definition: ToolDefinition): ToolDefinition {
+  return {
+    ...definition,
+    parameters: { ...definition.parameters, additionalProperties: false },
+  };
 }
 
 function requireString(input: unknown, field: string): string {
@@ -208,13 +250,7 @@ function normalizeDocs(input: unknown): DocsInput {
   };
 }
 
-function redactedMessage(error: unknown, secret?: string): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return secret === undefined || secret === "" ? message : message.split(secret).join("[redacted]");
-}
-
 async function context7Credential(dependencies: WebToolDependencies): Promise<{
-  secret?: string;
   env?: NodeJS.ProcessEnv;
 }> {
   let resolved: ResolvedCredential | undefined;
@@ -224,38 +260,53 @@ async function context7Credential(dependencies: WebToolDependencies): Promise<{
     throw new Error("Context7 credential resolution failed");
   }
   if (resolved === undefined) return {};
-  return { secret: resolved.value, env: { CONTEXT7_API_KEY: resolved.value } };
+  return { env: { CONTEXT7_API_KEY: resolved.value } };
 }
 
-function childError(stderr: string, exitCode: number, secret?: string): Error {
-  const detail = redactedMessage(stderr, secret)
-    .trim()
-    .replace(/^Error:\s*/m, "")
-    .replace(/\s+/g, " ");
-  return new Error(detail === "" ? `command exited with code ${exitCode}` : detail.slice(0, 8192));
+function operationName(args: readonly string[]): string {
+  if (args[0] === "docs") return `web docs ${args[1] ?? "operation"}`;
+  return `web ${args[0] ?? "child"}`;
+}
+
+function boundedToolText(content: string, hint: string): string {
+  const truncation = truncateHead(content);
+  if (!truncation.truncated) return content;
+  const guidance = hint.trim() === "" ? "" : ` ${hint.trim()}`;
+  if (truncation.firstLineExceedsLimit) {
+    return `[First line is ${formatSize(truncation.totalBytes)}, exceeds ${formatSize(truncation.maxBytes)} limit.${guidance}]`;
+  }
+  if (truncation.truncatedBy === "lines") {
+    return `${truncation.content}\n\n[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines} line limit).${guidance}]`;
+  }
+  return `${truncation.content}\n\n[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes)} limit).${guidance}]`;
+}
+
+function childError(operation: string, exitCode: number): Error {
+  return new Error(`${operation} failed: command exited with code ${exitCode}`);
 }
 
 async function runJSON<T>(
   dependencies: WebToolDependencies,
   args: string[],
   signal: AbortSignal,
-  secret?: string,
   env?: NodeJS.ProcessEnv,
 ): Promise<T> {
+  const operation = operationName(args);
   const runner = dependencies.run ?? runCli;
   let result: CliRunResult;
   try {
     result = await runner(dependencies.binaryPath, { args, signal, ...(env ? { env } : {}) });
   } catch (error) {
-    throw new Error(redactedMessage(error, secret));
+    if (error instanceof Error && error.message === "Operation aborted") throw error;
+    throw new Error(`${operation} failed to start`);
   }
   if (result.exitCode !== 0) {
-    throw childError(result.stderr, result.exitCode, secret);
+    throw childError(operation, result.exitCode);
   }
   try {
-    return parseSingleJsonDoc<T>(redactedMessage(result.stdout, secret));
-  } catch (error) {
-    throw new Error(`web child returned invalid JSON: ${redactedMessage(error, secret)}`);
+    return parseSingleJsonDoc<T>(result.stdout);
+  } catch {
+    throw new Error(`${operation} returned invalid JSON`);
   }
 }
 
@@ -269,94 +320,97 @@ function formatDocsResolve(result: DocsResolveResult): string {
 
 function webFetchTool(dependencies: WebToolDependencies): ToolDefinition {
   const fetch = dependencies.fetch ?? fetchWebPage;
-  return defineTool({
-    name: "web_fetch",
-    description:
-      "Fetch and read an HTTP or HTTPS web page as Markdown with heading-tree and section navigation.",
-    parameters: fetchParameters,
-    output: fetchOutput,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      return fetch(
-        {
-          url: requireString(args, "url"),
-          tree: args.tree,
-          section_id: args.section_id,
-          full: args.full,
-          tree_threshold: args.tree_threshold,
-        },
-        exec.signal,
-      );
-    },
-  });
+  return strictDefinition(
+    defineTool({
+      name: "web_fetch",
+      description:
+        "Fetch and read an HTTP or HTTPS web page as Markdown with heading-tree and section navigation.",
+      parameters: fetchParameters,
+      output: fetchOutput,
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        rejectUnknownFields(args, Object.keys(fetchParameters), "web_fetch");
+        return fetch(
+          {
+            url: requireString(args, "url"),
+            tree: args.tree,
+            section_id: args.section_id,
+            full: args.full,
+            tree_threshold: args.tree_threshold,
+          },
+          exec.signal,
+        );
+      },
+    }),
+  );
 }
 
 function webDocsTool(dependencies: WebToolDependencies): ToolDefinition {
-  return defineTool({
-    name: "web_docs",
-    description:
-      "Resolve a library and fetch its documentation through Context7. Use action resolve with query, then action fetch with library_id.",
-    parameters: docsParameters,
-    output: docsOutput,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const input = normalizeDocs(args);
-      const credential = await context7Credential(dependencies);
-      const argsForChild =
-        input.action === "resolve"
-          ? ["docs", "resolve", input.query, "--json"]
-          : [
-              "docs",
-              "fetch",
-              input.library_id,
-              ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
-              ...(input.tokens !== undefined && input.tokens !== 0
-                ? ["--tokens", String(input.tokens)]
-                : []),
-              "--json",
-            ];
-      if (input.action === "resolve") {
-        return runJSON<DocsResolveResult>(
-          dependencies,
-          argsForChild,
-          exec.signal,
-          credential.secret,
-          credential.env,
-        );
-      }
-      return runJSON<DocsFetchResult>(
-        dependencies,
-        argsForChild,
-        exec.signal,
-        credential.secret,
-        credential.env,
-      );
-    },
-  });
+  return strictDefinition(
+    defineTool({
+      name: "web_docs",
+      description:
+        "Resolve a library and fetch its documentation through Context7. Use action resolve with query, then action fetch with library_id.",
+      parameters: docsParameters,
+      output: docsOutput,
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        const input = normalizeDocs(args);
+        const credential = await context7Credential(dependencies);
+        const argsForChild =
+          input.action === "resolve"
+            ? ["docs", "resolve", "--json", "--", input.query]
+            : [
+                "docs",
+                "fetch",
+                ...(input.tokens !== undefined && input.tokens !== 0
+                  ? ["--tokens", String(input.tokens)]
+                  : []),
+                "--json",
+                "--",
+                input.library_id,
+                ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
+              ];
+        if (input.action === "resolve") {
+          return runJSON<DocsResolveResult>(
+            dependencies,
+            argsForChild,
+            exec.signal,
+            credential.env,
+          );
+        }
+        return runJSON<DocsFetchResult>(dependencies, argsForChild, exec.signal, credential.env);
+      },
+    }),
+  );
 }
 
 function webSgraphTool(dependencies: WebToolDependencies): ToolDefinition {
-  return defineTool({
-    name: "web_sgraph",
-    description: "Search public source code through Sourcegraph.",
-    parameters: sgraphParameters,
-    output: sgraphOutput,
-    isConcurrencySafe: () => true,
-    async execute(args, exec) {
-      const query = requireString(args, "query");
-      const argsForChild = ["sgraph", query, "--json"];
-      if (args.count !== undefined && args.count !== 10) {
-        argsForChild.push("--count", String(args.count));
-      }
-      if (args.context !== undefined && args.context !== 10) {
-        argsForChild.push("--context", String(args.context));
-      }
-      if (args.timeout !== undefined && args.timeout !== 0) {
-        argsForChild.push("--timeout", String(args.timeout));
-      }
-      return runJSON<SGraphResult>(dependencies, argsForChild, exec.signal);
-    },
-  });
+  return strictDefinition(
+    defineTool({
+      name: "web_sgraph",
+      description: "Search public source code through Sourcegraph.",
+      parameters: sgraphParameters,
+      output: sgraphOutput,
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        rejectUnknownFields(args, Object.keys(sgraphParameters), "web_sgraph");
+        const query = requireString(args, "query");
+        const argsForChild = ["sgraph", "--json"];
+        if (args.count !== undefined && args.count !== 10) {
+          argsForChild.push("--count", String(args.count));
+        }
+        if (args.context !== undefined && args.context !== 10) {
+          argsForChild.push("--context", String(args.context));
+        }
+        if (args.timeout !== undefined && args.timeout !== 0) {
+          argsForChild.push("--timeout", String(args.timeout));
+        }
+        argsForChild.push("--", query);
+        return runJSON<SGraphResult>(dependencies, argsForChild, exec.signal);
+      },
+    }),
+  );
 }
 
 export function createWebToolDefinitions(

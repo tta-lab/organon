@@ -9,7 +9,8 @@
     "./binary": "./src/binary.ts",
     "./fetch": "./src/fetch.ts",
     "./parse": "./src/parse.ts",
-    "./process": "./src/process.ts"
+    "./process": "./src/process.ts",
+    "./truncate-core": "./src/truncate-core.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

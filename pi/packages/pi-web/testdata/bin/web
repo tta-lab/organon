@@ -11,11 +11,13 @@ if (!args.includes("--json")) {
   process.stderr.write("Error: --json is required by the extension contract\n");
   process.exit(2);
 }
+const separatorIndex = args.indexOf("--");
+const optionArgs = separatorIndex >= 0 ? args.slice(0, separatorIndex) : args;
 const flags = new Map();
-for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith("--")) {
-    const key = args[i].slice(2);
-    const next = args[i + 1];
+for (let i = 0; i < optionArgs.length; i++) {
+  if (optionArgs[i].startsWith("--")) {
+    const key = optionArgs[i].slice(2);
+    const next = optionArgs[i + 1];
     if (next !== undefined && !next.startsWith("--")) {
       flags.set(key, next);
       i++;
@@ -24,7 +26,16 @@ for (let i = 0; i < args.length; i++) {
     }
   }
 }
-const positional = args.filter((a) => !a.startsWith("--"));
+const positional = [];
+for (let i = 0; i < optionArgs.length; i++) {
+  const value = optionArgs[i];
+  if (value.startsWith("--")) {
+    if (optionArgs[i + 1] !== undefined && !optionArgs[i + 1].startsWith("--")) i++;
+    continue;
+  }
+  positional.push(value);
+}
+if (separatorIndex >= 0) positional.push(...args.slice(separatorIndex + 1));
 const cmd = positional[0];
 const target = positional[1] ?? positional[0];
 function recordSearchEvent(phase, query) {

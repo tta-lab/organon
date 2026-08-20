@@ -84,11 +84,6 @@ function validateSearchResult(value: unknown, provider: SearchProviderName): Web
   return { sources, truncated: false };
 }
 
-function redactedMessage(error: unknown, secret?: string): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return secret === undefined || secret === "" ? message : message.split(secret).join("[redacted]");
-}
-
 export function createOrganonSearchProvider(
   dependencies: SearchProviderDependencies,
 ): WebSearchProvider {
@@ -123,32 +118,24 @@ export function createOrganonSearchProvider(
       try {
         result = await runner(dependencies.binaryPath, options);
       } catch (error) {
-        throw new Error(`${provider} search failed: ${redactedMessage(error, resolved?.value)}`);
+        if (error instanceof Error && error.message === "Operation aborted") throw error;
+        throw new Error(`${provider} search failed to start`);
       }
       if (result.exitCode !== 0) {
-        const detail = result.stderr
-          .trim()
-          .replace(/^Error:\s*/m, "")
-          .replace(/\s+/g, " ");
-        const error =
-          detail === "" ? `command exited with code ${result.exitCode}` : detail.slice(0, 8192);
-        throw new Error(`${provider} search failed: ${redactedMessage(error, resolved?.value)}`);
+        throw new Error(`${provider} search failed: command exited with code ${result.exitCode}`);
       }
 
       let data: unknown;
       try {
         data = parseSingleJsonDoc<unknown>(result.stdout);
-      } catch (error) {
-        throw new Error(
-          `${provider} search returned invalid JSON: ${redactedMessage(error, resolved?.value)}`,
-        );
+      } catch {
+        throw new Error(`${provider} search returned invalid JSON`);
       }
       try {
         return validateSearchResult(data, provider);
       } catch (error) {
-        throw new Error(
-          `${provider} search result validation failed: ${redactedMessage(error, resolved?.value)}`,
-        );
+        const detail = error instanceof Error ? error.message : "invalid source";
+        throw new Error(`${provider} search result validation failed: ${detail}`);
       }
     },
   };

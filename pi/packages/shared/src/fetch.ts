@@ -27,12 +27,21 @@ export type FetchResult = {
   content: string;
 };
 
+export interface FetchOptions {
+  /** Test-owned or application-owned cache root; omitted uses the platform default. */
+  cacheDirectory?: string;
+  /** Test-owned or application-owned HTTP implementation; omitted uses global fetch. */
+  fetch?: typeof globalThis.fetch;
+}
+
 export async function fetchWebPage(
   input: FetchInput,
   callerSignal?: AbortSignal,
+  options?: FetchOptions,
 ): Promise<FetchResult> {
   const url = validateURL(input.url);
-  const content = await fetchCached(url, callerSignal);
+  const content = await fetchCached(url, callerSignal, options);
+  throwIfAborted(callerSignal);
   const rendered = renderMarkdown(
     content,
     input.tree ?? false,
@@ -43,43 +52,63 @@ export async function fetchWebPage(
   return { url, mode: rendered.mode, content: rendered.content };
 }
 
-async function fetchCached(url: string, callerSignal?: AbortSignal): Promise<string> {
-  const cache = new DailyCache(defaultCacheDir());
+async function fetchCached(
+  url: string,
+  callerSignal: AbortSignal | undefined,
+  options?: FetchOptions,
+): Promise<string> {
+  throwIfAborted(callerSignal);
+  const cache = new DailyCache(options?.cacheDirectory ?? defaultCacheDir());
   await cache.prepare();
+  throwIfAborted(callerSignal);
   const cached = await cache.read(url);
+  throwIfAborted(callerSignal);
   if (cached !== undefined) return cached;
 
-  const content = await fetchLocal(url, callerSignal);
-  await cache.write(url, content);
+  const content = await fetchLocal(url, callerSignal, options);
+  throwIfAborted(callerSignal);
+  await cache.write(url, content, callerSignal);
+  throwIfAborted(callerSignal);
   return content;
 }
 
-async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<string> {
+async function fetchLocal(
+  url: string,
+  callerSignal?: AbortSignal,
+  options?: FetchOptions,
+): Promise<string> {
+  throwIfAborted(callerSignal);
+  const fetcher = options?.fetch ?? globalThis.fetch;
   const request = createRequestSignal(callerSignal, REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    const response = await fetcher(url, {
       headers: { "User-Agent": WEB_FETCH_AGENT },
       redirect: "follow",
       signal: request.signal,
     });
+    throwIfAborted(callerSignal);
     if (response.status >= 400) {
       throw new Error(`HTTP ${response.status}`);
     }
 
     const body = await readBody(response);
+    throwIfAborted(callerSignal);
     const contentType = mediaType(response.headers.get("content-type"));
     if (isBinaryContentType(contentType) || isBinaryBody(body)) {
       throw binaryFetchError(url, response.headers.get("content-type") ?? "");
     }
 
     if (contentType !== "" && contentType !== "text/html") {
-      return truncateContent(new TextDecoder().decode(body));
+      const content = truncateContent(new TextDecoder().decode(body));
+      throwIfAborted(callerSignal);
+      return content;
     }
 
     try {
       const html = new TextDecoder().decode(body);
       const { document } = parseHTML(html);
       const parsed = await Defuddle(document, url, { markdown: true, useAsync: false });
+      throwIfAborted(callerSignal);
       const content = parsed.content;
       if (!content || content.trim() === "") {
         throw new Error("no content could be extracted");
@@ -97,6 +126,10 @@ async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<stri
   } finally {
     request.cleanup();
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error("Operation aborted");
 }
 
 function validateURL(rawURL: string): string {
@@ -226,11 +259,14 @@ class DailyCache {
     }
   }
 
-  async write(url: string, content: string): Promise<void> {
+  async write(url: string, content: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     if (!this.enabled) return;
     try {
+      throwIfAborted(signal);
       await writeFile(this.path(url), content, { encoding: "utf8", mode: 0o644 });
     } catch {
+      if (signal?.aborted) throw new Error("Operation aborted");
       // Cache failures must not make a successful fetch fail.
     }
   }

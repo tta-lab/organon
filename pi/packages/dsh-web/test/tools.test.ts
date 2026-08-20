@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { fetchWebPage } from "@tta-lab/pi-shared/fetch";
+
 import { CONTEXT7_CREDENTIAL_REF } from "../src/contract.js";
 import {
   createWebToolDefinitions,
@@ -45,27 +47,6 @@ async function startServer(): Promise<{ server: Server; url: string }> {
   return { server, url: `http://127.0.0.1:${address.port}/page` };
 }
 
-async function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
-  const previousHome = process.env.HOME;
-  const previousXdg = process.env.XDG_CACHE_HOME;
-  const previousLocalAppData = process.env.LOCALAPPDATA;
-  const home = await mkdtemp(join(tmpdir(), "dsh-web-tools-home-"));
-  process.env.HOME = home;
-  delete process.env.XDG_CACHE_HOME;
-  delete process.env.LOCALAPPDATA;
-  try {
-    return await fn();
-  } finally {
-    if (previousHome === undefined) delete process.env.HOME;
-    else process.env.HOME = previousHome;
-    if (previousXdg === undefined) delete process.env.XDG_CACHE_HOME;
-    else process.env.XDG_CACHE_HOME = previousXdg;
-    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
-    else process.env.LOCALAPPDATA = previousLocalAppData;
-    await rm(home, { recursive: true, force: true });
-  }
-}
-
 describe.sequential("DSH global Pi-compatible web tools", () => {
   it("registers the three global names with Pi-shaped schemas and generic presentation", () => {
     const definitions = createWebToolDefinitions(dependencies());
@@ -95,6 +76,9 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
       "full",
       "tree_threshold",
     ]);
+    expect((fetch.parameters as any).additionalProperties).toBe(false);
+    expect((docs.parameters as any).additionalProperties).toBe(false);
+    expect((sgraph.parameters as any).additionalProperties).toBe(false);
     expect((docs.parameters as any).properties.action.enum).toEqual(["resolve", "fetch"]);
     expect(Object.keys((sgraph.parameters as any).properties)).toEqual([
       "query",
@@ -122,6 +106,28 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
     expect(sgraph.presentCall).toBeUndefined();
     expect(sgraph.presentResult).toBeUndefined();
     expect(sgraph.output.presentationMeta).toBeUndefined();
+  });
+
+  it("bounds fetch navigation and docs/source rendering at the Pi model limits", () => {
+    const [fetch, docs, sgraph] = createWebToolDefinitions(dependencies());
+    const large = Array.from({ length: 3000 }, (_, index) => `line ${index}`).join("\n");
+    for (const mode of ["tree", "section", "full"] as const) {
+      const rendered = (
+        fetch.output.render({}, { url: "https://example.test", mode, content: large })[0] as {
+          text: string;
+        }
+      ).text;
+      expect(rendered).toContain("[Truncated:");
+      expect(rendered).not.toContain("line 2999");
+      expect(rendered.split("\n").length).toBeLessThanOrEqual(2002);
+    }
+    const docsRendered = (
+      docs.output.render({}, { library_id: "/org/lib", content: large })[0] as { text: string }
+    ).text;
+    const sourceRendered = (sgraph.output.render({}, { content: large })[0] as { text: string })
+      .text;
+    expect(docsRendered).toContain("[Truncated:");
+    expect(sourceRendered).toContain("[Truncated:");
   });
 
   it("preserves shared fetch navigation arguments and structured results", async () => {
@@ -165,23 +171,25 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
 
   it("uses the shared fetch runtime for tree, section, and full navigation", async () => {
     const { server, url } = await startServer();
+    const cacheDirectory = await mkdtemp(join(tmpdir(), "dsh-web-tools-cache-"));
     try {
-      await withTempHome(async () => {
-        const definition = createWebToolDefinitions(dependencies())[0]!;
-        const tree = (await callTool(definition, { url, tree: true })) as any;
-        expect(tree.mode).toBe("tree");
-        const sectionID = String(tree.content.match(/\[([^\]]+)\] ## Install/)?.[1] ?? "");
-        expect(sectionID).not.toBe("");
+      const fetch = (input: any, signal?: AbortSignal) =>
+        fetchWebPage(input, signal, { cacheDirectory });
+      const definition = createWebToolDefinitions(dependencies({ fetch }))[0]!;
+      const tree = (await callTool(definition, { url, tree: true })) as any;
+      expect(tree.mode).toBe("tree");
+      const sectionID = String(tree.content.match(/\[([^\]]+)\] ## Install/)?.[1] ?? "");
+      expect(sectionID).not.toBe("");
 
-        const section = (await callTool(definition, { url, section_id: sectionID })) as any;
-        expect(section.mode).toBe("section");
-        expect(section.content).toContain("Install content.");
+      const section = (await callTool(definition, { url, section_id: sectionID })) as any;
+      expect(section.mode).toBe("section");
+      expect(section.content).toContain("Install content.");
 
-        const full = (await callTool(definition, { url, full: true })) as any;
-        expect(full.mode).toBe("full");
-        expect(full.content).toContain("Details content.");
-      });
+      const full = (await callTool(definition, { url, full: true })) as any;
+      expect(full.mode).toBe("full");
+      expect(full.content).toContain("Details content.");
     } finally {
+      await rm(cacheDirectory, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
@@ -194,7 +202,7 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
       if (options.args[0] === "docs" && options.args[1] === "resolve") {
         return {
           stdout: JSON.stringify({
-            query: options.args[2],
+            query: options.args[options.args.indexOf("--") + 1],
             libraries: [
               {
                 id: "/org/lib",
@@ -240,22 +248,22 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
     const controller = new AbortController();
     const resolved = await callTool(
       docs!,
-      { action: "resolve", query: "dispatch-proof" },
+      { action: "resolve", query: "-dispatch-proof" },
       controller.signal,
     );
     const fetched = await callTool(
       docs!,
-      { action: "fetch", library_id: "/org/lib", topic: "hooks", tokens: 500 },
+      { action: "fetch", library_id: "/-org/lib", topic: "-hooks", tokens: 500 },
       controller.signal,
     );
     const source = await callTool(
       sgraph!,
-      { query: "repo:tta-lab", count: 14, context: 3, timeout: 9 },
+      { query: "-repo:tta-lab", count: 14, context: 3, timeout: 9 },
       controller.signal,
     );
 
     expect(resolved).toEqual({
-      query: "dispatch-proof",
+      query: "-dispatch-proof",
       libraries: [
         {
           id: "/org/lib",
@@ -270,9 +278,20 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
     expect(fetched).toEqual({ library_id: "/org/lib", topic: "hooks", content: "documentation" });
     expect(source).toEqual({ content: "# Sourcegraph results" });
     expect(calls.map((call) => call.args)).toEqual([
-      ["docs", "resolve", "dispatch-proof", "--json"],
-      ["docs", "fetch", "/org/lib", "hooks", "--tokens", "500", "--json"],
-      ["sgraph", "repo:tta-lab", "--json", "--count", "14", "--context", "3", "--timeout", "9"],
+      ["docs", "resolve", "--json", "--", "-dispatch-proof"],
+      ["docs", "fetch", "--tokens", "500", "--json", "--", "/-org/lib", "-hooks"],
+      [
+        "sgraph",
+        "--json",
+        "--count",
+        "14",
+        "--context",
+        "3",
+        "--timeout",
+        "9",
+        "--",
+        "-repo:tta-lab",
+      ],
     ]);
     expect(calls[0]!.env).toEqual({ CONTEXT7_API_KEY: secret });
     expect(calls[1]!.env).toEqual({ CONTEXT7_API_KEY: secret });
@@ -313,11 +332,36 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
     )[1]!;
 
     await expect(callTool(definition, { action: "fetch", library_id: "/org/lib" })).rejects.toThrow(
-      /web child|backend failed/,
+      /web docs fetch failed|command exited with code 1/,
     );
     await expect(
       callTool(definition, { action: "fetch", library_id: "/org/lib" }),
     ).rejects.not.toThrow(secret);
+  });
+
+  it("rejects undeclared input fields before invoking the binary", async () => {
+    const fetchRun = vi.fn();
+    const fetchDefinition = createWebToolDefinitions(
+      dependencies({ fetch: vi.fn(), run: fetchRun }),
+    )[0]!;
+    await expect(
+      callTool(fetchDefinition, { url: "https://example.test", extra: true }),
+    ).rejects.toThrow(/web_fetch input does not accept field extra/);
+    expect(fetchRun).not.toHaveBeenCalled();
+
+    const sgraphRun = vi.fn();
+    const sgraphDefinition = createWebToolDefinitions(dependencies({ run: sgraphRun }))[2]!;
+    await expect(callTool(sgraphDefinition, { query: "x", extra: true })).rejects.toThrow(
+      /web_sgraph input does not accept field extra/,
+    );
+    expect(sgraphRun).not.toHaveBeenCalled();
+
+    const run = vi.fn();
+    const definition = createWebToolDefinitions(dependencies({ run }))[1]!;
+    await expect(
+      callTool(definition, { action: "resolve", query: "x", extra: true }),
+    ).rejects.toThrow(/web_docs input does not accept field extra/);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("rejects cross-action docs fields before invoking the binary", async () => {
@@ -327,5 +371,38 @@ describe.sequential("DSH global Pi-compatible web tools", () => {
       callTool(definition, { action: "resolve", query: "x", library_id: "/wrong" }),
     ).rejects.toThrow(/does not accept library_id/);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("does not leak inherited fallback secrets from child failures", async () => {
+    const secret = "ctx7sk-inherited-secret";
+    const failing = createWebToolDefinitions(
+      dependencies({
+        credentials: { resolve: async () => undefined },
+        run: async () => ({
+          stdout: `malformed ${secret}`,
+          stderr: `backend failed with ${secret}`,
+          exitCode: 1,
+          killed: false,
+        }),
+      }),
+    )[1]!;
+    await expect(
+      callTool(failing, { action: "fetch", library_id: "/org/lib" }),
+    ).rejects.not.toThrow(secret);
+
+    const malformed = createWebToolDefinitions(
+      dependencies({
+        credentials: { resolve: async () => undefined },
+        run: async () => ({
+          stdout: `not-json ${secret}`,
+          stderr: "",
+          exitCode: 0,
+          killed: false,
+        }),
+      }),
+    )[1]!;
+    await expect(
+      callTool(malformed, { action: "fetch", library_id: "/org/lib" }),
+    ).rejects.not.toThrow(secret);
   });
 });

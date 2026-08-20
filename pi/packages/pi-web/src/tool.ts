@@ -4,7 +4,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
 import {
-  cliError,
   detectPlatform,
   modelTextResult,
   parseSingleJsonDoc,
@@ -12,8 +11,12 @@ import {
   runCli,
 } from "@tta-lab/pi-shared";
 
-import { fetchWebPage, type FetchResult } from "@tta-lab/pi-shared/fetch";
+import { fetchWebPage, type FetchInput, type FetchResult } from "@tta-lab/pi-shared/fetch";
 export type { FetchResult } from "@tta-lab/pi-shared/fetch";
+
+export interface WebFetchToolOptions {
+  fetch?: (input: FetchInput, signal?: AbortSignal) => Promise<FetchResult>;
+}
 
 const require = createRequire(import.meta.url);
 const DEFAULT_TREE_THRESHOLD = 5000;
@@ -152,6 +155,29 @@ function requireString(input: unknown, field: string): string {
   return input[field] as string;
 }
 
+async function runOrganonJSON<T>(
+  binary: string,
+  args: string[],
+  signal: AbortSignal | undefined,
+  operation: string,
+): Promise<T> {
+  let result;
+  try {
+    result = await runCli(binary, { args, signal });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Operation aborted") throw error;
+    throw new Error(`${operation} failed to start`);
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${operation} failed: command exited with code ${result.exitCode}`);
+  }
+  try {
+    return parseSingleJsonDoc<T>(result.stdout);
+  } catch {
+    throw new Error(`${operation} returned invalid JSON`);
+  }
+}
+
 function requireQueries(input: unknown): string[] {
   if (!isRecord(input)) {
     throw new Error("queries must be an array of 1 to 4 non-empty strings");
@@ -241,9 +267,12 @@ export function webSearchTool() {
       const queries = requireQueries(params);
       const settled = await Promise.allSettled(
         queries.map(async (query) => {
-          const result = await runCli(binary, { args: ["search", query, "--json"], signal });
-          if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
-          return parseSingleJsonDoc<SearchResult>(result.stdout);
+          return runOrganonJSON<SearchResult>(
+            binary,
+            ["search", "--json", "--", query],
+            signal,
+            "search backend",
+          );
         }),
       );
       const responses = settled.map((result) => {
@@ -264,7 +293,8 @@ export function webSearchTool() {
   });
 }
 
-export function webFetchTool() {
+export function webFetchTool(options: WebFetchToolOptions = {}) {
+  const fetch = options.fetch ?? fetchWebPage;
   return makeTool({
     name: "web_fetch",
     label: "Web fetch",
@@ -274,7 +304,7 @@ export function webFetchTool() {
     promptGuidelines: FETCH_PROMPT_GUIDELINES,
     parameters: webFetchSchema,
     execute: async (params: WebFetchInput, signal) => {
-      const data = await fetchWebPage(
+      const data = await fetch(
         {
           url: requireString(params, "url"),
           tree: params.tree,
@@ -305,21 +335,25 @@ export function webDocsTool() {
       const input = normalizeDocs(params);
       const args =
         input.action === "resolve"
-          ? ["docs", "resolve", input.query, "--json"]
+          ? ["docs", "resolve", "--json", "--", input.query]
           : [
               "docs",
               "fetch",
-              input.library_id,
-              ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
               ...(input.tokens !== undefined && input.tokens !== 0
                 ? ["--tokens", String(input.tokens)]
                 : []),
               "--json",
+              "--",
+              input.library_id,
+              ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
             ];
-      const result = await runCli(binary, { args, signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
       if (input.action === "resolve") {
-        const data = parseSingleJsonDoc<DocsResolveResult>(result.stdout);
+        const data = await runOrganonJSON<DocsResolveResult>(
+          binary,
+          args,
+          signal,
+          "web docs resolve",
+        );
         const lines = data.libraries.map((lib) => `- ${lib.id}: ${lib.title}`);
         const raw =
           lines.length === 0
@@ -329,7 +363,7 @@ export function webDocsTool() {
           hint: "Use web_docs action fetch with a library_id from the results.",
         });
       }
-      const data = parseSingleJsonDoc<DocsFetchResult>(result.stdout);
+      const data = await runOrganonJSON<DocsFetchResult>(binary, args, signal, "web docs fetch");
       return modelTextResult(data, data.content, {
         hint: "Refetch with a narrower topic or tokens budget for the remainder.",
       });
@@ -349,16 +383,15 @@ export function webSgraphTool() {
     parameters: webSgraphSchema,
     execute: async (params: WebSgraphInput, signal) => {
       const query = requireString(params, "query");
-      const args = ["sgraph", query, "--json"];
+      const args = ["sgraph", "--json"];
       if (params.count !== undefined && params.count !== 10)
         args.push("--count", String(params.count));
       if (params.context !== undefined && params.context !== 10)
         args.push("--context", String(params.context));
       if (params.timeout !== undefined && params.timeout !== 0)
         args.push("--timeout", String(params.timeout));
-      const result = await runCli(binary, { args, signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
-      const data = parseSingleJsonDoc<SGraphResult>(result.stdout);
+      args.push("--", query);
+      const data = await runOrganonJSON<SGraphResult>(binary, args, signal, "web sgraph");
       return modelTextResult(data, data.content, {
         hint: "Use a narrower Sourcegraph query or lower count and context.",
       });
