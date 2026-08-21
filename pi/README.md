@@ -1,10 +1,12 @@
 # Organon Pi Extensions
 
 Four independently installable [Pi](https://pi.dev) extension packages give Pi
-native access to Organon capabilities without MCP configuration. Each package
-carries a matching native Go binary for your platform, so installing the npm
-package is sufficient on a supported host. `pi-src`, `pi-web`, and `pi-project`
-each register capability tools; `pi-og` registers five guarded forge tools.
+native access to Organon capabilities without MCP configuration. The separate
+`@tta-lab/dsh-web` package is a public DeepSeek Harness rc.8 Web bundle. Pi
+packages carry matching native Go binaries for your platform, so installing the
+npm package is sufficient on a supported host. `pi-src`, `pi-web`, and
+`pi-project` each register capability tools; `pi-og` registers five guarded forge
+tools.
 
 | Package               | Tool(s)                                                | Capability                                                               |
 | --------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
@@ -22,6 +24,14 @@ pi install npm:@tta-lab/pi-project@<version>
 pi install npm:@tta-lab/pi-og@<version>
 ```
 
+For the DeepSeek Harness Web profile, install the public bundle through the normal
+profile plugin command; it applies its own patch and does not require a custom
+profile or preset:
+
+```bash
+dsh plugin --profile web add @tta-lab/dsh-web
+```
+
 Install only the capabilities you need; each package is independent. All
 packages in one release share a version, and each main package pins its native
 platform packages to that exact version, so schemas and binaries can never
@@ -32,8 +42,12 @@ drift.
 - macOS (Darwin) ARM64
 - Linux x64 (amd64)
 - Linux ARM64
+- Windows x64 (Pi Web and DSH Web)
 
-Unsupported platforms fail at extension startup with an actionable error.
+Windows x64 is supported by `@tta-lab/pi-web` and `@tta-lab/dsh-web` through the
+shared `@tta-lab/pi-web-win32-x64` optional package; the other extension packages
+retain their Darwin/Linux native targets. Unsupported platforms fail at extension
+startup with an actionable error.
 Runtime binaries are never downloaded from GitHub releases, compiled during
 installation, or resolved from `PATH`.
 
@@ -158,14 +172,15 @@ pnpm exec vitest run
 node scripts/test-release-invariants.mjs
 ```
 
-`make pi-build` detects the supported host, builds the four CGO-disabled Go
-binaries directly into the matching native packages, installs the frozen Pi
-lockfile, and builds all four extension bundles. It recreates missing native
-`bin` directories and rejects unsupported hosts instead of staging a binary
-under the wrong platform name.
+`make pi-build` detects supported Darwin/Linux hosts, builds the four CGO-disabled
+Go binaries directly into the matching native packages, installs the frozen Pi
+lockfile, and builds all Pi extension bundles plus the DSH Web host/client bundle.
+The Windows web package is cross-compiled from the GoReleaser `windows/amd64` web
+target and is smoke-tested on the Windows CI runner. Staging recreates missing
+native `bin` directories and rejects unsupported or wrong-platform artifacts.
 
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to the single
-sixteen-package publish plan, `scripts/stage-natives.mjs` copies the
+package publish plan, `scripts/stage-natives.mjs` copies the
 cross-compiled Go binaries into the native packages (failing on a missing or
 wrong-platform artifact), and `scripts/publish-packages.mjs` supplies the one
 native-first plan consumed by both local bootstrap and the release workflow.
@@ -174,16 +189,18 @@ and GoReleaser artifact invariants before publishing.
 
 ## Publishing and releases
 
-Organon publishes four independently installable main packages and twelve
-platform packages. Every release uses one synchronized version and publishes
-all twelve native packages before the four main packages:
+Organon publishes the independently installable Pi extensions and the
+`@tta-lab/dsh-web` DeepSeek Harness bundle as public main packages. Every release
+uses one synchronized version and publishes all native packages before every main
+package:
 
-| Main package          | Native optional packages                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `@tta-lab/pi-src`     | `@tta-lab/pi-src-darwin-arm64`, `@tta-lab/pi-src-linux-x64`, `@tta-lab/pi-src-linux-arm64`             |
-| `@tta-lab/pi-web`     | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`             |
-| `@tta-lab/pi-project` | `@tta-lab/pi-project-darwin-arm64`, `@tta-lab/pi-project-linux-x64`, `@tta-lab/pi-project-linux-arm64` |
-| `@tta-lab/pi-og`      | `@tta-lab/pi-og-darwin-arm64`, `@tta-lab/pi-og-linux-x64`, `@tta-lab/pi-og-linux-arm64`                |
+| Main package          | Native optional packages                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@tta-lab/pi-src`     | `@tta-lab/pi-src-darwin-arm64`, `@tta-lab/pi-src-linux-x64`, `@tta-lab/pi-src-linux-arm64`                              |
+| `@tta-lab/pi-web`     | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`, `@tta-lab/pi-web-win32-x64` |
+| `@tta-lab/pi-project` | `@tta-lab/pi-project-darwin-arm64`, `@tta-lab/pi-project-linux-x64`, `@tta-lab/pi-project-linux-arm64`                  |
+| `@tta-lab/pi-og`      | `@tta-lab/pi-og-darwin-arm64`, `@tta-lab/pi-og-linux-x64`, `@tta-lab/pi-og-linux-arm64`                                 |
+| `@tta-lab/dsh-web`    | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`, `@tta-lab/pi-web-win32-x64` |
 
 Stable SemVer versions use the `latest` dist-tag. SemVer prereleases use
 `beta`, so a beta must be installed explicitly with (for example)
@@ -230,7 +247,7 @@ npm whoami --registry=https://registry.npmjs.org
 # If account-level 2FA is not already enabled, do this once before publishing:
 # npm profile enable-2fa auth-and-writes --registry=https://registry.npmjs.org
 
-(cd pi && pnpm install --frozen-lockfile && pnpm -r --filter './packages/pi-*' run build)
+(cd pi && pnpm install --frozen-lockfile && pnpm build)
 # GoReleaser reads the exact version from this ephemeral local tag. --skip=publish
 # creates dist artifacts and metadata without creating a GitHub release; never
 # run og push, git push, or a publish command against this checkout's tag.
@@ -256,8 +273,9 @@ versions already on the registry are skipped.
 
 ### One-time npm Trusted Publisher setup
 
-After all sixteen packages exist, bind each package to the same GitHub workflow
-and protected Environment. npm trust commands require npm >= 11.10.0, package
+After all packages in the publish plan exist, bind each package—including
+`@tta-lab/dsh-web`—to the same GitHub workflow and protected Environment. npm
+trust commands require npm >= 11.10.0, package
 write permission, and account-level 2FA. Run this loop once from the repository
 root of the clean bootstrap checkout; the first request may ask for 2FA.
 The two-second delay avoids npm rate limiting:
@@ -295,14 +313,14 @@ for package in $(node --input-type=module -e '
 done
 ```
 
-Do not enable the normal release path until all sixteen outputs match those
+Do not enable the normal release path until every publish-plan output matches those
 claims. If setup must be corrected, inspect the trust ID with `npm trust list`,
 revoke only the incorrect relationship, and configure that package again.
 
 Finally, configure the token restriction separately for each package in the npm
 website: open the package **Settings**, open **Publishing access**, and select
 **Require two-factor authentication and disallow tokens**. Verify that setting
-on every one of the sixteen package pages before enabling routine releases.
+on every package page in the publish plan before enabling routine releases.
 This is the npm policy that blocks traditional publish tokens while retaining
 the configured OIDC Trusted Publishers; verify it in the package settings rather
 than relying on a CLI 2FA setting.
@@ -320,8 +338,8 @@ Configure GitHub separately from npm:
 
 The tag workflow has two jobs. `preflight` is ungated and runs the Go gates, Pi
 format/typecheck/build/tests, GoReleaser snapshot, native staging, and release
-invariants. Its job summary shows the tag, commit, package version, sixteen
-package count, target dist-tag, and passed checks. Only after that job succeeds
+invariants. Its job summary shows the tag, commit, package version, derived
+package inventory, target dist-tag, and passed checks. Only after that job succeeds
 does the single `release` job enter the `npm` Environment and wait for one
 approval. Approving your own deployment is allowed; rejecting or leaving it
 unapproved publishes neither the GitHub/Homebrew release nor npm packages.
@@ -336,10 +354,28 @@ registry:
 
 ```bash
 VERSION=<release-version>
-for package in @tta-lab/pi-src @tta-lab/pi-web @tta-lab/pi-project @tta-lab/pi-og; do
+for package in $(node --input-type=module -e '
+  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
+  for (const entry of packagePublishPlan()) {
+    if (entry.kind === "main") console.log(entry.name);
+  }
+'); do
   npm view "$package@$VERSION" version dist-tags --json --registry=https://registry.npmjs.org
+done
+
+for package in $(node --input-type=module -e '
+  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
+  for (const entry of packagePublishPlan()) {
+    if (entry.kind === "main" && entry.name !== "@tta-lab/dsh-web") console.log(entry.name);
+  }
+'); do
   pi install "npm:$package@$VERSION"
 done
+
+# DSH Web is installed through DSH, not Pi. Keep this proof disposable.
+DSH_HOME="$(mktemp -d)"
+trap 'rm -rf "$DSH_HOME"' EXIT
+dsh plugin --profile web add "@tta-lab/dsh-web@$VERSION"
 ```
 
 OIDC releases on the public repository and public packages automatically carry
@@ -347,7 +383,10 @@ npm provenance. Verify each main package's attestation and inspect its npm
 package page's Provenance section:
 
 ```bash
-for package in @tta-lab/pi-src @tta-lab/pi-web @tta-lab/pi-project @tta-lab/pi-og; do
+for package in $(node --input-type=module -e '
+  import { packagePublishPlan } from "./scripts/publish-packages.mjs";
+  for (const entry of packagePublishPlan()) if (entry.kind === "main") console.log(entry.name);
+'); do
   npm view "$package@$VERSION" dist.attestations --json --registry=https://registry.npmjs.org
 done
 ```
@@ -377,4 +416,4 @@ files in repository `packages/native/*/bin` directories, so running the tests
 with real binaries present leaves them byte-for-byte unchanged—and running with
 them absent leaves them absent. The offline pack smoke also uses throwaway
 copies. Replace the host-platform binary name (`darwin-arm64`, `linux-x64`,
-`linux-arm64`) and the tool as needed.
+`linux-arm64`, `win32-x64`) and the tool as needed.

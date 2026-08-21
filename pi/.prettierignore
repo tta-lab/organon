@@ -1,0 +1,2 @@
+# pnpm lockfile snapshot keys can exceed Prettier's YAML parser limits.
+pnpm-lock.yaml

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -263,6 +264,49 @@ func TestWebMCPPassesCancellationToService(t *testing.T) {
 		t.Fatal("service context was not canceled")
 	}
 	<-done
+}
+
+func TestWebMCPCommandPassesProvider(t *testing.T) {
+	var gotProvider string
+	wantErr := errors.New("stop before serving")
+	cmd := newWebMCPCmdWithFactory(func(provider string) (webService, error) {
+		gotProvider = provider
+		return nil, wantErr
+	})
+	cmd.SetArgs([]string{"--provider", "duckduckgo"})
+
+	if err := cmd.Execute(); !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if gotProvider != "duckduckgo" {
+		t.Fatalf("provider = %q, want duckduckgo", gotProvider)
+	}
+}
+
+func TestWebMCPCommandLeavesProviderEmptyForFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".config", "ttal")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "web.toml"), []byte("[search\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotProvider string
+	wantErr := errors.New("stop before serving")
+	cmd := newWebMCPCmdWithFactory(func(provider string) (webService, error) {
+		gotProvider = provider
+		return nil, wantErr
+	})
+
+	if err := cmd.Execute(); !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if gotProvider != "" {
+		t.Fatalf("provider = %q, want empty fallback selection", gotProvider)
+	}
 }
 
 func TestWebMCPCommandHelper(_ *testing.T) {

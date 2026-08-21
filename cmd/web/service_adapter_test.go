@@ -18,6 +18,7 @@ import (
 
 type stubWebService struct {
 	searchResult webcore.SearchResult
+	searchInput  string
 	fetchResult  webcore.FetchResult
 	resolve      webcore.DocsResolveResult
 	docs         webcore.DocsFetchResult
@@ -27,7 +28,8 @@ type stubWebService struct {
 	sgraphInput  webcore.SGraphInput
 }
 
-func (s *stubWebService) Search(context.Context, string) (webcore.SearchResult, error) {
+func (s *stubWebService) Search(_ context.Context, query string) (webcore.SearchResult, error) {
+	s.searchInput = query
 	return s.searchResult, nil
 }
 
@@ -54,20 +56,29 @@ func fixedServiceFactory(service webService) serviceFactory {
 	return func(string) (webService, error) { return service, nil }
 }
 
+func capturingServiceFactory(service webService, captured *string) serviceFactory {
+	return func(provider string) (webService, error) {
+		*captured = provider
+		return service, nil
+	}
+}
+
 func TestSearchCLIFormatsTypedServiceResult(t *testing.T) {
 	service := &stubWebService{searchResult: webcore.SearchResult{
 		Provider: "Brave",
 		Results:  []search.SearchResult{{Title: "One", Link: "https://example.com", Snippet: "Summary", Position: 1}},
 	}}
-	cmd := newSearchCmdWithFactory(fixedServiceFactory(service))
+	var provider string
+	cmd := newSearchCmdWithFactory(capturingServiceFactory(service, &provider))
 	var output bytes.Buffer
 	cmd.SetOut(&output)
-	cmd.SetArgs([]string{"query"})
+	cmd.SetArgs([]string{"query", "--provider", "brave"})
 
 	require.NoError(t, cmd.Execute())
 	want := "Found 1 search results:\n\n" +
 		"1. One\n   URL: https://example.com\n   Summary: Summary\n\n"
 	assert.Equal(t, want, output.String())
+	assert.Equal(t, "brave", provider)
 }
 
 func TestFetchCLIMapsFlagsAndPrintsContent(t *testing.T) {
@@ -135,6 +146,20 @@ func TestFetchCLIJSONOutputMatchesStructuredResult(t *testing.T) {
 	var got webcore.FetchResult
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	assert.Equal(t, webcore.FetchResult{URL: "https://example.com", Mode: "full", Content: "rendered"}, got)
+}
+
+func TestDocsAndSGraphCLISeparateHyphenArguments(t *testing.T) {
+	service := &stubWebService{}
+
+	fetchCmd := newDocsFetchCmdWithFactory(fixedServiceFactory(service))
+	fetchCmd.SetArgs([]string{"--json", "--tokens", "500", "--", "-org/lib", "-topic"})
+	require.NoError(t, fetchCmd.Execute())
+	assert.Equal(t, webcore.DocsFetchInput{LibraryID: "-org/lib", Topic: "-topic", Tokens: 500}, service.docsInput)
+
+	sgraphCmd := newSgraphCmdWithFactory(fixedServiceFactory(service))
+	sgraphCmd.SetArgs([]string{"--json", "--count", "14", "--", "-repo:test"})
+	require.NoError(t, sgraphCmd.Execute())
+	assert.Equal(t, webcore.SGraphInput{Query: "-repo:test", Count: 14, ContextWindow: 10}, service.sgraphInput)
 }
 
 func TestDocsResolveCLIJSONOutputMatchesStructuredResult(t *testing.T) {

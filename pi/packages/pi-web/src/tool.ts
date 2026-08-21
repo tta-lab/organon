@@ -4,7 +4,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
 import {
-  cliError,
   detectPlatform,
   modelTextResult,
   parseSingleJsonDoc,
@@ -12,15 +11,26 @@ import {
   runCli,
 } from "@tta-lab/pi-shared";
 
-import { fetchWebPage, type FetchResult } from "./fetch.js";
-export type { FetchResult } from "./fetch.js";
+import { fetchWebPage, type FetchInput, type FetchResult } from "@tta-lab/pi-shared/fetch";
+export type { FetchResult } from "@tta-lab/pi-shared/fetch";
+
+export interface WebFetchToolOptions {
+  fetch?: (input: FetchInput, signal?: AbortSignal) => Promise<FetchResult>;
+}
 
 const require = createRequire(import.meta.url);
 const DEFAULT_TREE_THRESHOLD = 5000;
 
 export const webSearchSchema = Type.Object(
   {
-    query: Type.String({ description: "Web search query" }),
+    queries: Type.Array(
+      Type.String({ description: "Web search query", minLength: 1, pattern: "\\S" }),
+      {
+        description: "One to four web search queries",
+        minItems: 1,
+        maxItems: 4,
+      },
+    ),
   },
   { additionalProperties: false },
 );
@@ -145,6 +155,65 @@ function requireString(input: unknown, field: string): string {
   return input[field] as string;
 }
 
+async function runOrganonJSON<T>(
+  binary: string,
+  args: string[],
+  signal: AbortSignal | undefined,
+  operation: string,
+): Promise<T> {
+  let result;
+  try {
+    result = await runCli(binary, { args, signal });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Operation aborted") throw error;
+    throw new Error(`${operation} failed to start`);
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${operation} failed: command exited with code ${result.exitCode}`);
+  }
+  try {
+    return parseSingleJsonDoc<T>(result.stdout);
+  } catch {
+    throw new Error(`${operation} returned invalid JSON`);
+  }
+}
+
+function requireQueries(input: unknown): string[] {
+  if (!isRecord(input)) {
+    throw new Error("queries must be an array of 1 to 4 non-empty strings");
+  }
+  for (const field of Object.keys(input)) {
+    if (field !== "queries") {
+      throw new Error(`web_search input does not accept field ${field}`);
+    }
+  }
+  const queries = input.queries;
+  if (
+    !Array.isArray(queries) ||
+    queries.length < 1 ||
+    queries.length > 4 ||
+    queries.some((query) => typeof query !== "string" || query.trim().length === 0)
+  ) {
+    throw new Error("queries must be an array of 1 to 4 non-empty strings");
+  }
+  return [...new Set(queries as string[])];
+}
+
+function mergeSearchResults(responses: SearchResult[]): SearchResult {
+  const results: SearchResult["results"] = [];
+  for (let resultIndex = 0; ; resultIndex++) {
+    let added = false;
+    for (const response of responses) {
+      const result = response.results[resultIndex];
+      if (result === undefined) continue;
+      results.push({ ...result, position: results.length + 1 });
+      added = true;
+    }
+    if (!added) break;
+  }
+  return { provider: responses[0]?.provider ?? "", results };
+}
+
 function normalizeDocs(input: unknown): DocsInput {
   if (!isRecord(input)) {
     throw new Error("web_docs input must be an object");
@@ -190,15 +259,27 @@ export function webSearchTool() {
     name: "web_search",
     label: "Web search",
     description:
-      "Search the web for current facts through the native Organon web search backends. Text output is limited to 2,000 lines or 50KB; truncated output is saved to a temporary file.",
+      "Search the web for current facts through the native Organon web search backends. Provide one to four queries; text output is limited to 2,000 lines or 50KB.",
     promptSnippet: "Search the web with web_search",
     promptGuidelines: SEARCH_PROMPT_GUIDELINES,
     parameters: webSearchSchema,
     execute: async (params: WebSearchInput, signal) => {
-      const query = requireString(params, "query");
-      const result = await runCli(binary, { args: ["search", query, "--json"], signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
-      const data = parseSingleJsonDoc<SearchResult>(result.stdout);
+      const queries = requireQueries(params);
+      const settled = await Promise.allSettled(
+        queries.map(async (query) => {
+          return runOrganonJSON<SearchResult>(
+            binary,
+            ["search", "--json", "--", query],
+            signal,
+            "search backend",
+          );
+        }),
+      );
+      const responses = settled.map((result) => {
+        if (result.status !== "fulfilled") throw result.reason;
+        return result.value;
+      });
+      const data = mergeSearchResults(responses);
       const lines = data.results.map(
         (r) => `${r.position}. ${r.title}\n   URL: ${r.link}\n   ${r.snippet}`,
       );
@@ -212,7 +293,8 @@ export function webSearchTool() {
   });
 }
 
-export function webFetchTool() {
+export function webFetchTool(options: WebFetchToolOptions = {}) {
+  const fetch = options.fetch ?? fetchWebPage;
   return makeTool({
     name: "web_fetch",
     label: "Web fetch",
@@ -222,7 +304,7 @@ export function webFetchTool() {
     promptGuidelines: FETCH_PROMPT_GUIDELINES,
     parameters: webFetchSchema,
     execute: async (params: WebFetchInput, signal) => {
-      const data = await fetchWebPage(
+      const data = await fetch(
         {
           url: requireString(params, "url"),
           tree: params.tree,
@@ -253,21 +335,25 @@ export function webDocsTool() {
       const input = normalizeDocs(params);
       const args =
         input.action === "resolve"
-          ? ["docs", "resolve", input.query, "--json"]
+          ? ["docs", "resolve", "--json", "--", input.query]
           : [
               "docs",
               "fetch",
-              input.library_id,
-              ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
               ...(input.tokens !== undefined && input.tokens !== 0
                 ? ["--tokens", String(input.tokens)]
                 : []),
               "--json",
+              "--",
+              input.library_id,
+              ...(input.topic !== undefined && input.topic !== "" ? [input.topic] : []),
             ];
-      const result = await runCli(binary, { args, signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
       if (input.action === "resolve") {
-        const data = parseSingleJsonDoc<DocsResolveResult>(result.stdout);
+        const data = await runOrganonJSON<DocsResolveResult>(
+          binary,
+          args,
+          signal,
+          "web docs resolve",
+        );
         const lines = data.libraries.map((lib) => `- ${lib.id}: ${lib.title}`);
         const raw =
           lines.length === 0
@@ -277,7 +363,7 @@ export function webDocsTool() {
           hint: "Use web_docs action fetch with a library_id from the results.",
         });
       }
-      const data = parseSingleJsonDoc<DocsFetchResult>(result.stdout);
+      const data = await runOrganonJSON<DocsFetchResult>(binary, args, signal, "web docs fetch");
       return modelTextResult(data, data.content, {
         hint: "Refetch with a narrower topic or tokens budget for the remainder.",
       });
@@ -297,16 +383,15 @@ export function webSgraphTool() {
     parameters: webSgraphSchema,
     execute: async (params: WebSgraphInput, signal) => {
       const query = requireString(params, "query");
-      const args = ["sgraph", query, "--json"];
+      const args = ["sgraph", "--json"];
       if (params.count !== undefined && params.count !== 10)
         args.push("--count", String(params.count));
       if (params.context !== undefined && params.context !== 10)
         args.push("--context", String(params.context));
       if (params.timeout !== undefined && params.timeout !== 0)
         args.push("--timeout", String(params.timeout));
-      const result = await runCli(binary, { args, signal });
-      if (result.exitCode !== 0) throw await cliError(result.stderr, result.exitCode);
-      const data = parseSingleJsonDoc<SGraphResult>(result.stdout);
+      args.push("--", query);
+      const data = await runOrganonJSON<SGraphResult>(binary, args, signal, "web sgraph");
       return modelTextResult(data, data.content, {
         hint: "Use a narrower Sourcegraph query or lower count and context.",
       });

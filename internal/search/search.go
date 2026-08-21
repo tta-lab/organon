@@ -55,7 +55,7 @@ func SearchResultsWithConfig(ctx context.Context, query string, cfg Config) (Res
 		return Response{}, fmt.Errorf("query is required")
 	}
 
-	provider, searcher, err := resolveConfiguredSearchProvider(cfg.Search.Provider)
+	provider, searcher, err := resolveConfiguredSearchProvider(cfg.Provider)
 	if err != nil {
 		return Response{}, err
 	}
@@ -117,19 +117,22 @@ func resolveSearchProvider() (string, WebSearcher, error) {
 }
 
 func resolveConfiguredSearchProvider(configured string) (string, WebSearcher, error) {
+	if err := ValidateProvider(configured); err != nil {
+		return "", nil, err
+	}
 	switch configured {
 	case "":
 		return resolveSearchProvider()
 	case "exa":
 		key := os.Getenv("EXA_API_KEY")
 		if key == "" {
-			return "", nil, fmt.Errorf("EXA_API_KEY is required when search.provider is exa")
+			return "", nil, fmt.Errorf("EXA_API_KEY is required when --provider exa is selected")
 		}
 		return providerExa, NewExaSearcher(key), nil
 	case "brave":
 		key := os.Getenv("BRAVE_API_KEY")
 		if key == "" {
-			return "", nil, fmt.Errorf("BRAVE_API_KEY is required when search.provider is brave")
+			return "", nil, fmt.Errorf("BRAVE_API_KEY is required when --provider brave is selected")
 		}
 		return providerBrave, NewBraveSearcher(key), nil
 	case "duckduckgo":

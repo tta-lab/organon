@@ -23,17 +23,13 @@ describe("native Pi fetch parser failures", () => {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("server did not bind");
 
-    const priorHome = process.env.HOME;
-    const home = mkdtempSync(join(tmpdir(), "pi-web-parse-failure-"));
-    process.env.HOME = home;
+    const cacheDirectory = mkdtempSync(join(tmpdir(), "pi-web-parse-failure-cache-"));
     try {
-      await expect(fetchWebPage({ url: `http://127.0.0.1:${address.port}` })).rejects.toThrow(
-        /defuddle parse failed: synthetic parser failure/,
-      );
+      await expect(
+        fetchWebPage({ url: `http://127.0.0.1:${address.port}` }, undefined, { cacheDirectory }),
+      ).rejects.toThrow(/defuddle parse failed: synthetic parser failure/);
     } finally {
-      if (priorHome === undefined) delete process.env.HOME;
-      else process.env.HOME = priorHome;
-      rmSync(home, { recursive: true, force: true });
+      rmSync(cacheDirectory, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

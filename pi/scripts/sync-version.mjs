@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Syncs one release version across the single sixteen-package publish plan and
+// Syncs one release version across the single data-driven publish plan and
 // pins main-package optionalDependencies to that exact version.
 //
 // Usage: node scripts/sync-version.mjs <version> [--dry-run]

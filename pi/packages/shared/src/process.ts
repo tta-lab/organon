@@ -7,6 +7,8 @@ export interface CliRunOptions {
   stdin?: string;
   /** Tool abort signal; propagated to the child process. */
   signal?: AbortSignal;
+  /** Optional environment overrides merged over the parent process environment. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface CliRunResult {
@@ -28,7 +30,10 @@ export function runCli(binaryPath: string, options: CliRunOptions): Promise<CliR
       reject(new Error("Operation aborted"));
       return;
     }
-    const child = spawn(binaryPath, options.args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(binaryPath, options.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+    });
     let stdout = "";
     let stderr = "";
     let spawnError: Error | undefined;

@@ -1,40 +1,20 @@
 package search
 
-import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"strings"
+import "fmt"
 
-	"github.com/BurntSushi/toml"
-)
-
-// Config controls web search provider selection.
+// Config controls runtime web search provider selection. An empty Provider uses
+// the EXA_API_KEY → BRAVE_API_KEY → DuckDuckGo fallback.
 type Config struct {
-	Search SearchConfig `toml:"search"`
+	Provider string
 }
 
-// SearchConfig controls the search command.
-type SearchConfig struct {
-	Provider string `toml:"provider"`
-}
-
-// LoadConfig reads web search configuration from path. A missing file keeps
-// the existing automatic provider selection behavior.
-func LoadConfig(path string) (Config, error) {
-	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return cfg, nil
-		}
-		return Config{}, fmt.Errorf("read web config %s: %w", path, err)
-	}
-
-	cfg.Search.Provider = strings.ToLower(strings.TrimSpace(cfg.Search.Provider))
-	switch cfg.Search.Provider {
+// ValidateProvider checks an explicit provider selection. The empty value
+// selects the documented environment-based fallback.
+func ValidateProvider(provider string) error {
+	switch provider {
 	case "", "exa", "brave", "duckduckgo":
-		return cfg, nil
+		return nil
 	default:
-		return Config{}, fmt.Errorf("read web config %s: search.provider must be exa, brave, or duckduckgo", path)
+		return fmt.Errorf("unsupported search provider %q", provider)
 	}
 }

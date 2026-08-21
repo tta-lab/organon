@@ -10,7 +10,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/tta-lab/organon/internal/config"
 	webcore "github.com/tta-lab/organon/internal/web"
 )
 
@@ -166,17 +165,27 @@ func newWebMCPServer(service webService) *mcp.Server {
 }
 
 func newWebMCPCmd() *cobra.Command {
-	return &cobra.Command{
+	return newWebMCPCmdWithFactory(defaultServiceFactory)
+}
+
+func newWebMCPCmdWithFactory(factory serviceFactory) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve typed web tools over stdio MCP",
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			service, err := defaultServiceFactory(config.WebConfigPath())
+			provider, err := cmd.Flags().GetString("provider")
+			if err != nil {
+				return fmt.Errorf("read --provider: %w", err)
+			}
+			service, err := factory(provider)
 			if err != nil {
 				return err
 			}
 			return newWebMCPServer(service).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
+	cmd.Flags().String("provider", "", "Search provider: exa, brave, or duckduckgo")
+	return cmd
 }

@@ -47,36 +47,84 @@ async function waitForProcessExit(pid: number): Promise<void> {
 describe("platform detection", () => {
   it("detects the current host as one of the supported triples", () => {
     const triple = detectPlatform();
-    expect(["darwin", "linux"]).toContain(triple.os);
+    expect(["darwin", "linux", "win32"]).toContain(triple.os);
     expect(["arm64", "x64"]).toContain(triple.arch);
   });
 
   it("names the host native package for a tool", () => {
     const { os, arch } = detectPlatform();
-    expect(nativePackageName("project")).toBe(`@tta-lab/pi-project-${os}-${arch}`);
+    const tool = os === "win32" ? "web" : "project";
+    expect(nativePackageName(tool)).toBe(`@tta-lab/pi-${tool}-${os}-${arch}`);
   });
 });
 
 describe("binary resolution", () => {
   it("resolves the host native package's bin/<tool> via the resolver", () => {
     const { os, arch } = detectPlatform();
-    const resolved = resolveBinaryPath("project", {
+    const tool = os === "win32" ? "web" : "project";
+    const resolved = resolveBinaryPath(tool, {
       resolve: (specifier) => {
-        expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
+        expect(specifier).toBe(`@tta-lab/pi-${tool}-${os}-${arch}/package.json`);
         return join(here, "fake-node-modules", specifier);
       },
     });
-    expect(resolved.endsWith(`/bin/project`) || resolved.endsWith(`\\bin\\project`)).toBe(true);
+    const executable = os === "win32" ? `${tool}.exe` : tool;
+    expect(resolved.replaceAll("\\", "/").endsWith(`/bin/${executable}`)).toBe(true);
   });
 
   it("throws an actionable error when the native package is missing", () => {
+    const tool = detectPlatform().os === "win32" ? "web" : "project";
     expect(() =>
-      resolveBinaryPath("project", {
+      resolveBinaryPath(tool, {
         resolve: () => {
           throw new Error("Cannot find module");
         },
       }),
-    ).toThrow(/native package @tta-lab\/pi-project-/);
+    ).toThrow(new RegExp(`native package @tta-lab/pi-${tool}-`));
+  });
+});
+
+function withPlatform<T>(platform: NodeJS.Platform, arch: NodeJS.Architecture, run: () => T): T {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalArch = Object.getOwnPropertyDescriptor(process, "arch");
+  if (!originalPlatform || !originalArch)
+    throw new Error("process platform descriptors unavailable");
+  Object.defineProperty(process, "platform", { value: platform });
+  Object.defineProperty(process, "arch", { value: arch });
+  try {
+    return run();
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatform);
+    Object.defineProperty(process, "arch", originalArch);
+  }
+}
+
+describe("Windows web binary resolution", () => {
+  it("resolves win32/x64 web.exe through a path containing spaces", () => {
+    const directory = mkdtempSync(join(tmpdir(), "organon web native path "));
+    try {
+      const { resolved, packageName } = withPlatform("win32", "x64", () => ({
+        resolved: resolveBinaryPath("web", {
+          resolve: (specifier) => {
+            expect(specifier).toBe("@tta-lab/pi-web-win32-x64/package.json");
+            return join(directory, "node_modules", "@tta-lab", "pi-web-win32-x64", "package.json");
+          },
+        }),
+        packageName: nativePackageName("web"),
+      }));
+      expect(resolved).toBe(
+        join(directory, "node_modules", "@tta-lab", "pi-web-win32-x64", "bin", "web.exe"),
+      );
+      expect(packageName).toBe("@tta-lab/pi-web-win32-x64");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not advertise Windows natives for other tools", () => {
+    expect(() =>
+      withPlatform("win32", "x64", () => resolveBinaryPath("project", { resolve: () => "" })),
+    ).toThrow(/pi-web only/);
   });
 });
 
@@ -85,12 +133,14 @@ describe("subprocess adapter", () => {
     const result = await runCli(process.execPath, {
       args: [join(fixtures, "echo-args.mjs"), "list", "--json"],
       stdin: "hello\nworld",
+      env: { PI_TEST_CHILD_VALUE: "child-value" },
     });
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("diag\n");
     const out = JSON.parse(result.stdout);
     expect(out.argv).toEqual(["list", "--json"]);
     expect(out.stdin).toBe("hello\nworld");
+    expect(out.env).toBe("child-value");
   });
 
   it("rejects with Operation aborted when the signal fires", async () => {

@@ -27,27 +27,22 @@ type Dependencies struct {
 	SGraphSearch  func(context.Context, string, int, int, int) (string, error)
 }
 
-// Options configure a Service. SearchConfigPath is loaded once at construction.
+// Options configure a Service. SearchProvider applies to every search in the service.
 type Options struct {
-	SearchConfigPath string
-	Dependencies     Dependencies
+	SearchProvider string
+	Dependencies   Dependencies
 }
 
 // Service coordinates web backends for CLI and MCP adapters.
 type Service struct {
-	searchConfig search.Config
-	deps         Dependencies
+	searchProvider string
+	deps           Dependencies
 }
 
 // NewService constructs a shared web service.
 func NewService(options Options) (*Service, error) {
-	var searchConfig search.Config
-	var err error
-	if options.SearchConfigPath != "" {
-		searchConfig, err = search.LoadConfig(options.SearchConfigPath)
-		if err != nil {
-			return nil, err
-		}
+	if err := search.ValidateProvider(options.SearchProvider); err != nil {
+		return nil, err
 	}
 
 	deps := options.Dependencies
@@ -64,12 +59,12 @@ func NewService(options Options) (*Service, error) {
 		deps.SGraphSearch = sgraph.Search
 	}
 
-	return &Service{searchConfig: searchConfig, deps: deps}, nil
+	return &Service{searchProvider: options.SearchProvider, deps: deps}, nil
 }
 
 // Search performs a configured web search.
 func (s *Service) Search(ctx context.Context, query string) (SearchResult, error) {
-	return s.deps.Search(ctx, query, s.searchConfig)
+	return s.deps.Search(ctx, query, search.Config{Provider: s.searchProvider})
 }
 
 // Fetch retrieves a page, rejects binary bodies, and renders Markdown.

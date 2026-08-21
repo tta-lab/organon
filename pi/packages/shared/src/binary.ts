@@ -8,7 +8,7 @@ export type BinaryResolver = (specifier: string) => string;
 
 /** Name of the native npm package that carries the binary for `tool`. */
 export function nativePackageName(tool: string): string {
-  const { os, arch } = detectPlatform();
+  const { os, arch } = detectPlatform(tool);
   return `@tta-lab/pi-${tool}-${os}-${arch}`;
 }
 
@@ -26,12 +26,13 @@ export interface BinaryResolutionOptions {
  * actionable error from detectPlatform.
  */
 export function resolveBinaryPath(tool: string, options?: BinaryResolutionOptions): string {
-  const { os, arch } = detectPlatform();
+  const { os, arch } = detectPlatform(tool);
   const pkg = `@tta-lab/pi-${tool}-${os}-${arch}`;
+  const executable = os === "win32" ? `${tool}.exe` : tool;
   const testWorkspace =
     process.env.VITEST === "true" ? process.env.ORGANON_PI_TEST_WORKSPACE : undefined;
   if (testWorkspace && !options?.resolve) {
-    return join(testWorkspace, "packages", "native", `pi-${tool}-${os}-${arch}`, "bin", tool);
+    return join(testWorkspace, "packages", "native", `pi-${tool}-${os}-${arch}`, "bin", executable);
   }
   const require = options?.require ?? createRequire(import.meta.url);
   const resolver = options?.resolve ?? ((specifier: string) => require.resolve(specifier));
@@ -44,5 +45,5 @@ export function resolveBinaryPath(tool: string, options?: BinaryResolutionOption
         `or install ${pkg} at the exact same version so the matching binary is available.`,
     );
   }
-  return join(packageRoot, "bin", tool);
+  return join(packageRoot, "bin", executable);
 }

@@ -1,21 +1,43 @@
 #!/usr/bin/env node
-// CI-friendly release invariant test: syncs the single publish plan to a
-// throwaway version (or the goreleaser snapshot version when a dist dir is
-// given), validates the invariants including the tag-to-artifact mapping, then
-// restores the workspace manifests so the dev tree keeps workspace:*.
+// CI-friendly release invariant test: copies the single publish plan into a
+// disposable workspace, syncs it to a throwaway version (or the goreleaser
+// snapshot version when a dist dir is given), and validates the invariants
+// including the tag-to-artifact mapping without mutating the development tree.
 //
 // Usage: node scripts/test-release-invariants.mjs [goreleaserDistDir]
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { packagePublishPlan } from "./publish-packages.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workspace = join(here, "..");
-const dist = process.argv[2];
-const plan = packagePublishPlan(workspace);
+const requestedDist = process.argv[2];
+const dist = requestedDist === undefined ? undefined : resolve(workspace, requestedDist);
+const sourcePlan = packagePublishPlan(workspace);
+
+function createFixtureWorkspace(plan) {
+  const fixture = mkdtempSync(join(tmpdir(), "organon-release-invariants-"));
+  mkdirSync(join(fixture, "packages", "native"), { recursive: true });
+  mkdirSync(join(fixture, "scripts"), { recursive: true });
+  for (const entry of plan) {
+    const destination = join(fixture, relative(workspace, entry.path));
+    mkdirSync(destination, { recursive: true });
+    copyFileSync(join(entry.path, "package.json"), join(destination, "package.json"));
+  }
+  for (const script of [
+    "publish-packages.mjs",
+    "release-dry-run.mjs",
+    "release-targets.mjs",
+    "sync-version.mjs",
+  ]) {
+    copyFileSync(join(workspace, "scripts", script), join(fixture, "scripts", script));
+  }
+  return fixture;
+}
 
 let testVersion = "0.0.0-test";
 if (dist && existsSync(join(dist, "metadata.json"))) {
@@ -23,25 +45,26 @@ if (dist && existsSync(join(dist, "metadata.json"))) {
   testVersion = String(meta.version ?? testVersion).replace(/^v/, "");
 }
 
-const original = new Map();
-for (const entry of plan) {
-  const path = join(entry.path, "package.json");
-  original.set(path, readFileSync(path, "utf8"));
-}
-
+const fixture = createFixtureWorkspace(sourcePlan);
 try {
+  const fixturePlan = packagePublishPlan(fixture);
+  if (fixturePlan.length !== sourcePlan.length) {
+    throw new Error(
+      `release fixture package count ${fixturePlan.length} != source plan ${sourcePlan.length}`,
+    );
+  }
   execFileSync(process.execPath, ["scripts/sync-version.mjs", testVersion], {
-    cwd: workspace,
+    cwd: fixture,
     stdio: "inherit",
   });
   const args = ["scripts/release-dry-run.mjs", testVersion];
   if (dist) args.push(dist);
-  execFileSync(process.execPath, args, { cwd: workspace, stdio: "inherit" });
+  execFileSync(process.execPath, args, { cwd: fixture, stdio: "inherit" });
   console.log(
-    `release invariants hold for ${plan.length} manifests at ${testVersion}` +
+    `release invariants hold for ${fixturePlan.length} manifests at ${testVersion}` +
       (dist ? " with goreleaser artifacts" : ""),
   );
 } finally {
-  for (const [path, content] of original) writeFileSync(path, content);
-  console.log("workspace manifests restored");
+  rmSync(fixture, { recursive: true, force: true });
+  console.log("test-owned release fixture removed");
 }

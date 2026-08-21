@@ -3,7 +3,7 @@
 // Native packages must be published before main packages because main packages
 // declare them as exact-version optional dependencies.
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,14 +27,16 @@ function readManifest(path) {
 
 function packageEntries(workspace, relative, kind) {
   const directory = join(workspace, relative);
-  return readdirSync(directory)
-    .filter((entry) => entry.startsWith("pi-"))
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
     .sort()
     .flatMap((dir) => {
       const path = join(directory, dir);
+      if (!existsSync(join(path, "package.json"))) return [];
       const manifest = readManifest(path);
-      // Keep private workspace helpers out of the public release inventory if
-      // one is ever placed under a pi-* directory.
+      // Private workspace helpers stay out of the public release inventory;
+      // every non-private package-shaped directory is publishable.
       if (manifest.private === true) return [];
       if (typeof manifest.name !== "string" || !manifest.name) {
         throw new Error(`package metadata at ${join(path, "package.json")} has no name`);

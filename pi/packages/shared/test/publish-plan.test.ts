@@ -11,6 +11,7 @@ import {
   packagePublishPlan,
   publishReleasePackages,
 } from "../../../scripts/publish-packages.mjs";
+import { artifactMatchesTool } from "../../../scripts/release-targets.mjs";
 
 const tmp = mkdtempSync(join(tmpdir(), "organon-publish-plan-"));
 
@@ -85,12 +86,27 @@ describe("release publish plan", () => {
   it("uses the actual release plan to publish every native package before any main package", () => {
     const plan = packagePublishPlan();
 
-    expect(plan).toHaveLength(16);
-    expect(plan.slice(0, 12).every((entry) => entry.kind === "native")).toBe(true);
-    expect(plan.slice(12).every((entry) => entry.kind === "main")).toBe(true);
+    const nativeCount = plan.filter((entry) => entry.kind === "native").length;
+    const mainCount = plan.filter((entry) => entry.kind === "main").length;
+    expect(plan.length).toBe(nativeCount + mainCount);
+    expect(plan.slice(0, nativeCount).every((entry) => entry.kind === "native")).toBe(true);
+    expect(plan.slice(nativeCount).every((entry) => entry.kind === "main")).toBe(true);
+    expect(plan.some((entry) => entry.name === "@tta-lab/pi-web-win32-x64")).toBe(true);
+    expect(plan.some((entry) => entry.name === "@tta-lab/dsh-web" && entry.kind === "main")).toBe(
+      true,
+    );
+    expect(
+      plan.filter((entry) => entry.kind === "native").some((entry) => entry.name.includes("dsh")),
+    ).toBe(false);
     expect(() => assertNativePackagesFirst([...plan].reverse())).toThrow(
       "native packages must be published before main packages",
     );
+  });
+
+  it("normalizes Windows executable artifact names", () => {
+    expect(artifactMatchesTool("web", "web")).toBe(true);
+    expect(artifactMatchesTool("web.exe", "web")).toBe(true);
+    expect(artifactMatchesTool("web.exe", "src")).toBe(false);
   });
 
   it("selects beta for prereleases and latest for stable versions", () => {
@@ -141,8 +157,8 @@ describe("release publish plan", () => {
       published: plan.slice(1).map((entry) => entry.name),
       skipped: [existing.name],
     });
-    expect(views).toHaveLength(16);
-    expect(publishes).toHaveLength(15);
+    expect(views).toHaveLength(plan.length);
+    expect(publishes).toHaveLength(plan.length - 1);
     expect(views[0]!.args).toEqual([
       "view",
       `${existing.name}@${existing.version}`,

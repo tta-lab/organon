@@ -27,12 +27,21 @@ export type FetchResult = {
   content: string;
 };
 
+export interface FetchOptions {
+  /** Test-owned or application-owned cache root; omitted uses the platform default. */
+  cacheDirectory?: string;
+  /** Test-owned or application-owned HTTP implementation; omitted uses global fetch. */
+  fetch?: typeof globalThis.fetch;
+}
+
 export async function fetchWebPage(
   input: FetchInput,
   callerSignal?: AbortSignal,
+  options?: FetchOptions,
 ): Promise<FetchResult> {
   const url = validateURL(input.url);
-  const content = await fetchCached(url, callerSignal);
+  const content = await fetchCached(url, callerSignal, options);
+  throwIfAborted(callerSignal);
   const rendered = renderMarkdown(
     content,
     input.tree ?? false,
@@ -43,43 +52,63 @@ export async function fetchWebPage(
   return { url, mode: rendered.mode, content: rendered.content };
 }
 
-async function fetchCached(url: string, callerSignal?: AbortSignal): Promise<string> {
-  const cache = new DailyCache(defaultCacheDir());
+async function fetchCached(
+  url: string,
+  callerSignal: AbortSignal | undefined,
+  options?: FetchOptions,
+): Promise<string> {
+  throwIfAborted(callerSignal);
+  const cache = new DailyCache(options?.cacheDirectory ?? defaultCacheDir());
   await cache.prepare();
+  throwIfAborted(callerSignal);
   const cached = await cache.read(url);
+  throwIfAborted(callerSignal);
   if (cached !== undefined) return cached;
 
-  const content = await fetchLocal(url, callerSignal);
-  await cache.write(url, content);
+  const content = await fetchLocal(url, callerSignal, options);
+  throwIfAborted(callerSignal);
+  await cache.write(url, content, callerSignal);
+  throwIfAborted(callerSignal);
   return content;
 }
 
-async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<string> {
+async function fetchLocal(
+  url: string,
+  callerSignal?: AbortSignal,
+  options?: FetchOptions,
+): Promise<string> {
+  throwIfAborted(callerSignal);
+  const fetcher = options?.fetch ?? globalThis.fetch;
   const request = createRequestSignal(callerSignal, REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    const response = await fetcher(url, {
       headers: { "User-Agent": WEB_FETCH_AGENT },
       redirect: "follow",
       signal: request.signal,
     });
+    throwIfAborted(callerSignal);
     if (response.status >= 400) {
       throw new Error(`HTTP ${response.status}`);
     }
 
     const body = await readBody(response);
+    throwIfAborted(callerSignal);
     const contentType = mediaType(response.headers.get("content-type"));
     if (isBinaryContentType(contentType) || isBinaryBody(body)) {
       throw binaryFetchError(url, response.headers.get("content-type") ?? "");
     }
 
     if (contentType !== "" && contentType !== "text/html") {
-      return truncateContent(new TextDecoder().decode(body));
+      const content = truncateContent(new TextDecoder().decode(body));
+      throwIfAborted(callerSignal);
+      return content;
     }
 
     try {
       const html = new TextDecoder().decode(body);
       const { document } = parseHTML(html);
       const parsed = await Defuddle(document, url, { markdown: true, useAsync: false });
+      throwIfAborted(callerSignal);
       const content = parsed.content;
       if (!content || content.trim() === "") {
         throw new Error("no content could be extracted");
@@ -97,6 +126,10 @@ async function fetchLocal(url: string, callerSignal?: AbortSignal): Promise<stri
   } finally {
     request.cleanup();
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error("Operation aborted");
 }
 
 function validateURL(rawURL: string): string {
@@ -194,7 +227,13 @@ function errorMessage(error: unknown): string {
 
 function defaultCacheDir(): string {
   const home = process.env.HOME?.trim() || homedir();
-  return join(home, ".cache", "organon", "scrapes");
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA?.trim();
+    const root = localAppData || join(home, "AppData", "Local");
+    return join(root, "organon", "scrapes");
+  }
+  const root = process.env.XDG_CACHE_HOME?.trim() || join(home, ".cache");
+  return join(root, "organon", "scrapes");
 }
 
 class DailyCache {
@@ -204,7 +243,7 @@ class DailyCache {
 
   async prepare(): Promise<void> {
     try {
-      await mkdir(this.directory, { recursive: true, mode: 0o755 });
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
       this.enabled = true;
     } catch {
       this.enabled = false;
@@ -220,52 +259,29 @@ class DailyCache {
     }
   }
 
-  async write(url: string, content: string): Promise<void> {
+  async write(url: string, content: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     if (!this.enabled) return;
     try {
+      throwIfAborted(signal);
       await writeFile(this.path(url), content, { encoding: "utf8", mode: 0o644 });
     } catch {
+      if (signal?.aborted) throw new Error("Operation aborted");
       // Cache failures must not make a successful fetch fail.
     }
   }
 
   private path(url: string): string {
-    const now = new Date();
-    const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
-      .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
-      .join("-");
-    return join(this.directory, `${sanitizeURL(url)}__${date}.md`);
+    return join(this.directory, cacheFileName(url, new Date()));
   }
 }
 
-function sanitizeURL(rawURL: string): string {
-  let parsed: URL | undefined;
-  try {
-    parsed = new URL(rawURL);
-  } catch {
-    return rawURL
-      .replaceAll("://", "___")
-      .replaceAll("/", "_")
-      .replaceAll("?", "_")
-      .replaceAll("=", "_")
-      .replaceAll("&", "_")
-      .replaceAll("..", "__");
-  }
-
-  let base = rawURL.replaceAll("://", "___");
-  if (parsed.search) {
-    base = base.split("?", 1)[0]!;
-  }
-  base = base.replaceAll("/", "_").replace(/_$/, "").replaceAll("..", "__");
-  if (parsed.search) {
-    const queryHash = createHash("sha256").update(parsed.search.slice(1)).digest("hex").slice(0, 8);
-    base += `_q${queryHash}`;
-  }
-  if (base.length > 200) {
-    const hash = createHash("sha256").update(base).digest("hex").slice(0, 8);
-    base = base.slice(0, 191) + `_${hash}`;
-  }
-  return base;
+function cacheFileName(url: string, date: Date): string {
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+    .join("-");
+  const key = createHash("sha256").update(url).digest("hex");
+  return `${key}__${day}.md`;
 }
 
 function createRequestSignal(callerSignal: AbortSignal | undefined, timeoutMs: number) {

@@ -25,6 +25,7 @@ The package is independently installable and includes the matching native
 - macOS (Darwin) ARM64
 - Linux x64 (amd64)
 - Linux ARM64
+- Windows x64
 
 Unsupported hosts fail at startup instead of downloading or compiling a binary.
 
