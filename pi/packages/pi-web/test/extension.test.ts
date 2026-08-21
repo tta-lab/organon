@@ -137,7 +137,7 @@ describe("pi-web extension", () => {
         provider: string;
         results: Array<{ title: string; position: number }>;
       };
-      expect(details.provider).toBe("DuckDuckGo");
+      expect(details.provider).toBe("Brave");
       expect(details.results.map((item) => item.title)).toEqual([
         "Result 1 for slow",
         "Result 1 for fast",

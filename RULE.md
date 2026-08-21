@@ -39,7 +39,7 @@ web fetch <url> --full            # full content, skip auto-tree
 web fetch <url> --tree-threshold 8000  # custom auto-tree threshold
 ```
 
-Search backends: `EXA_API_KEY` → Exa, `BRAVE_API_KEY` → Brave, fallback → DuckDuckGo. (Empty key causes error — unset entirely for the next backend.)
+Search backends: `EXA_API_KEY` → Exa, then `BRAVE_API_KEY` → Brave. Search fails when neither is configured; an empty key causes an error.
 
 Fetch backend: `BROWSER_GATEWAY_URL` → browser gateway (no cache). Otherwise defuddle CLI with daily cache at `~/.cache/organon/scrapes/`.
 

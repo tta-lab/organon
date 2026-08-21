@@ -31,8 +31,6 @@ function credentialFor(
       return { ref: credentialRef(EXA_CREDENTIAL_REF), env: "EXA_API_KEY" };
     case "brave":
       return { ref: credentialRef(BRAVE_CREDENTIAL_REF), env: "BRAVE_API_KEY" };
-    case "duckduckgo":
-      return undefined;
   }
 }
 

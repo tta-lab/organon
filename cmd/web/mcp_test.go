@@ -273,13 +273,13 @@ func TestWebMCPCommandPassesProvider(t *testing.T) {
 		gotProvider = provider
 		return nil, wantErr
 	})
-	cmd.SetArgs([]string{"--provider", "duckduckgo"})
+	cmd.SetArgs([]string{"--provider", "brave"})
 
 	if err := cmd.Execute(); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
-	if gotProvider != "duckduckgo" {
-		t.Fatalf("provider = %q, want duckduckgo", gotProvider)
+	if gotProvider != "brave" {
+		t.Fatalf("provider = %q, want brave", gotProvider)
 	}
 }
 

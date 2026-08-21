@@ -14,7 +14,7 @@ batched `web_search` through the Organon provider seam.
 
 Provider selection is explicit and persists in the `organon-web` settings
 namespace. Exa and Brave API keys use namespaced write-only DSH credentials;
-settings only expose configured/source/writable metadata. DuckDuckGo needs no key.
+settings expose only configured/source/writable metadata.
 
 The published package is a dual host/browser bundle. Its host and client artifacts,
 profile patch, and exact DSH `0.1.0-rc.8` peer contract are included in the npm

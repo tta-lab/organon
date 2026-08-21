@@ -99,30 +99,6 @@ describe("Organon DSH search provider", () => {
     expect(childEnvironment?.EXA_API_KEY).toBe("inherited-value");
   });
 
-  it("does not resolve a DuckDuckGo credential and forwards cancellation", async () => {
-    let receivedSignal: AbortSignal | undefined;
-    let credentialCalls = 0;
-    const provider = createOrganonSearchProvider({
-      binaryPath: "web",
-      getProvider: () => "duckduckgo",
-      credentials: {
-        resolve: async () => {
-          credentialCalls++;
-          return undefined;
-        },
-      },
-      run: async (_binary, options) => {
-        receivedSignal = options.signal;
-        return { stdout: resultJSON, stderr: "", exitCode: 0, killed: false };
-      },
-    });
-    const controller = new AbortController();
-
-    await provider.search({ query: "cancel", maxResults: 1 }, controller.signal);
-    expect(receivedSignal).toBe(controller.signal);
-    expect(credentialCalls).toBe(0);
-  });
-
   it("rejects malformed JSON and invalid source fields before returning an rc.8 result", async () => {
     const malformed = createOrganonSearchProvider({
       binaryPath: "web",
