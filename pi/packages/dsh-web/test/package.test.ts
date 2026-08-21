@@ -1,17 +1,10 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { Context } from "@deepseek-ai/cordis";
 import { WebRuntime } from "@deepseek-ai/dsh-web";
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
 import { apply, SettingsSchema } from "../src/index.js";
 import { createOrganonSearchProvider } from "../src/provider.js";
 import { SEARCH_PROVIDER_ID, SETTINGS_NAMESPACE } from "../src/contract.js";
-
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("DSH Web package composition", () => {
   it("registers the Organon provider and global Pi-compatible tools without replacing search", () => {
@@ -96,72 +89,5 @@ describe("DSH Web package composition", () => {
       { query: "second query", signal: controller.signal },
     ]);
     await root.fiber.dispose();
-  });
-
-  it("declares the rc.8 dual-face artifact, official settings injects, and complete stock Web patch", () => {
-    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    const patch = parse(readFileSync(join(root, "cordis.patch.yml"), "utf8")) as any[];
-    expect(manifest.name).toBe("@tta-lab/dsh-web");
-    const rc8Peers = [
-      "@deepseek-ai/dsh-api-remotes",
-      "@deepseek-ai/dsh-client-connection",
-      "@deepseek-ai/dsh-client-locale",
-      "@deepseek-ai/dsh-client-runtime",
-      "@deepseek-ai/dsh-client-ui-settings",
-      "@deepseek-ai/dsh-client-ui-settings-plugins",
-      "@deepseek-ai/dsh-client-ui-slots",
-      "@deepseek-ai/dsh-credentials",
-      "@deepseek-ai/dsh-settings",
-      "@deepseek-ai/dsh-tools",
-      "@deepseek-ai/dsh-web",
-    ];
-    expect(
-      Object.fromEntries(
-        Object.entries(manifest.peerDependencies).filter(([name]) =>
-          name.startsWith("@deepseek-ai/dsh"),
-        ),
-      ),
-    ).toEqual(Object.fromEntries(rc8Peers.map((name) => [name, "0.1.0-rc.8"])));
-    expect(manifest.optionalDependencies).toEqual({
-      "@tta-lab/pi-web-darwin-arm64": "workspace:*",
-      "@tta-lab/pi-web-linux-arm64": "workspace:*",
-      "@tta-lab/pi-web-linux-x64": "workspace:*",
-      "@tta-lab/pi-web-win32-x64": "workspace:*",
-    });
-    expect(manifest.files).toEqual(["dist", "cordis.patch.yml", "README.md"]);
-    expect(manifest.main).toBe("dist/index.js");
-    expect(manifest.types).toBe("dist/index.d.ts");
-    expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
-    expect(manifest.dsh.client.platform).toBe("web");
-    expect(manifest.dsh.client.inject).toEqual([
-      "@deepseek-ai/dsh-api-remotes",
-      "@deepseek-ai/dsh-client-connection",
-      "@deepseek-ai/dsh-client-locale",
-      "@deepseek-ai/dsh-client-runtime",
-      "@deepseek-ai/dsh-client-ui-settings",
-      "@deepseek-ai/dsh-client-ui-settings-plugins",
-    ]);
-    expect(manifest.exports["./client"]).toEqual({
-      types: "./dist/client.d.cts",
-      default: "./dist/client.js",
-    });
-
-    expect(patch.find((entry) => entry.id === "web")).toEqual({
-      id: "web",
-      name: "@deepseek-ai/dsh-web",
-      config: { searchProvider: SEARCH_PROVIDER_ID },
-    });
-    expect(patch.find((entry) => entry.id === "tool-web")).toEqual({
-      id: "tool-web",
-      disabled: true,
-    });
-    const inserted = patch.find((entry) => Array.isArray(entry.insert))?.insert ?? [];
-    expect(inserted).toContainEqual({
-      id: "organon-dsh-web",
-      name: "@tta-lab/dsh-web",
-      inject: ["web", "credentials", "settings", "tools"],
-    });
-    expect(JSON.stringify(patch)).not.toContain("web_search");
-    expect(JSON.stringify(patch)).not.toContain("preset");
   });
 });

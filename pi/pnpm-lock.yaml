@@ -205,9 +205,6 @@ importers:
       '@deepseek-ai/cordis':
         specifier: 4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@deepseek-ai/dsh':
-        specifier: 0.1.0-rc.8
-        version: 0.1.0-rc.8(9611893d5cc72d36150f4c6ce126d0e6)
       '@deepseek-ai/dsh-api-remotes':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(595254fcd6f0e2eefb415cb6827720e3)
@@ -217,9 +214,6 @@ importers:
       '@deepseek-ai/dsh-client-locale':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(1a3d8a91c4f4fa0e0397786bec3eddce)
-      '@deepseek-ai/dsh-client-modules':
-        specifier: 0.1.0-rc.8
-        version: 0.1.0-rc.8(@deepseek-ai/cordis-plugin-loader@1.0.2)(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-host-webserver@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-client-runtime':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(c30c11caf28a5634279e6e808a6e5391)
