@@ -100,6 +100,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "pnpm run build",
     "test": "vitest run --root ../.. packages/dsh-web/test"
   }
 }
