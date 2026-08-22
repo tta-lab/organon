@@ -1,6 +1,7 @@
 package og
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -269,7 +270,7 @@ func TestCleanupRevalidatesRemoteAfterBranchSwitch(t *testing.T) {
 	gitRun(t, repo, "config", "--add", "includeIf.onbranch:main.path", conditional)
 	broker := &recordingBroker{token: "scoped-token"}
 	service := NewService(broker)
-	ctx, err := service.resolveRepoContextFor(repo)
+	ctx, err := service.resolveRepoContextFor(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("resolveRepoContextFor: %v", err)
 	}

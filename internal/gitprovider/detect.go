@@ -254,9 +254,9 @@ func detectProviderFromHost(host string) ProviderType {
 func NewProviderByNameWithToken(name, githubToken, host string) (Provider, error) {
 	switch ProviderType(name) {
 	case ProviderForgejo:
-		return NewForgejoProvider(host)
+		return NewForgejoProvider(context.Background(), host)
 	case ProviderGitHub:
-		return NewGitHubProviderWithToken(githubToken)
+		return NewGitHubProviderWithToken(context.Background(), githubToken)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", name)
 	}
@@ -267,9 +267,9 @@ func NewProviderByNameWithToken(name, githubToken, host string) (Provider, error
 func NewProviderWithToken(info *RepoInfo, githubToken string) (Provider, error) {
 	switch info.Provider {
 	case ProviderGitHub:
-		return NewGitHubProviderWithToken(githubToken)
+		return NewGitHubProviderWithToken(context.Background(), githubToken)
 	case ProviderForgejo:
-		return NewForgejoProvider(info.baseWebURL())
+		return NewForgejoProvider(context.Background(), info.baseWebURL())
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", info.Provider)
 	}

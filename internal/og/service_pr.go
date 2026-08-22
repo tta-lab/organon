@@ -1,6 +1,7 @@
 package og
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -229,19 +230,14 @@ func (s Service) PRLog(req Request) (Response, error) {
 }
 
 func (s Service) resolvePRContextForRequest(req Request) (*repoContext, error) {
-	ctx, err := s.resolvePRContext(req.WorkDir, req.Index)
-	if err != nil {
-		return nil, err
-	}
-	bindRequestContext(ctx, req)
-	return ctx, nil
+	return s.resolvePRContext(requestContext(req), req.WorkDir, req.Index)
 }
 
-func (s Service) resolvePRContext(workDir string, index int64) (*repoContext, error) {
+func (s Service) resolvePRContext(ctx context.Context, workDir string, index int64) (*repoContext, error) {
 	if index > 0 {
-		return s.resolveRemoteRepoContextFor(workDir)
+		return s.resolveRemoteRepoContextFor(ctx, workDir)
 	}
-	return s.resolveRepoContextFor(workDir)
+	return s.resolveRepoContextFor(ctx, workDir)
 }
 
 func getRequestedPR(ctx *repoContext, index int64) (*PullRequest, error) {

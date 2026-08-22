@@ -13,10 +13,7 @@ import (
 	"github.com/google/go-github/v88/github"
 )
 
-const (
-	githubHTTPTimeout = 30 * time.Second
-	tokenRefreshLead  = time.Minute
-)
+const tokenRefreshLead = time.Minute
 
 // Purpose identifies the minimum permission set needed by an operation.
 type Purpose string
@@ -106,7 +103,6 @@ func NewBroker(cfg Config, keySource KeySource, options ...BrokerOption) (Creden
 	appTransport.BaseURL = strings.TrimSuffix(opts.baseURL, "/")
 	client, err := github.NewClient(
 		github.WithTransport(appTransport),
-		github.WithTimeout(githubHTTPTimeout),
 		github.WithURLs(&opts.baseURL, &opts.baseURL),
 	)
 	if err != nil {

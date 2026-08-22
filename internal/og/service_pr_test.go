@@ -242,7 +242,7 @@ func TestFindPRUsesCommitLookupForGitHub(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	ctx, err := resolveRepoContextFor(repo)
+	ctx, err := resolveRepoContextFor(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("resolveRepoContextFor: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMisses(t *testing.T)
 	})
 	defer restoreProvider()
 
-	ctx, err := resolveRepoContextFor(repo)
+	ctx, err := resolveRepoContextFor(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("resolveRepoContextFor: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMismatches(t *testin
 	})
 	defer restoreProvider()
 
-	ctx, err := resolveRepoContextFor(repo)
+	ctx, err := resolveRepoContextFor(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("resolveRepoContextFor: %v", err)
 	}

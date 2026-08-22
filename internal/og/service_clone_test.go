@@ -692,7 +692,7 @@ func TestGitCloneAllowsSymlinkedParent(t *testing.T) {
 	if resp.Clone == nil || !resp.Clone.Registered {
 		t.Fatalf("clone result = %+v", resp.Clone)
 	}
-	ctx, err := service.resolveRemoteRepoContextFor(resp.Clone.Path)
+	ctx, err := service.resolveRemoteRepoContextFor(context.Background(), resp.Clone.Path)
 	if err != nil {
 		t.Fatalf("resolve cloned project through symlink parent: %v", err)
 	}

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
@@ -51,7 +50,7 @@ func (s Service) GitClone(req Request) (Response, error) {
 	}
 
 	result := cloneResultFor(source, registered, !req.Reference)
-	alreadyExists, err := s.validateExistingClone(source)
+	alreadyExists, err := s.validateExistingClone(ctx, source)
 	if err != nil {
 		return Response{}, err
 	}
@@ -184,7 +183,7 @@ func (s Service) cloneNew(
 	}); err != nil {
 		return Response{}, err
 	}
-	if err := validateClonedRepository(temp, source); err != nil {
+	if err := validateClonedRepository(ctx, temp, source); err != nil {
 		return Response{}, err
 	}
 	if _, err := os.Lstat(source.destination); err == nil {
@@ -292,7 +291,7 @@ func ensureCloneParent(destination string) error {
 	return nil
 }
 
-func (s Service) validateExistingClone(source cloneSource) (bool, error) {
+func (s Service) validateExistingClone(ctx context.Context, source cloneSource) (bool, error) {
 	info, err := os.Lstat(source.destination)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -303,14 +302,14 @@ func (s Service) validateExistingClone(source cloneSource) (bool, error) {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return false, fmt.Errorf("clone destination %q is not a safe directory", source.destination)
 	}
-	if err := validateClonedRepository(source.destination, source); err != nil {
+	if err := validateClonedRepository(ctx, source.destination, source); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func validateClonedRepository(directory string, source cloneSource) error {
-	root, err := gitOutput(directory, "rev-parse", "--show-toplevel")
+func validateClonedRepository(ctx context.Context, directory string, source cloneSource) error {
+	root, err := gitOutput(ctx, directory, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("validate cloned repository: %w", err)
 	}
@@ -319,7 +318,7 @@ func validateClonedRepository(directory string, source cloneSource) error {
 	if rootErr != nil || directoryErr != nil || filepath.Clean(realRoot) != filepath.Clean(realDirectory) {
 		return fmt.Errorf("cloned repository top-level %q does not match destination %q", root, directory)
 	}
-	remote, err := controlledGitOutput(directory, "remote", "get-url", remoteOrigin)
+	remote, err := controlledGitOutput(ctx, directory, "remote", "get-url", remoteOrigin)
 	if err != nil {
 		return fmt.Errorf("validate cloned origin: %w", err)
 	}
@@ -346,8 +345,6 @@ func ogconfigForSource(source cloneSource) ogconfig.Config {
 }
 
 func runGitClone(ctx context.Context, invocation cloneInvocation) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
 	cmd := exec.CommandContext(
 		ctx, "git", "clone", "--origin", remoteOrigin, "--", invocation.Remote, invocation.Destination,
 	)

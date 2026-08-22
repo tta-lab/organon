@@ -131,8 +131,8 @@ func (s Service) GitTag(req Request) (Response, error) {
 	if !semverTagRe.MatchString(tag) {
 		return Response{}, fmt.Errorf("invalid semver tag %q", tag)
 	}
-	if !localTagExists(ctx.WorkDir, tag) {
-		if err := runGit(ctx.WorkDir, "tag", "--", tag); err != nil {
+	if !localTagExists(operationContext(ctx), ctx.WorkDir, tag) {
+		if err := runGit(operationContext(ctx), ctx.WorkDir, "tag", "--", tag); err != nil {
 			return Response{}, err
 		}
 	}

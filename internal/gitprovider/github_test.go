@@ -1,7 +1,9 @@
 package gitprovider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,36 @@ import (
 
 	"github.com/google/go-github/v88/github"
 )
+
+func TestContextTransportHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := newContextHTTPClient(ctx, roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("transport must not run after cancellation")
+		return nil, nil
+	}))
+	req, err := http.NewRequest(http.MethodGet, "https://example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Do(req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("client error = %v, want context cancellation", err)
+	}
+}
+
+func TestGitHubProviderHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	provider, err := NewGitHubProviderWithToken(ctx, "token")
+	if err != nil {
+		t.Fatalf("NewGitHubProviderWithToken: %v", err)
+	}
+
+	if _, err := provider.GetPR("o", "r", 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetPR error = %v, want context cancellation", err)
+	}
+}
 
 func TestGitHubProviderEditPRSendsEmptyBody(t *testing.T) {
 	var got map[string]any
@@ -42,7 +74,7 @@ const testGitHubBaseBranch = "main"
 
 func TestNewGitHubProviderWithTokenDoesNotUseAmbientToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ambient-token")
-	_, err := NewGitHubProviderWithToken("")
+	_, err := NewGitHubProviderWithToken(context.Background(), "")
 	if err == nil || !strings.Contains(err.Error(), "explicit") {
 		t.Fatalf("NewGitHubProviderWithToken error = %v, want explicit token error", err)
 	}
@@ -152,7 +184,7 @@ func TestFetchLogTailReadsPastFirst64KiB(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	got := fetchLogTail(server.URL, 2)
+	got := fetchLogTail(context.Background(), server.URL, 2)
 	want := "actual failure\nexit status 1"
 	if got != want {
 		t.Fatalf("fetchLogTail() = %q, want %q", got, want)

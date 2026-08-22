@@ -2,6 +2,7 @@ package gitprovider
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -81,14 +82,43 @@ type Provider interface {
 	GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error)
 }
 
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+type contextTransport struct {
+	context context.Context
+	base    http.RoundTripper
+}
+
+func (t contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx := contextOrBackground(t.context)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return t.base.RoundTrip(req.Clone(ctx))
+}
+
+func newContextHTTPClient(ctx context.Context, transport http.RoundTripper) *http.Client {
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	return &http.Client{Transport: contextTransport{context: contextOrBackground(ctx), base: transport}}
+}
 
 func isFailedStatus(s string) bool {
 	return s == StateFailure || s == StateError
 }
 
-func fetchLogTail(url string, lines int) string {
-	resp, err := httpClient.Get(url) //nolint:gosec
+func fetchLogTail(ctx context.Context, url string, lines int) string {
+	req, err := http.NewRequestWithContext(contextOrBackground(ctx), http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec
 	if err != nil {
 		return ""
 	}

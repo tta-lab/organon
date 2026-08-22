@@ -1,6 +1,7 @@
 package gitprovider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,7 @@ func TestForgejoProviderEditPRSendsEmptyBody(t *testing.T) {
 		_, _ = w.Write([]byte(`{"index":7,"title":"new title","body":"","state":"open"}`))
 	}))
 	t.Cleanup(server.Close)
-	provider, err := NewForgejoProviderWithToken(server.URL, "token")
+	provider, err := NewForgejoProviderWithToken(context.Background(), server.URL, "token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestForgejoProviderEditPRSendsEmptyBody(t *testing.T) {
 }
 
 func TestNewForgejoProvider_EmptyHost(t *testing.T) {
-	_, err := NewForgejoProvider("")
+	_, err := NewForgejoProvider(context.Background(), "")
 	if err == nil {
 		t.Error("expected error for empty host")
 	}
@@ -47,7 +48,7 @@ func TestNewForgejoProvider_MissingToken(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "")
 	t.Setenv("FORGEJO_ACCESS_TOKEN", "")
 
-	_, err := NewForgejoProvider("git.example.com")
+	_, err := NewForgejoProvider(context.Background(), "git.example.com")
 	if err == nil {
 		t.Error("expected error for missing token")
 	}
