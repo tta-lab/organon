@@ -186,6 +186,6 @@ func newWebMCPCmdWithFactory(factory serviceFactory) *cobra.Command {
 			return newWebMCPServer(service).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
-	cmd.Flags().String("provider", "", "Search provider: exa, brave, or duckduckgo")
+	cmd.Flags().String("provider", "", "Search provider: exa or brave")
 	return cmd
 }

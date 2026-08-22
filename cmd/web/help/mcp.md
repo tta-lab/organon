@@ -5,8 +5,8 @@ Select the provider used by every search call with `--provider`:
 
   web mcp --provider brave
 
-Supported providers are `exa`, `brave`, and `duckduckgo`. Without the flag,
-search backends use the `EXA_API_KEY` → `BRAVE_API_KEY` → DuckDuckGo fallback.
+Supported providers are `exa` and `brave`. Without the flag, search backends use
+`EXA_API_KEY` → `BRAVE_API_KEY`; search fails when neither key is configured.
 The server loads the ttal environment once at startup; restart it after changing
 environment variables. Every tool is read-only but performs open-world network
 access.

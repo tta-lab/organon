@@ -19,7 +19,6 @@ require (
 	github.com/tiktoken-go/tokenizer v0.8.1
 	github.com/yuin/goldmark v1.8.5
 	go.woodpecker-ci.org/woodpecker/v3 v3.17.0
-	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0

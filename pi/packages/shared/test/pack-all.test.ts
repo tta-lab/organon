@@ -240,7 +240,7 @@ describe("all native package manifests", () => {
         tool: "web",
         publicTool: "web_search",
         action: { queries: ["tree-sitter"] },
-        assert: (result: any) => expect(result.details.provider).toBe("DuckDuckGo"),
+        assert: (result: any) => expect(result.details.provider).toBe("Brave"),
       },
       {
         tool: "project",

@@ -273,17 +273,17 @@ func TestWebMCPCommandPassesProvider(t *testing.T) {
 		gotProvider = provider
 		return nil, wantErr
 	})
-	cmd.SetArgs([]string{"--provider", "duckduckgo"})
+	cmd.SetArgs([]string{"--provider", "brave"})
 
 	if err := cmd.Execute(); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
-	if gotProvider != "duckduckgo" {
-		t.Fatalf("provider = %q, want duckduckgo", gotProvider)
+	if gotProvider != "brave" {
+		t.Fatalf("provider = %q, want brave", gotProvider)
 	}
 }
 
-func TestWebMCPCommandLeavesProviderEmptyForFallback(t *testing.T) {
+func TestWebMCPCommandLeavesProviderEmptyForAutomaticSelection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	configDir := filepath.Join(home, ".config", "ttal")
@@ -305,7 +305,7 @@ func TestWebMCPCommandLeavesProviderEmptyForFallback(t *testing.T) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 	if gotProvider != "" {
-		t.Fatalf("provider = %q, want empty fallback selection", gotProvider)
+		t.Fatalf("provider = %q, want empty automatic selection", gotProvider)
 	}
 }
 

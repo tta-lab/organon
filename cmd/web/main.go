@@ -119,7 +119,7 @@ func newSearchCmdWithFactory(factory serviceFactory) *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
-	cmd.Flags().String("provider", "", "Search provider: exa, brave, or duckduckgo")
+	cmd.Flags().String("provider", "", "Search provider: exa or brave")
 	return cmd
 }
 

@@ -116,7 +116,7 @@ describe("DSH rc.8 package contract", () => {
     const registeredTools: any[] = [];
     packedHost.apply({
       settings: {
-        register: () => ({ get: () => ({ provider: "duckduckgo" }) }),
+        register: () => ({ get: () => ({ provider: "exa" }) }),
       },
       credentials: { resolve: async () => undefined },
       web: { registerSearchProvider: (provider: unknown) => (registeredProvider = provider) },

@@ -29,11 +29,10 @@ type Response struct {
 const (
 	providerExa   = "Exa"
 	providerBrave = "Brave"
-	providerDDG   = "DuckDuckGo"
 )
 
 // Search performs a web search using the best available backend.
-// Backend selection: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, otherwise → DuckDuckGo Lite.
+// Backend selection: EXA_API_KEY → Exa, then BRAVE_API_KEY → Brave.
 func Search(ctx context.Context, query string) (string, error) {
 	return SearchWithConfig(ctx, query, Config{})
 }
@@ -88,9 +87,8 @@ func searchResultsWithProvider(
 }
 
 // resolveSearcher returns the best available search backend.
-// Priority: EXA_API_KEY → Exa, BRAVE_API_KEY → Brave, fallback → DDG.
-// Returns an error if a key is set but empty — this prevents silently
-// falling back when a user has misconfigured their API key.
+// Priority: EXA_API_KEY → Exa, then BRAVE_API_KEY → Brave.
+// Returns an error if a key is set but empty or neither provider is configured.
 func resolveSearcher() (WebSearcher, error) {
 	_, searcher, err := resolveSearchProvider()
 	return searcher, err
@@ -99,7 +97,7 @@ func resolveSearcher() (WebSearcher, error) {
 func resolveSearchProvider() (string, WebSearcher, error) {
 	exaKey, exaSet := os.LookupEnv("EXA_API_KEY")
 	if exaSet && exaKey == "" {
-		return "", nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave/DuckDuckGo")
+		return "", nil, fmt.Errorf("EXA_API_KEY is set but empty; provide a valid key or unset it to use Brave")
 	}
 	if exaKey != "" {
 		return providerExa, NewExaSearcher(exaKey), nil
@@ -107,13 +105,13 @@ func resolveSearchProvider() (string, WebSearcher, error) {
 
 	braveKey, braveSet := os.LookupEnv("BRAVE_API_KEY")
 	if braveSet && braveKey == "" {
-		return "", nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it to use DuckDuckGo")
+		return "", nil, fmt.Errorf("BRAVE_API_KEY is set but empty; provide a valid key or unset it")
 	}
 	if braveKey != "" {
 		return providerBrave, NewBraveSearcher(braveKey), nil
 	}
 
-	return providerDDG, NewDDGSearcher(), nil
+	return "", nil, fmt.Errorf("web search requires EXA_API_KEY or BRAVE_API_KEY")
 }
 
 func resolveConfiguredSearchProvider(configured string) (string, WebSearcher, error) {
@@ -135,8 +133,6 @@ func resolveConfiguredSearchProvider(configured string) (string, WebSearcher, er
 			return "", nil, fmt.Errorf("BRAVE_API_KEY is required when --provider brave is selected")
 		}
 		return providerBrave, NewBraveSearcher(key), nil
-	case "duckduckgo":
-		return providerDDG, NewDDGSearcher(), nil
 	default:
 		return "", nil, fmt.Errorf("unsupported search provider %q", configured)
 	}

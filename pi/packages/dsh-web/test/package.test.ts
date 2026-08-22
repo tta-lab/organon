@@ -34,7 +34,7 @@ describe("DSH Web package composition", () => {
 
     apply(ctx as any);
     expect(registeredNamespace).toBe(SETTINGS_NAMESPACE);
-    expect(registeredBase).toEqual({ provider: "duckduckgo" });
+    expect(registeredBase).toEqual({ provider: "exa" });
     expect(registered.id).toBe(SEARCH_PROVIDER_ID);
     expect(registered.available()).toBe(true);
     expect(registeredTools.map((definition) => definition.name)).toEqual([
@@ -54,13 +54,13 @@ describe("DSH Web package composition", () => {
     await root.plugin(WebRuntime, { searchProvider: SEARCH_PROVIDER_ID });
     const provider = createOrganonSearchProvider({
       binaryPath: "test-owned-web",
-      getProvider: () => "duckduckgo",
+      getProvider: () => "exa",
       credentials: { resolve: async () => undefined },
       run: async (_binary, options) => {
         const marker = options.args.indexOf("--");
         calls.push({ query: options.args[marker + 1] ?? "", signal: options.signal });
         return {
-          stdout: JSON.stringify({ provider: "DuckDuckGo", results: [] }),
+          stdout: JSON.stringify({ provider: "Exa", results: [] }),
           stderr: "",
           exitCode: 0,
           killed: false,

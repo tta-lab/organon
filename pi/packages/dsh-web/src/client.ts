@@ -129,9 +129,7 @@ function SettingsCard({
     };
   }, [api, credentialRevision]);
 
-  const provider = isSearchProvider(snapshot.value?.provider)
-    ? snapshot.value.provider
-    : "duckduckgo";
+  const provider = isSearchProvider(snapshot.value?.provider) ? snapshot.value.provider : "exa";
   const saveProvider = async (next: SearchProviderName) => {
     setError(undefined);
     try {
@@ -169,7 +167,7 @@ function SettingsCard({
     createElement(
       "p",
       null,
-      "Choose the search provider explicitly. DuckDuckGo does not require a key.",
+      "Choose the search provider explicitly. Both providers require an API key.",
     ),
     createElement(
       "label",

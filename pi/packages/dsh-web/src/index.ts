@@ -13,12 +13,12 @@ export const name = "organon-dsh-web";
 export const inject = ["web", "credentials", "settings", "tools"] as const;
 
 export const SettingsSchema = z.object({
-  provider: z.union(PROVIDERS).default("duckduckgo"),
+  provider: z.union(PROVIDERS).default("exa"),
 });
 
 export function apply(ctx: Context): void {
   const settings = ctx.settings.register(settingsNamespace(SETTINGS_NAMESPACE), SettingsSchema, {
-    base: { provider: "duckduckgo" },
+    base: { provider: "exa" },
     applies: "live",
   });
   const binaryPath = resolveBinaryPath("web", { require: createRequire(import.meta.url) });

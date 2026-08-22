@@ -100,7 +100,7 @@ switch (cmd) {
           position: 2,
         });
       }
-      process.stdout.write(JSON.stringify({ provider: "DuckDuckGo", results }) + "\n");
+      process.stdout.write(JSON.stringify({ provider: "Brave", results }) + "\n");
     };
     const barrierPath = process.env.PI_WEB_TEST_SEARCH_BARRIER;
     if (barrierPath) waitForSearchPeers(barrierPath, query, finish);
