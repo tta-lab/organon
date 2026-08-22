@@ -1,6 +1,7 @@
 package gitprovider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,9 +11,10 @@ import (
 
 type ForgejoProvider struct {
 	client *forgejo_sdk.Client
+	ctx    context.Context
 }
 
-func NewForgejoProvider(host string) (Provider, error) {
+func NewForgejoProvider(ctx context.Context, host string) (Provider, error) {
 	token := os.Getenv("FORGEJO_TOKEN")
 	if token == "" {
 		token = os.Getenv("FORGEJO_ACCESS_TOKEN")
@@ -24,10 +26,10 @@ func NewForgejoProvider(host string) (Provider, error) {
 		return nil, fmt.Errorf("FORGEJO_TOKEN, FORGEJO_ACCESS_TOKEN, or GITEA_TOKEN environment variable is required")
 	}
 
-	return NewForgejoProviderWithToken(host, token)
+	return NewForgejoProviderWithToken(ctx, host, token)
 }
 
-func NewForgejoProviderWithToken(host, token string) (Provider, error) {
+func NewForgejoProviderWithToken(ctx context.Context, host, token string) (Provider, error) {
 	if host == "" {
 		return nil, fmt.Errorf("host is required for Forgejo provider")
 	}
@@ -40,12 +42,16 @@ func NewForgejoProviderWithToken(host, token string) (Provider, error) {
 		url = "https://" + host
 	}
 
-	client, err := forgejo_sdk.NewClient(url, forgejo_sdk.SetToken(token))
+	client, err := forgejo_sdk.NewClient(
+		url,
+		forgejo_sdk.SetToken(token),
+		forgejo_sdk.SetHTTPClient(newContextHTTPClient(ctx, nil)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Forgejo client: %w", err)
 	}
 
-	return &ForgejoProvider{client: client}, nil
+	return &ForgejoProvider{client: client, ctx: contextOrBackground(ctx)}, nil
 }
 
 func (p *ForgejoProvider) Name() string { return "forgejo" }
@@ -165,7 +171,7 @@ func (p *ForgejoProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedS
 // Note: this method requires WOODPECKER_URL and WOODPECKER_TOKEN to be set
 // independently of the Forgejo credentials; Woodpecker is a separate service.
 func (p *ForgejoProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error) {
-	wc, err := NewWoodpeckerClient()
+	wc, err := NewWoodpeckerClient(p.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("woodpecker client: %w (set WOODPECKER_URL and WOODPECKER_TOKEN)", err)
 	}

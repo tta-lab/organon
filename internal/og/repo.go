@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/githubapp"
@@ -55,41 +54,41 @@ type repoContext struct {
 	githubBroker     githubapp.CredentialBroker
 }
 
-func resolveRepoContextFor(workDir string) (*repoContext, error) {
+func resolveRepoContextFor(ctx context.Context, workDir string) (*repoContext, error) {
 	return resolveRepoContextWith(
-		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+		ctx, workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
 	)
 }
 
 func resolveRepoContextWith(
-	workDir string, projects *project.Store, cfg ogconfig.Config,
+	ctx context.Context, workDir string, projects *project.Store, cfg ogconfig.Config,
 ) (*repoContext, error) {
-	ctxInfo, err := resolveRemoteRepoContextWith(workDir, projects, cfg)
+	ctxInfo, err := resolveRemoteRepoContextWith(ctx, workDir, projects, cfg)
 	if err != nil {
 		return nil, err
 	}
-	branch, err := gitOutput(ctxInfo.WorkDir, "rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := gitOutput(ctx, ctxInfo.WorkDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("get current branch: %w", err)
 	}
 	if branch == headRefName || branch == "" {
 		return nil, fmt.Errorf("not on a named branch")
 	}
-	ctxInfo.DefaultBase, ctxInfo.DefaultBaseKnown = defaultBranch(ctxInfo.WorkDir)
+	ctxInfo.DefaultBase, ctxInfo.DefaultBaseKnown = defaultBranch(ctx, ctxInfo.WorkDir)
 	ctxInfo.Branch = branch
 	return ctxInfo, nil
 }
 
-func resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
+func resolveRemoteRepoContextFor(ctx context.Context, workDir string) (*repoContext, error) {
 	return resolveRemoteRepoContextWith(
-		workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
+		ctx, workDir, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
 	)
 }
 
 func resolveRemoteRepoContextWith(
-	workDir string, projects *project.Store, cfg ogconfig.Config,
+	ctx context.Context, workDir string, projects *project.Store, cfg ogconfig.Config,
 ) (*repoContext, error) {
-	root, entry, err := resolveRegisteredRepo(workDir, projects)
+	root, entry, err := resolveRegisteredRepo(ctx, workDir, projects)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +107,7 @@ func resolveRemoteRepoContextWith(
 		token = os.Getenv(tokenEnv)
 	}
 	return &repoContext{
+		Context:        ctx,
 		WorkDir:        root,
 		ProjectAlias:   entry.Alias,
 		Archived:       entry.Archived,
@@ -125,13 +125,14 @@ func resolveRemoteRepoContextWith(
 }
 
 func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error {
-	if err := operationContext(ctxInfo).Err(); err != nil {
+	ctx := operationContext(ctxInfo)
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if ctxInfo.WorkDir == "" || ctxInfo.RemoteURL == "" || ctxInfo.BaseURL == "" {
 		return nil
 	}
-	remote, err := controlledGitOutput(ctxInfo.WorkDir, "remote", "get-url", remoteOrigin)
+	remote, err := controlledGitOutput(ctx, ctxInfo.WorkDir, "remote", "get-url", remoteOrigin)
 	if err != nil {
 		return fmt.Errorf("origin fetch target cannot be verified")
 	}
@@ -148,7 +149,7 @@ func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error 
 		return fmt.Errorf("origin fetch target does not match registered remote")
 	}
 	if requirePush {
-		if err := validatePushTargets(ctxInfo.WorkDir, ctxInfo.config, expected, provider); err != nil {
+		if err := validatePushTargets(ctx, ctxInfo.WorkDir, ctxInfo.config, expected, provider); err != nil {
 			return err
 		}
 	}
@@ -157,12 +158,13 @@ func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error 
 }
 
 func validatePushTargets(
+	ctx context.Context,
 	workDir string,
 	cfg ogconfig.Config,
 	expected string,
 	fetchProvider gitprovider.ProviderType,
 ) error {
-	out, err := controlledGitOutput(workDir, "remote", "get-url", "--push", "--all", remoteOrigin)
+	out, err := controlledGitOutput(ctx, workDir, "remote", "get-url", "--push", "--all", remoteOrigin)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return fmt.Errorf("origin push target cannot be verified")
 	}
@@ -180,7 +182,11 @@ func validatePushTargets(
 	return nil
 }
 
-func resolveRegisteredRepo(workDir string, projects *project.Store) (string, project.Entry, error) {
+func resolveRegisteredRepo(
+	ctx context.Context,
+	workDir string,
+	projects *project.Store,
+) (string, project.Entry, error) {
 	if workDir == "" {
 		var err error
 		workDir, err = os.Getwd()
@@ -192,7 +198,7 @@ func resolveRegisteredRepo(workDir string, projects *project.Store) (string, pro
 	if err != nil {
 		return "", project.Entry{}, fmt.Errorf("resolve working directory: %w", err)
 	}
-	root, err := gitOutput(workDir, "rev-parse", "--show-toplevel")
+	root, err := gitOutput(ctx, workDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", project.Entry{}, fmt.Errorf("not in a git repository: %w", err)
 	}
@@ -245,35 +251,37 @@ func tokenEnvFor(provider gitprovider.ProviderType) string {
 	return gitutil.ForgeTokenEnv()
 }
 
-func gitOutput(workDir string, args ...string) (string, error) {
-	return gitOutputWithEnv(workDir, gitutil.AnonymousGitEnv(os.Environ()), args...)
+func gitOutput(ctx context.Context, workDir string, args ...string) (string, error) {
+	return gitOutputWithEnv(ctx, workDir, gitutil.AnonymousGitEnv(os.Environ()), args...)
 }
 
-func controlledGitOutput(workDir string, args ...string) (string, error) {
-	return gitOutput(workDir, args...)
+func controlledGitOutput(ctx context.Context, workDir string, args ...string) (string, error) {
+	return gitOutput(ctx, workDir, args...)
 }
 
-func gitOutputWithEnv(workDir string, env []string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func gitOutputWithEnv(ctx context.Context, workDir string, env []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
 	if env != nil {
 		cmd.Env = env
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-func runGit(workDir string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+func runGit(ctx context.Context, workDir string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
 	cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -354,8 +362,7 @@ func requireGitPushTarget(ctxInfo *repoContext, operation string) error {
 }
 
 func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...string) error {
-	ctx, cancel := context.WithTimeout(operationContext(ctxInfo), 60*time.Second)
-	defer cancel()
+	ctx := operationContext(ctxInfo)
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	switch ctxInfo.Provider {
 	case gitprovider.ProviderGitHub:
@@ -369,6 +376,9 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return fmt.Errorf(
 			"git %s: %w: %s",
 			strings.Join(args, " "), err, redactSecret(string(out), auth.token),
@@ -400,8 +410,8 @@ func confirmedGitAuthenticationFailure(err error) bool {
 		strings.Contains(message, "requested url returned error: 403")
 }
 
-func defaultBranch(workDir string) (string, bool) {
-	out, err := gitOutput(workDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+func defaultBranch(ctx context.Context, workDir string) (string, bool) {
+	out, err := gitOutput(ctx, workDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err == nil {
 		if _, branch, ok := strings.Cut(out, "origin/"); ok && branch != "" {
 			return branch, true
@@ -410,8 +420,8 @@ func defaultBranch(workDir string) (string, bool) {
 	return branchMain, false
 }
 
-func latestTag(workDir string) (string, error) {
-	out, err := gitOutput(workDir, "tag", "--sort=-version:refname")
+func latestTag(ctx context.Context, workDir string) (string, error) {
+	out, err := gitOutput(ctx, workDir, "tag", "--sort=-version:refname")
 	if err != nil {
 		return "", err
 	}
@@ -425,7 +435,7 @@ func latestTag(workDir string) (string, error) {
 }
 
 func computeBumpedTag(ctxInfo *repoContext, level string) (string, error) {
-	latest, err := latestTag(ctxInfo.WorkDir)
+	latest, err := latestTag(operationContext(ctxInfo), ctxInfo.WorkDir)
 	if err != nil {
 		return "", err
 	}
@@ -473,7 +483,7 @@ func computeBumpedTag(ctxInfo *repoContext, level string) (string, error) {
 }
 
 func shouldBumpLatestTag(ctxInfo *repoContext, tag string) (bool, error) {
-	if err := runGit(ctxInfo.WorkDir, "remote", "get-url", remoteOrigin); err != nil {
+	if err := runGit(operationContext(ctxInfo), ctxInfo.WorkDir, "remote", "get-url", remoteOrigin); err != nil {
 		return true, nil
 	}
 	ref := "refs/tags/" + tag
@@ -496,13 +506,14 @@ func exitCode(err error) int {
 	return -1
 }
 
-func localTagExists(workDir, tag string) bool {
-	err := runGit(workDir, "show-ref", "--verify", "--quiet", "refs/tags/"+tag)
+func localTagExists(ctx context.Context, workDir, tag string) bool {
+	err := runGit(ctx, workDir, "show-ref", "--verify", "--quiet", "refs/tags/"+tag)
 	return err == nil
 }
 
 func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) error {
-	out, err := gitOutput(ctxInfo.WorkDir, "status", "--porcelain")
+	ctx := operationContext(ctxInfo)
+	out, err := gitOutput(ctx, ctxInfo.WorkDir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot verify worktree is clean: %w", err)
 	}
@@ -513,7 +524,7 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) 
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot refresh origin: %w", err)
 	}
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
-	if err := runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
+	if err := runGit(ctx, ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
 		if allowMissingRemote {
 			return nil
 		}
@@ -522,7 +533,7 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) 
 		)
 	}
 	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
-	ahead, err := gitOutput(ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
+	ahead, err := gitOutput(ctx, ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
 	if err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot check local commits: %w", err)
 	}
@@ -544,8 +555,9 @@ func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
 	if err := ensureCleanBranchForCleanup(ctxInfo, prMerged); err != nil {
 		return err
 	}
+	ctx := operationContext(ctxInfo)
 	remoteExists := remoteBranchExists(ctxInfo)
-	if err := runGit(ctxInfo.WorkDir, "switch", ctxInfo.DefaultBase); err != nil {
+	if err := runGit(ctx, ctxInfo.WorkDir, "switch", ctxInfo.DefaultBase); err != nil {
 		return err
 	}
 	if err := runGitWithCreds(
@@ -560,10 +572,10 @@ func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
 			return err
 		}
 	}
-	return runGit(ctxInfo.WorkDir, "branch", "-D", ctxInfo.Branch)
+	return runGit(ctx, ctxInfo.WorkDir, "branch", "-D", ctxInfo.Branch)
 }
 
 func remoteBranchExists(ctxInfo *repoContext) bool {
 	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
-	return runGit(ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef) == nil
+	return runGit(operationContext(ctxInfo), ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef) == nil
 }

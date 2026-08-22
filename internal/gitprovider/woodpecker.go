@@ -25,7 +25,7 @@ type WoodpeckerClient struct {
 
 // NewWoodpeckerClient creates a Woodpecker API client from env vars.
 // Requires WOODPECKER_URL and WOODPECKER_TOKEN.
-func NewWoodpeckerClient() (*WoodpeckerClient, error) {
+func NewWoodpeckerClient(ctx context.Context) (*WoodpeckerClient, error) {
 	url := os.Getenv("WOODPECKER_URL")
 	if url == "" {
 		return nil, fmt.Errorf("WOODPECKER_URL environment variable is required")
@@ -36,7 +36,8 @@ func NewWoodpeckerClient() (*WoodpeckerClient, error) {
 	}
 
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(context.Background(), ts)
+	httpClient := oauth2.NewClient(contextOrBackground(ctx), ts)
+	httpClient.Transport = contextTransport{context: contextOrBackground(ctx), base: httpClient.Transport}
 	client := woodpecker.NewClient(url, httpClient)
 
 	return &WoodpeckerClient{client: client, baseURL: strings.TrimRight(url, "/")}, nil

@@ -32,7 +32,7 @@ func findPR(ctx *repoContext, state string) (*PullRequest, error) {
 	}
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		if finder, ok := provider.(commitPRFinder); ok {
-			sha, err := gitOutput(ctx.WorkDir, "rev-parse", "HEAD")
+			sha, err := gitOutput(operationContext(ctx), ctx.WorkDir, "rev-parse", "HEAD")
 			if err != nil {
 				return nil, fmt.Errorf("get current HEAD SHA: %w", err)
 			}
@@ -236,7 +236,7 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 		if err != nil {
 			return nil, err
 		}
-		return gitprovider.NewGitHubProviderWithTokenAndAuthFailure(token, func() {
+		return gitprovider.NewGitHubProviderWithTokenAndAuthFailure(operationContext(ctx), token, func() {
 			_ = ctx.githubBroker.Invalidate(ctx.Owner, ctx.Repo, githubapp.PurposeAPI, token)
 		})
 	}
@@ -247,7 +247,7 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 	if baseURL == "" {
 		baseURL = ctx.Host
 	}
-	return gitprovider.NewForgejoProviderWithToken(baseURL, ctx.Token)
+	return gitprovider.NewForgejoProviderWithToken(operationContext(ctx), baseURL, ctx.Token)
 }
 
 func fromProviderPR(pr *gitprovider.PullRequest) *PullRequest {

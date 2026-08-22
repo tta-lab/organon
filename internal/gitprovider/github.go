@@ -8,23 +8,27 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/go-github/v88/github"
 )
 
 type GitHubProvider struct {
 	client *github.Client
+	ctx    context.Context
 }
 
 // NewGitHubProviderWithToken creates a GitHub provider with an explicit token.
-func NewGitHubProviderWithToken(token string) (Provider, error) {
-	return NewGitHubProviderWithTokenAndAuthFailure(token, nil)
+func NewGitHubProviderWithToken(ctx context.Context, token string) (Provider, error) {
+	return NewGitHubProviderWithTokenAndAuthFailure(ctx, token, nil)
 }
 
 // NewGitHubProviderWithTokenAndAuthFailure creates a GitHub provider and
 // reports confirmed credential rejection without retrying the request.
-func NewGitHubProviderWithTokenAndAuthFailure(token string, onAuthFailure func()) (Provider, error) {
+func NewGitHubProviderWithTokenAndAuthFailure(
+	ctx context.Context,
+	token string,
+	onAuthFailure func(),
+) (Provider, error) {
 	if token == "" {
 		return nil, fmt.Errorf("an explicit GitHub token is required")
 	}
@@ -35,12 +39,15 @@ func NewGitHubProviderWithTokenAndAuthFailure(token string, onAuthFailure func()
 			token:         token,
 			onAuthFailure: onAuthFailure,
 		}),
-		github.WithTimeout(30*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub client: %w", err)
 	}
-	return &GitHubProvider{client: client}, nil
+	return &GitHubProvider{client: client, ctx: contextOrBackground(ctx)}, nil
+}
+
+func (p *GitHubProvider) operationContext() context.Context {
+	return contextOrBackground(p.ctx)
 }
 
 type githubTokenTransport struct {
@@ -83,7 +90,7 @@ func confirmedGitHubAPIAuthFailure(response *http.Response) bool {
 func (p *GitHubProvider) Name() string { return "github" }
 
 func (p *GitHubProvider) CreatePR(owner, repo, head, base, title, body string) (*PullRequest, error) {
-	pr, _, err := p.client.PullRequests.Create(context.Background(), owner, repo, &github.NewPullRequest{
+	pr, _, err := p.client.PullRequests.Create(p.operationContext(), owner, repo, &github.NewPullRequest{
 		Title: &title,
 		Body:  &body,
 		Head:  &head,
@@ -105,7 +112,7 @@ func (p *GitHubProvider) FindPRByState(owner, repo, head, base, state string) (*
 		state = "open"
 	}
 	headFilter := owner + ":" + head
-	prs, _, err := p.client.PullRequests.List(context.Background(), owner, repo, &github.PullRequestListOptions{
+	prs, _, err := p.client.PullRequests.List(p.operationContext(), owner, repo, &github.PullRequestListOptions{
 		State: state,
 		Head:  headFilter,
 		Base:  base,
@@ -127,7 +134,7 @@ func (p *GitHubProvider) FindPRByState(owner, repo, head, base, state string) (*
 
 func (p *GitHubProvider) FindPRByCommit(owner, repo, sha string) (*PullRequest, error) {
 	prs, _, err := p.client.PullRequests.ListPullRequestsWithCommit(
-		context.Background(),
+		p.operationContext(),
 		owner,
 		repo,
 		sha,
@@ -148,7 +155,7 @@ func (p *GitHubProvider) FindPRByCommit(owner, repo, sha string) (*PullRequest, 
 func (p *GitHubProvider) EditPR(owner, repo string, index int64, title, body string) (*PullRequest, error) {
 	opt := &github.PullRequest{Title: &title, Body: &body}
 
-	pr, _, err := p.client.PullRequests.Edit(context.Background(), owner, repo, int(index), opt)
+	pr, _, err := p.client.PullRequests.Edit(p.operationContext(), owner, repo, int(index), opt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to edit PR #%d: %w", index, err)
 	}
@@ -157,7 +164,7 @@ func (p *GitHubProvider) EditPR(owner, repo string, index int64, title, body str
 }
 
 func (p *GitHubProvider) GetPR(owner, repo string, index int64) (*PullRequest, error) {
-	pr, _, err := p.client.PullRequests.Get(context.Background(), owner, repo, int(index))
+	pr, _, err := p.client.PullRequests.Get(p.operationContext(), owner, repo, int(index))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR #%d: %w", index, err)
 	}
@@ -166,7 +173,7 @@ func (p *GitHubProvider) GetPR(owner, repo string, index int64) (*PullRequest, e
 }
 
 func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
-	comment, _, err := p.client.Issues.CreateComment(context.Background(), owner, repo, int(index), &github.IssueComment{
+	comment, _, err := p.client.Issues.CreateComment(p.operationContext(), owner, repo, int(index), &github.IssueComment{
 		Body: &body,
 	})
 	if err != nil {
@@ -179,7 +186,7 @@ func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body str
 }
 
 func (p *GitHubProvider) ListComments(owner, repo string, index int64) ([]*Comment, error) {
-	comments, _, err := p.client.Issues.ListComments(context.Background(), owner, repo, int(index), nil)
+	comments, _, err := p.client.Issues.ListComments(p.operationContext(), owner, repo, int(index), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list comments on PR #%d: %w", index, err)
 	}
@@ -196,7 +203,7 @@ func (p *GitHubProvider) ListComments(owner, repo string, index int64) ([]*Comme
 // This only sees checks created via the Checks API (GitHub Actions, Apps); external CI
 // tools that push commit statuses (Jenkins, CircleCI) are not captured.
 func (p *GitHubProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error) {
-	ctx := context.Background()
+	ctx := p.operationContext()
 	result, _, err := p.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref,
 		&github.ListCheckRunsOptions{ListOptions: github.ListOptions{PerPage: 100}})
 	if err != nil {
@@ -260,7 +267,7 @@ func checkRunToState(status, conclusion string) string {
 }
 
 func (p *GitHubProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error) {
-	ctx := context.Background()
+	ctx := p.operationContext()
 
 	runs, _, err := p.client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo,
 		&github.ListWorkflowRunsOptions{HeadSHA: sha})
@@ -293,7 +300,7 @@ func (p *GitHubProvider) GetCIFailureDetails(owner, repo, sha string, tailLines 
 
 			logURL, _, logErr := p.client.Actions.GetWorkflowJobLogs(ctx, owner, repo, job.GetID(), 3)
 			if logErr == nil && logURL != nil {
-				jf.LogTail = fetchLogTail(logURL.String(), tailLines)
+				jf.LogTail = fetchLogTail(ctx, logURL.String(), tailLines)
 			}
 
 			failures = append(failures, jf)

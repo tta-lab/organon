@@ -1,6 +1,7 @@
 package og
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/tta-lab/organon/internal/config"
@@ -58,43 +59,29 @@ func (s Service) Validate() error {
 }
 
 func (s Service) resolveRepoContextForRequest(req Request) (*repoContext, error) {
-	ctx, err := s.resolveRepoContextFor(req.WorkDir)
-	if err != nil {
-		return nil, err
-	}
-	bindRequestContext(ctx, req)
-	return ctx, nil
+	return s.resolveRepoContextFor(requestContext(req), req.WorkDir)
 }
 
 func (s Service) resolveRemoteRepoContextForRequest(req Request) (*repoContext, error) {
-	ctx, err := s.resolveRemoteRepoContextFor(req.WorkDir)
+	return s.resolveRemoteRepoContextFor(requestContext(req), req.WorkDir)
+}
+
+func (s Service) resolveRepoContextFor(ctx context.Context, workDir string) (*repoContext, error) {
+	ctxInfo, err := resolveRepoContextWith(ctx, workDir, s.projectStore(), s.config)
 	if err != nil {
 		return nil, err
 	}
-	bindRequestContext(ctx, req)
-	return ctx, nil
+	ctxInfo.githubBroker = s.githubBroker
+	return ctxInfo, nil
 }
 
-func bindRequestContext(ctx *repoContext, req Request) {
-	ctx.Context = requestContext(req)
-}
-
-func (s Service) resolveRepoContextFor(workDir string) (*repoContext, error) {
-	ctx, err := resolveRepoContextWith(workDir, s.projectStore(), s.config)
+func (s Service) resolveRemoteRepoContextFor(ctx context.Context, workDir string) (*repoContext, error) {
+	ctxInfo, err := resolveRemoteRepoContextWith(ctx, workDir, s.projectStore(), s.config)
 	if err != nil {
 		return nil, err
 	}
-	ctx.githubBroker = s.githubBroker
-	return ctx, nil
-}
-
-func (s Service) resolveRemoteRepoContextFor(workDir string) (*repoContext, error) {
-	ctx, err := resolveRemoteRepoContextWith(workDir, s.projectStore(), s.config)
-	if err != nil {
-		return nil, err
-	}
-	ctx.githubBroker = s.githubBroker
-	return ctx, nil
+	ctxInfo.githubBroker = s.githubBroker
+	return ctxInfo, nil
 }
 
 // ProjectStore returns the hot registry used by this service.
