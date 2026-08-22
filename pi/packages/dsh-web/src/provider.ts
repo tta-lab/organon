@@ -23,9 +23,7 @@ export interface SearchProviderDependencies {
   run?: (binaryPath: string, options: CliRunOptions) => Promise<CliRunResult>;
 }
 
-function credentialFor(
-  provider: SearchProviderName,
-): { ref: CredentialRef; env: string } | undefined {
+function credentialFor(provider: SearchProviderName): { ref: CredentialRef; env: string } {
   switch (provider) {
     case "exa":
       return { ref: credentialRef(EXA_CREDENTIAL_REF), env: "EXA_API_KEY" };
@@ -95,21 +93,17 @@ export function createOrganonSearchProvider(
       const provider = dependencies.getProvider();
       const credential = credentialFor(provider);
       let resolved: ResolvedCredential | undefined;
-      if (credential !== undefined) {
-        try {
-          resolved = await dependencies.credentials.resolve(credential.ref);
-        } catch {
-          throw new Error(`${provider} credential resolution failed`);
-        }
+      try {
+        resolved = await dependencies.credentials.resolve(credential.ref);
+      } catch {
+        throw new Error(`${provider} credential resolution failed`);
       }
 
       const options: CliRunOptions = {
         // Put all flags before `--`; a query beginning with `-` is positional.
         args: ["search", "--provider", provider, "--json", "--", request.query],
         signal,
-        ...(resolved !== undefined && credential !== undefined
-          ? { env: { [credential.env]: resolved.value } }
-          : {}),
+        ...(resolved !== undefined ? { env: { [credential.env]: resolved.value } } : {}),
       };
 
       let result: CliRunResult;
