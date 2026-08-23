@@ -1,17 +1,15 @@
 # Organon Pi Extensions
 
-Four independently installable [Pi](https://pi.dev) extension packages give Pi
-native access to Organon capabilities without MCP configuration. The separate
-`@tta-lab/dsh-web` package is a public DeepSeek Harness rc.8 Web bundle. Pi
+Three independently installable [Pi](https://pi.dev) extension packages give Pi
+native access to Organon capabilities without MCP configuration. Pi
 packages carry matching native Go binaries for your platform, so installing the
-npm package is sufficient on a supported host. `pi-src`, `pi-web`, and
+npm package is sufficient on a supported host. `pi-src` and
 `pi-project` each register capability tools; `pi-og` registers five guarded forge
 tools.
 
 | Package               | Tool(s)                                                | Capability                                                               |
 | --------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
 | `@tta-lab/pi-src`     | `read`, `edit`                                         | Structure-aware file reading and editing through exact-name Pi overrides |
-| `@tta-lab/pi-web`     | `web_search`, `web_fetch`, `web_docs`, `web_sgraph`    | Web search, page fetch, library documentation, Sourcegraph code search   |
 | `@tta-lab/pi-project` | `project_list`, `project_find`, `project_get`          | List, find, and get registered projects                                  |
 | `@tta-lab/pi-og`      | `og_clone`, `og_pull`, `og_push`, `og_pr`, `og_checks` | Guarded Git and forge operations through the package-local og binary     |
 
@@ -19,17 +17,8 @@ tools.
 
 ```bash
 pi install npm:@tta-lab/pi-src@<version>
-pi install npm:@tta-lab/pi-web@<version>
 pi install npm:@tta-lab/pi-project@<version>
 pi install npm:@tta-lab/pi-og@<version>
-```
-
-For the DeepSeek Harness Web profile, install the public bundle through the normal
-profile plugin command; it applies its own patch and does not require a custom
-profile or preset:
-
-```bash
-dsh plugin --profile web add @tta-lab/dsh-web
 ```
 
 Install only the capabilities you need; each package is independent. All
@@ -42,12 +31,8 @@ drift.
 - macOS (Darwin) ARM64
 - Linux x64 (amd64)
 - Linux ARM64
-- Windows x64 (Pi Web and DSH Web)
 
-Windows x64 is supported by `@tta-lab/pi-web` and `@tta-lab/dsh-web` through the
-shared `@tta-lab/pi-web-win32-x64` optional package; the other extension packages
-retain their Darwin/Linux native targets. Unsupported platforms fail at extension
-startup with an actionable error.
+Unsupported platforms fail at extension startup with an actionable error.
 Runtime binaries are never downloaded from GitHub releases, compiled during
 installation, or resolved from `PATH`.
 
@@ -136,8 +121,8 @@ preserving BOM and line endings.
 
 ## MCP servers
 
-The `web`, `project`, `og`, and `skill` MCP servers continue to serve non-Pi
-clients and are unchanged. Pi users who install the matching `web`, `project`,
+The `project`, `og`, and `skill` MCP servers continue to serve non-Pi
+clients and are unchanged. Pi users who install the matching `project`,
 `pi-og`, or `src` extension should remove that capability's duplicate MCP
 server configuration from Pi, so it exposes native capability tools without
 transport duplicates. The old project-scoped `src` MCP server has been removed:
@@ -145,15 +130,10 @@ Pi uses the local-path `read`/`edit` extension, and CLI users use the normal
 `src` command. If you previously configured `organon-src` in an MCP client,
 remove that server entry.
 
-The Pi `web_fetch` tool uses the bundled TypeScript Defuddle implementation
-and does not require a globally installed `defuddle` CLI. `web_search`,
-`web_docs`, and `web_sgraph` remain thin adapters over the Go CLI. The grouped
-`web_docs` tool uses `resolve` and `fetch` actions.
-
 ## CLI JSON output
 
 The commands behind these extensions also accept `--json` for machine-readable
-output (for example `project list --json`, `web fetch <url> --json`, `src read
+output (for example `project list --json`, `src read
 <file> --json`, `og pr find --project <alias> --json`). Diagnostics stay on
 stderr; stdout carries exactly one JSON document.
 
@@ -172,11 +152,9 @@ pnpm exec vitest run
 node scripts/test-release-invariants.mjs
 ```
 
-`make pi-build` detects supported Darwin/Linux hosts, builds the four CGO-disabled
+`make pi-build` detects supported Darwin/Linux hosts, builds the three CGO-disabled
 Go binaries directly into the matching native packages, installs the frozen Pi
-lockfile, and builds all Pi extension bundles plus the DSH Web host/client bundle.
-The Windows web package is cross-compiled from the GoReleaser `windows/amd64` web
-target and is smoke-tested on the Windows CI runner. Staging recreates missing
+lockfile, and builds all Pi extension bundles. Staging recreates missing
 native `bin` directories and rejects unsupported or wrong-platform artifacts.
 
 Releases are tag-driven: `scripts/sync-version.mjs` maps the tag to the single
@@ -189,18 +167,15 @@ and GoReleaser artifact invariants before publishing.
 
 ## Publishing and releases
 
-Organon publishes the independently installable Pi extensions and the
-`@tta-lab/dsh-web` DeepSeek Harness bundle as public main packages. Every release
-uses one synchronized version and publishes all native packages before every main
-package:
+Organon publishes the independently installable Pi extensions as public main
+packages. Every release uses one synchronized version and publishes all native
+packages before every main package:
 
-| Main package          | Native optional packages                                                                                                |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@tta-lab/pi-src`     | `@tta-lab/pi-src-darwin-arm64`, `@tta-lab/pi-src-linux-x64`, `@tta-lab/pi-src-linux-arm64`                              |
-| `@tta-lab/pi-web`     | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`, `@tta-lab/pi-web-win32-x64` |
-| `@tta-lab/pi-project` | `@tta-lab/pi-project-darwin-arm64`, `@tta-lab/pi-project-linux-x64`, `@tta-lab/pi-project-linux-arm64`                  |
-| `@tta-lab/pi-og`      | `@tta-lab/pi-og-darwin-arm64`, `@tta-lab/pi-og-linux-x64`, `@tta-lab/pi-og-linux-arm64`                                 |
-| `@tta-lab/dsh-web`    | `@tta-lab/pi-web-darwin-arm64`, `@tta-lab/pi-web-linux-x64`, `@tta-lab/pi-web-linux-arm64`, `@tta-lab/pi-web-win32-x64` |
+| Main package          | Native optional packages                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@tta-lab/pi-src`     | `@tta-lab/pi-src-darwin-arm64`, `@tta-lab/pi-src-linux-x64`, `@tta-lab/pi-src-linux-arm64`             |
+| `@tta-lab/pi-project` | `@tta-lab/pi-project-darwin-arm64`, `@tta-lab/pi-project-linux-x64`, `@tta-lab/pi-project-linux-arm64` |
+| `@tta-lab/pi-og`      | `@tta-lab/pi-og-darwin-arm64`, `@tta-lab/pi-og-linux-x64`, `@tta-lab/pi-og-linux-arm64`                |
 
 Stable SemVer versions use the `latest` dist-tag. SemVer prereleases use
 `beta`, so a beta must be installed explicitly with (for example)
@@ -273,12 +248,11 @@ versions already on the registry are skipped.
 
 ### One-time npm Trusted Publisher setup
 
-After all packages in the publish plan exist, bind each package—including
-`@tta-lab/dsh-web`—to the same GitHub workflow and protected Environment. npm
-trust commands require npm >= 11.10.0, package
-write permission, and account-level 2FA. Run this loop once from the repository
-root of the clean bootstrap checkout; the first request may ask for 2FA.
-The two-second delay avoids npm rate limiting:
+After all packages in the publish plan exist, bind each package to the same
+GitHub workflow and protected Environment. npm trust commands require npm >=
+11.10.0, package write permission, and account-level 2FA. Run this loop once
+from the repository root of the clean bootstrap checkout; the first request may
+ask for 2FA. The two-second delay avoids npm rate limiting:
 
 ```bash
 set -eu
@@ -366,16 +340,11 @@ done
 for package in $(node --input-type=module -e '
   import { packagePublishPlan } from "./scripts/publish-packages.mjs";
   for (const entry of packagePublishPlan()) {
-    if (entry.kind === "main" && entry.name !== "@tta-lab/dsh-web") console.log(entry.name);
+    if (entry.kind === "main") console.log(entry.name);
   }
 '); do
   pi install "npm:$package@$VERSION"
 done
-
-# DSH Web is installed through DSH, not Pi. Keep this proof disposable.
-DSH_HOME="$(mktemp -d)"
-trap 'rm -rf "$DSH_HOME"' EXIT
-dsh plugin --profile web add "@tta-lab/dsh-web@$VERSION"
 ```
 
 OIDC releases on the public repository and public packages automatically carry
@@ -410,10 +379,10 @@ pi -e ./pi/packages/pi-src/dist/index.js
 pi install /Users/neil/code/guion-opensource/organon/pi/packages/pi-src
 ```
 
-The pi-src/web/project/og tests resolve fixture binaries from a fresh
+The pi-src/project/og tests resolve fixture binaries from a fresh
 temporary package-shaped workspace. Vitest never creates, replaces, or removes
 files in repository `packages/native/*/bin` directories, so running the tests
 with real binaries present leaves them byte-for-byte unchanged—and running with
 them absent leaves them absent. The offline pack smoke also uses throwaway
 copies. Replace the host-platform binary name (`darwin-arm64`, `linux-x64`,
-`linux-arm64`, `win32-x64`) and the tool as needed.
+`linux-arm64`) and the tool as needed.

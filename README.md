@@ -2,7 +2,7 @@
 
 Structure-aware tools for AI agents, plus small workflow CLIs used in the tta-lab workspace.
 
-Organon provides commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code and the web, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
+Organon provides commands that give [logos](https://github.com/tta-lab/logos) agents structured perception of code, running inside a [temenos](https://github.com/tta-lab/temenos) sandbox.
 
 ```
 $ src main.go --tree
@@ -50,34 +50,6 @@ EDIT
 Supports symbol-aware extraction for Go, Rust, TypeScript, TSX, Python, C, C++, Java, Ruby, JavaScript, and many more via auto-inference. Language is detected from file extension. Markdown uses heading-based sections.
 
 `src edit` is a text-based escape hatch for files where symbol editing is overkill (config files, unsupported languages, quick edits). It uses exact match with whitespace normalization fallbacks and works on any text file regardless of language support.
-
-### `web fetch` — Web pages
-
-Fetch and navigate web pages with heading-based structure. Same `--tree` / `-s` pattern.
-
-```bash
-web fetch https://docs.example.com --tree     # heading tree with IDs
-web fetch https://docs.example.com -s bK      # read a section
-web fetch https://docs.example.com            # read full page
-```
-
-### `web` — Web search
-
-Search the web and return results.
-
-```bash
-web "tree-sitter Go bindings"
-```
-
-### `web docs` — Library documentation
-
-Resolve library names to Context7 IDs and fetch documentation.
-
-```bash
-web docs resolve react       # list matching libraries with IDs
-web docs fetch /reactjs/react.dev hooks  # fetch docs for a library
-CONTEXT7_API_KEY=... web docs resolve react  # with API key (higher rate limits)
-```
 
 ### `skill` — Skill discovery
 
@@ -274,7 +246,7 @@ reactivate or reuse the exposed migration PAT.
 
 ## MCP servers
 
-`project`, `og`, `web`, and `skill` each provide a typed stdio MCP server. Configure
+`project`, `og`, and `skill` each provide a typed stdio MCP server. Configure
 them as separate processes so clients can grant only the tools a session needs:
 
 ```json
@@ -282,7 +254,6 @@ them as separate processes so clients can grant only the tools a session needs:
   "mcpServers": {
     "organon-project": { "command": "project", "args": ["mcp"] },
     "organon-og": { "command": "og", "args": ["mcp"] },
-    "organon-web": { "command": "web", "args": ["mcp"] },
     "organon-skill": { "command": "skill", "args": ["mcp"] }
   }
 }
@@ -314,21 +285,21 @@ force-with-lease and is rejected on the default branch. Pull retains the CLI's
 guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
 operation; `pr_get`, modify, comment, checks, log, and failures use the current
 branch when the ID is omitted. Tag remains CLI-only. Start a new `og` process after
-changing `og.toml`; restart web MCP after changing web configuration. Run
+changing `og.toml`. Run
 `<tool> mcp --help` for each server's tool list and configuration details.
 
 ## Pi extensions
 
-Pi reaches Organon through four independently installable extension packages
-(`@tta-lab/pi-src`, `@tta-lab/pi-web`, `@tta-lab/pi-project`, `@tta-lab/pi-og`)
+Pi reaches Organon through three independently installable extension packages
+(`@tta-lab/pi-src`, `@tta-lab/pi-project`, `@tta-lab/pi-og`)
 instead of MCP configuration. Each carries a platform-matched native binary
 and its own npm release. `pi-src` replaces Pi's built-in `read` and `edit` with
-symbol-aware operations and exact multi-edit batches; `pi-web` and
-`pi-project` each register one tool, while `pi-og` registers
+symbol-aware operations and exact multi-edit batches; `pi-project` registers
+the project tools, while `pi-og` registers
 `og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks`.
 All six OG tools preserve the MCP domain behavior over a local subprocess. See
 [`pi/README.md`](pi/README.md) for installation, supported platforms, the `read`
-and `edit` override behavior, and the opaque symbol-ID rules. The `web`, `project`, `og`,
+and `edit` override behavior, and the opaque symbol-ID rules. The `project`, `og`,
 and `skill` MCP servers remain for non-Pi clients; the project-scoped `src` MCP
 server is removed.
 
@@ -350,7 +321,6 @@ brew install tta-lab/ttal/organon
 
 ```bash
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
-CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/web@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/project@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/og@latest
@@ -367,7 +337,6 @@ Download binaries from [GitHub Releases](https://github.com/tta-lab/organon/rele
 temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
-│   ├── web    ← web search and page reading
 │   ├── skill  ← skill discovery
 │   ├── project ← registered project discovery
 │   └── og     ← guarded Git and forge operations
@@ -393,7 +362,7 @@ logos (agent loop)
 
 ## The name
 
-Aristotle's *Organon* (ὄργανον, "instrument") was his collected works on logic — the toolkit that made reasoning possible. These tools are the instruments through which logos reasons about code and the web.
+Aristotle's *Organon* (ὄργανον, "instrument") was his collected works on logic — the toolkit that made reasoning possible. These tools are the instruments through which logos reasons about code.
 
 | Project | Role |
 |---------|------|

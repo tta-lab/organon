@@ -13,7 +13,7 @@ pi-build:
 			darwin/arm64|linux/arm64|linux/x64) ;; \
 			*) echo "unsupported pi host: $$os-$$arch (supported: darwin-arm64, linux-arm64, linux-x64)" >&2; exit 1 ;; \
 		esac; \
-		for tool in src web project og; do \
+		for tool in src project og; do \
 			dest="pi/packages/native/pi-$$tool-$$os-$$arch/bin/$$tool"; \
 			mkdir -p "$$(dirname "$$dest")"; \
 			echo "building $$dest"; \
@@ -57,7 +57,7 @@ tidy:
 ci: fmt vet lint test build
 
 ci-scope:
-	@test -n "$(SCOPE_CMD)" || (echo "SCOPE_CMD is required (for example: web)" >&2; exit 2)
+	@test -n "$(SCOPE_CMD)" || (echo "SCOPE_CMD is required (for example: project)" >&2; exit 2)
 	@test -n "$(SCOPE_PACKAGES)" || (echo "SCOPE_PACKAGES is required" >&2; exit 2)
 	@files="$$(for dir in $$($(GO_ENV) go list -f '{{.Dir}}' $(SCOPE_PACKAGES)); do rg --files "$$dir" -g '*.go'; done)"; \
 		unformatted="$$(gofmt -l -s $$files)"; \

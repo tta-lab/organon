@@ -166,15 +166,10 @@ describe("all native package manifests", () => {
       expectPublicMetadata(manifest, packageRepositoryDirectory(entry));
       expect(packageFiles(tgz)).toContain("package/README.md");
 
-      const piTool = entry.name.match(/^@tta-lab\/pi-(src|web|project|og)$/)?.[1];
-      const expectedTargets =
-        entry.name === "@tta-lab/dsh-web"
-          ? nativeTargetsForTool("web")
-          : piTool === undefined
-            ? []
-            : nativeTargetsForTool(piTool);
+      const piTool = entry.name.match(/^@tta-lab\/pi-(src|project|og)$/)?.[1];
+      const expectedTargets = piTool === undefined ? [] : nativeTargetsForTool(piTool);
       const expectedDependencies = expectedTargets.map(
-        ({ packageSuffix: suffix }) => `@tta-lab/pi-${piTool ?? "web"}-${suffix}`,
+        ({ packageSuffix: suffix }) => `@tta-lab/pi-${piTool}-${suffix}`,
       );
       expect(Object.keys(manifest.optionalDependencies ?? {})).toHaveLength(
         expectedDependencies.length,
@@ -184,28 +179,7 @@ describe("all native package manifests", () => {
         expect(manifest.optionalDependencies[dep]).toBe(version);
         expect(manifest.optionalDependencies[dep]).not.toMatch(/[\^~]/);
       }
-
-      if (entry.name === "@tta-lab/dsh-web") {
-        expect(expectedDependencies).toContain("@tta-lab/pi-web-win32-x64");
-        expect(packageFiles(tgz)).toEqual(
-          expect.arrayContaining([
-            "package/dist/index.js",
-            "package/dist/index.d.ts",
-            "package/dist/client.js",
-            "package/dist/client.d.cts",
-            "package/cordis.patch.yml",
-          ]),
-        );
-        expect(manifest.main).toBe("dist/index.js");
-        expect(manifest.exports["./client"]).toEqual({
-          types: "./dist/client.d.cts",
-          default: "./dist/client.js",
-        });
-        expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
-        expect(manifest.dsh.client.platform).toBe("web");
-      } else {
-        expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
-      }
+      expect(manifest.pi.extensions).toEqual(["./dist/index.js"]);
     }
   });
 
@@ -237,12 +211,6 @@ describe("all native package manifests", () => {
         },
       },
       {
-        tool: "web",
-        publicTool: "web_search",
-        action: { queries: ["tree-sitter"] },
-        assert: (result: any) => expect(result.details.provider).toBe("Brave"),
-      },
-      {
         tool: "project",
         publicTool: "project_list",
         action: {},
@@ -257,9 +225,7 @@ describe("all native package manifests", () => {
     ];
 
     writeFileSync(join(tmp, "smoke.go"), "package sample\n\nfunc Foo() {}\n");
-    const smokeTools =
-      currentHostSuffix === "win32-x64" ? smoke.filter(({ tool }) => tool === "web") : smoke;
-    for (const { tool, publicTool = tool, action, assert } of smokeTools) {
+    for (const { tool, publicTool = tool, action, assert } of smoke) {
       const nativePkgName = `@tta-lab/pi-${tool}-${currentHostSuffix}`;
       const nativePkgDir = nativePackageDir(tool, currentHostSuffix);
       const nativeTgz = pack(nativePkgDir, nativePkgName);
@@ -295,8 +261,7 @@ describe("all native package manifests", () => {
       const pkg = join(installRoot, "node_modules", `@tta-lab/pi-${tool}`);
       expect(existsSync(join(pkg, "dist", "index.js"))).toBe(true);
       const installedNative = join(installRoot, "node_modules", nativePkgName);
-      const installedExecutable = currentHostSuffix === "win32-x64" ? `${tool}.exe` : tool;
-      expect(existsSync(join(installedNative, "bin", installedExecutable))).toBe(true);
+      expect(existsSync(join(installedNative, "bin", tool))).toBe(true);
       for (const { packageSuffix: suffix } of nativeTargetsForTool(tool)) {
         if (suffix !== currentHostSuffix) {
           expect(

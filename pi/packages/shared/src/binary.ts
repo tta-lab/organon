@@ -8,7 +8,7 @@ export type BinaryResolver = (specifier: string) => string;
 
 /** Name of the native npm package that carries the binary for `tool`. */
 export function nativePackageName(tool: string): string {
-  const { os, arch } = detectPlatform(tool);
+  const { os, arch } = detectPlatform();
   return `@tta-lab/pi-${tool}-${os}-${arch}`;
 }
 
@@ -26,9 +26,9 @@ export interface BinaryResolutionOptions {
  * actionable error from detectPlatform.
  */
 export function resolveBinaryPath(tool: string, options?: BinaryResolutionOptions): string {
-  const { os, arch } = detectPlatform(tool);
+  const { os, arch } = detectPlatform();
   const pkg = `@tta-lab/pi-${tool}-${os}-${arch}`;
-  const executable = os === "win32" ? `${tool}.exe` : tool;
+  const executable = tool;
   const testWorkspace =
     process.env.VITEST === "true" ? process.env.ORGANON_PI_TEST_WORKSPACE : undefined;
   if (testWorkspace && !options?.resolve) {

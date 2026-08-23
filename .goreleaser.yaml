@@ -18,28 +18,6 @@ builds:
       - amd64
       - arm64
 
-  - id: web
-    binary: web
-    main: ./cmd/web
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-
-  - id: web-windows
-    binary: web
-    main: ./cmd/web
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - windows
-    goarch:
-      - amd64
-
   - id: skill
     binary: skill
     main: ./cmd/skill
@@ -109,21 +87,11 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     builds:
       - src
-      - web
       - skill
       - project
       - goal
       - token
       - og
-  - id: windows-web
-    formats: [zip]
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else }}{{ .Arch }}{{ end }}
-    builds:
-      - web-windows
 
 checksum:
   name_template: checksums.txt

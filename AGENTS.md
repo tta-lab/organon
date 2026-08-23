@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Organon is a Go monorepo producing six CLI tools for AI agents: `src` (tree-sitter source editing), `web` (web search and page fetching), `skill` (filesystem-based skill discovery), `token` (LLM token counting), `project` (project management CLI), and `goal` (Lenos session goal file management).
+Organon is a Go monorepo producing CLI tools for AI agents: `src` (tree-sitter source editing), `skill` (filesystem-based skill discovery), `token` (LLM token counting), `project` (project management CLI), and `goal` (Lenos session goal file management).
 
 ## Essential Commands
 
@@ -12,7 +12,7 @@ make test         # CGO_ENABLED=0 go test -v ./...
 make build        # CGO_ENABLED=0 go build ./cmd/...
 make install      # CGO_ENABLED=0 go install ./cmd/...
 make ci           # fmt, vet, lint, test, build
-make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./internal/config'
+make ci-scope SCOPE_CMD=project SCOPE_PACKAGES='./cmd/project ./internal/project ./internal/config'
                   # scoped format check, vet, lint, test, and binary build
 ```
 
@@ -20,7 +20,6 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 
 ### Binaries
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing with local path resolution and `--json` output for Pi extension adapters
-- `cmd/web/` — unified web tool: `web search` (Exa/Brave) and `web fetch` (page reading)
 - `cmd/skill/` — filesystem-based skill discovery plus read-only MCP
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
 - `cmd/project/` — project management CLI: list, get, resolve, and jump to registered projects
@@ -38,12 +37,7 @@ make ci-scope SCOPE_CMD=web SCOPE_PACKAGES='./cmd/web ./internal/search ./intern
 ### Tool-Specific Packages
 - `internal/treesitter/` — tree-sitter parsing, symbol extraction, query files
 - `internal/srcop/` — src file operations (replace, insert, delete, comment)
-- `internal/fetch/` — url fetch backends (defuddle, browser-gateway, cache)
-- `internal/markdown/` — heading parsing via goldmark
-- `internal/search/` — web search backends (Exa, Brave)
-- `internal/docs/` — Context7 documentation client
-- `internal/sgraph/` — Sourcegraph public GraphQL code search
-- `internal/web/` — shared typed web application service used by CLI and MCP adapters
+- `internal/markdown/` — heading parsing and section navigation via goldmark
 - `internal/project/` — hot, archive-aware path and canonical-remote registry shared by CLI, MCP, and og
 - `internal/og/` — direct Git/forge policy, configuration, and typed domain operations
 - `internal/ogconfig/` — whole-file og configuration and remote trust classification
@@ -82,8 +76,8 @@ requests it. Remote PR CI may still run the full suite.
 
 ```bash
 make test                            # gotestsum with go test fallback
-make ci-scope SCOPE_CMD=web \
-  SCOPE_PACKAGES='./cmd/web ./internal/search ./internal/config'
+make ci-scope SCOPE_CMD=project \
+  SCOPE_PACKAGES='./cmd/project ./internal/project ./internal/config'
 CGO_ENABLED=0 go test ./internal/id/...
 CGO_ENABLED=0 go test -v -run TestSymbols ./internal/treesitter/...
 ```

@@ -14,12 +14,6 @@ import {
   projectListSchema,
 } from "../../pi-project/src/tool.js";
 import { editSchema, readSchema } from "../../pi-src/src/tool.js";
-import {
-  webDocsSchema,
-  webFetchSchema,
-  webSearchSchema,
-  webSgraphSchema,
-} from "../../pi-web/src/tool.js";
 
 interface JsonSchemaLike {
   type?: unknown;
@@ -46,10 +40,6 @@ describe("registered Pi tool schemas are provider-compatible", () => {
   const tools: Array<[string, TSchema]> = [
     ["read", readSchema],
     ["edit", editSchema],
-    ["web_search", webSearchSchema],
-    ["web_fetch", webFetchSchema],
-    ["web_docs", webDocsSchema],
-    ["web_sgraph", webSgraphSchema],
     ["project_list", projectListSchema],
     ["project_find", projectFindSchema],
     ["project_get", projectGetSchema],

@@ -1,6 +1,6 @@
 // Supported public native package targets. Keep platform/build metadata here so
 // staging, artifact invariants, and package inventory tests cannot drift.
-export const NATIVE_TOOLS = ["src", "web", "project", "og"];
+export const NATIVE_TOOLS = ["src", "project", "og"];
 
 const ALL_TOOLS = NATIVE_TOOLS;
 
@@ -31,15 +31,6 @@ export const NATIVE_TARGETS = [
     goarch: "arm64",
     fileMarker: /ELF.*aarch64/,
     tools: ALL_TOOLS,
-  },
-  {
-    packageOS: "win32",
-    packageCPU: "x64",
-    packageSuffix: "win32-x64",
-    goos: "windows",
-    goarch: "amd64",
-    fileMarker: /PE32\+.*x86-64/,
-    tools: ["web"],
   },
 ];
 
