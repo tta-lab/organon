@@ -1,9 +1,8 @@
 /**
  * Dependency-free Pi-compatible head truncation for shared model-facing runtimes.
  *
- * Keep this module free of the Pi host package: DSH bundles it alongside the
- * private fetch runtime, while Pi's full truncation wrapper adds temp-file
- * retention on top.
+ * Keep this module free of the Pi host package: Pi's full truncation wrapper
+ * adds temp-file retention on top.
  */
 
 export const DEFAULT_MAX_LINES = 2000;

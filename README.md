@@ -58,7 +58,7 @@ List, find, and read agent skills from project-local and global skill directorie
 ```bash
 skill list
 skill find "review and repair pull requests" --limit 3
-skill get organon-web
+skill get organon-src
 ```
 
 ### `nd-playlist` — Navidrome playlists as code

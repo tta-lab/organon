@@ -149,8 +149,7 @@ describe("all native package manifests", () => {
         expectPublicMetadata(manifest, `pi/packages/native/pi-${tool}-${target.packageSuffix}`);
         expect(manifest.os).toEqual([target.packageOS]);
         expect(manifest.cpu).toEqual([target.packageCPU]);
-        const executable = target.goos === "windows" ? `${tool}.exe` : tool;
-        expect(manifest.bin).toEqual({ [tool]: `bin/${executable}` });
+        expect(manifest.bin).toEqual({ [tool]: `bin/${tool}` });
       }
     }
   }, 120000);
