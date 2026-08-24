@@ -21,7 +21,8 @@ func truncateContent(s string) string {
 	if utf8.RuneCountInString(s) <= maxContentChars {
 		return s
 	}
-	return string([]rune(s)[:maxContentChars]) + "\n[content truncated at " + fmt.Sprintf("%d", maxContentChars) + " characters]"
+	return string([]rune(s)[:maxContentChars]) + "\n[content truncated at " +
+		fmt.Sprintf("%d", maxContentChars) + " characters]"
 }
 
 // mdHeading holds metadata for one parsed markdown heading.
