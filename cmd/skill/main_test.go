@@ -368,6 +368,7 @@ func TestListCmd_JSONOutput_Empty(t *testing.T) {
 func TestFindCmd_JSONOutput(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Chdir(t.TempDir())
 
 	writeSkillAt(t, tmpHome, "breathe", "Refresh context window", "agent", "some body")
 
@@ -397,6 +398,7 @@ func TestFindCmd_JSONOutput(t *testing.T) {
 func TestFindCmd_JSONOutput_NoMatch(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Chdir(t.TempDir())
 
 	stdout, stderr, err := runSkill(t, []string{"find", "nonexistent", "--json"})
 	if err != nil {
