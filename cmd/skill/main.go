@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/skill"
 )
 
@@ -18,14 +17,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
 		os.Exit(1)
 	}
-	paths, warnings, err := resolvePaths(home)
+	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		fmt.Fprintf(os.Stderr, "cannot determine current directory: %v\n", err)
 		os.Exit(1)
 	}
-	for _, warning := range warnings {
-		fmt.Fprintln(os.Stderr, warning)
-	}
+	paths := skill.DiscoveryPaths(cwd, home)
 	cmd := newRootCmd(os.Stdout, os.Stderr, paths)
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
@@ -45,31 +42,6 @@ func newRootCmd(out, errOut io.Writer, paths []string) *cobra.Command {
 	cmd.AddCommand(newMCPCmd())
 
 	return cmd
-}
-
-// resolvePaths returns the discovery directories in priority order plus
-// warnings for configured extra directories that do not exist. Missing
-// configured dirs are not fatal — they may be absent on this machine — but a
-// typo should not pass silently.
-func resolvePaths(home string) ([]string, []string, error) {
-	cfg, err := skill.LoadConfig(config.SkillsConfigPath())
-	if err != nil {
-		return nil, nil, err
-	}
-	roots := skill.GlobalDiscoveryPaths(home, cfg)
-	paths := make([]string, 0, len(roots))
-	warnings := make([]string, 0, 1)
-	for _, root := range roots {
-		paths = append(paths, root.Dir)
-		if root.Builtin {
-			continue
-		}
-		if _, err := os.Stat(root.Dir); err != nil {
-			warnings = append(warnings, fmt.Sprintf(
-				"warning: configured skills directory %q not found (skills.toml global)", root.Dir))
-		}
-	}
-	return paths, warnings, nil
 }
 
 func newListCmd(out, errOut io.Writer, paths []string) *cobra.Command {

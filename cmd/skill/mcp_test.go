@@ -11,14 +11,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/tta-lab/organon/internal/skill"
 )
-
-// testSkillServer builds a server whose per-request config loader returns cfg.
-func testSkillServer(home string, cfg skill.Config) *mcp.Server {
-	return newSkillMCPServer(home, func() (skill.Config, error) { return cfg, nil })
-}
 
 func connectSkillMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
 	t.Helper()
@@ -60,7 +53,7 @@ func callSkillTool(t *testing.T, session *mcp.ClientSession, name string, argume
 
 func TestSkillMCPExposesOnlyReadOnlyClosedWorldTools(t *testing.T) {
 	home := t.TempDir()
-	session := connectSkillMCP(t, testSkillServer(home, skill.Config{}))
+	session := connectSkillMCP(t, newSkillMCPServer(t.TempDir(), home))
 	result, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +80,7 @@ func TestSkillMCPExposesOnlyReadOnlyClosedWorldTools(t *testing.T) {
 func TestSkillMCPGlobalSkillsDiscoveredAndRead(t *testing.T) {
 	home := t.TempDir()
 	writeSkillAt(t, home, "my-skill", "a global skill", "tool", "skill body content")
-	session := connectSkillMCP(t, testSkillServer(home, skill.Config{}))
+	session := connectSkillMCP(t, newSkillMCPServer(t.TempDir(), home))
 
 	listed := callSkillTool(t, session, "skill_list", map[string]any{})
 	got := listed["skills"].([]any)
@@ -110,76 +103,12 @@ func TestSkillMCPGlobalSkillsDiscoveredAndRead(t *testing.T) {
 	}
 }
 
-func TestSkillMCPConfiguredExtras(t *testing.T) {
-	home := t.TempDir()
-	extraRoot := t.TempDir()
-	writeSkillAt(t, home, "default-skill", "from ~/.agents", "tool", "default body")
-	writeSkillAt(t, extraRoot, "extra-skill", "from configured global dir", "tool", "extra body")
-	// Same name in both dirs: the default must win on the collision.
-	writeSkillAt(t, home, "shared", "default version", "tool", "default shared body")
-	writeSkillAt(t, extraRoot, "shared", "extra version", "tool", "extra shared body")
-
-	cfg := skill.Config{
-		Global: []string{filepath.Join(extraRoot, ".agents", "skills")},
-	}
-	session := connectSkillMCP(t, testSkillServer(home, cfg))
-
-	listed := callSkillTool(t, session, "skill_list", map[string]any{})
-	got := listed["skills"].([]any)
-	if len(got) != 3 {
-		t.Fatalf("listed skills = %#v", got)
-	}
-	byName := make(map[string]map[string]any, len(got))
-	for _, item := range got {
-		entry := item.(map[string]any)
-		byName[entry["name"].(string)] = entry
-	}
-	wantDefault := filepath.Join(home, ".agents", "skills")
-	wantExtra := filepath.Join(extraRoot, ".agents", "skills")
-	if byName["default-skill"]["source"] != wantDefault {
-		t.Fatalf("default skill = %#v, want source %q", byName["default-skill"], wantDefault)
-	}
-	if byName["extra-skill"]["source"] != wantExtra {
-		t.Fatalf("configured extra skill = %#v, want source %q", byName["extra-skill"], wantExtra)
-	}
-	if byName["shared"]["source"] != wantDefault {
-		t.Fatalf("collision skill = %#v, want default source %q", byName["shared"], wantDefault)
-	}
-
-	detail := callSkillTool(t, session, "skill_get", map[string]any{"name": "shared"})
-	if got := detail["skill"].(map[string]any); got["body"] != "default shared body" {
-		t.Fatalf("collision detail = %#v, want default body", got)
-	}
-}
-
-func TestSkillMCPReloadsConfigPerRequest(t *testing.T) {
-	home := t.TempDir()
-	extraRoot := t.TempDir()
-	writeSkillAt(t, extraRoot, "reloaded-skill", "appears after config edit", "tool", "reloaded body")
-
-	var cfg skill.Config
-	session := connectSkillMCP(t, newSkillMCPServer(home, func() (skill.Config, error) {
-		return cfg, nil
-	}))
-
-	listed := callSkillTool(t, session, "skill_list", map[string]any{})
-	if got := listed["skills"].([]any); len(got) != 0 {
-		t.Fatalf("before edit: skills = %#v, want none", got)
-	}
-
-	cfg = skill.Config{Global: []string{filepath.Join(extraRoot, ".agents", "skills")}}
-	listed = callSkillTool(t, session, "skill_list", map[string]any{})
-	if got := listed["skills"].([]any); len(got) != 1 || got[0].(map[string]any)["name"] != "reloaded-skill" {
-		t.Fatalf("after edit: skills = %#v", got)
-	}
-}
-
 func TestSkillMCPFindRanksTokenizedQueryAndAppliesLimit(t *testing.T) {
 	home := t.TempDir()
 	writeSkillAt(t, home, "pr-review-loop", "Review pull requests in a repeated loop", "workflow", "body")
 	writeSkillAt(t, home, "plan-triage", "Triage implementation plans", "workflow", "body")
 	writeSkillAt(t, home, "review-notes", "Review collected notes", "workflow", "body")
-	session := connectSkillMCP(t, testSkillServer(home, skill.Config{}))
+	session := connectSkillMCP(t, newSkillMCPServer(t.TempDir(), home))
 
 	output := callSkillTool(t, session, "skill_find", map[string]any{
 		"query": "review loop triage", "limit": 2,
@@ -212,7 +141,7 @@ func TestSkillMCPAllowsGlobalSymlinkSkills(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(base, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	session := connectSkillMCP(t, testSkillServer(home, skill.Config{}))
+	session := connectSkillMCP(t, newSkillMCPServer(t.TempDir(), home))
 
 	global := callSkillTool(t, session, "skill_get", map[string]any{"name": "linked"})
 	if got := global["skill"].(map[string]any); got["source"] != base || got["body"] != "linked body" {
@@ -234,8 +163,13 @@ func TestSkillMCPCommandHelper(_ *testing.T) {
 
 func TestSkillMCPCommandTransport(t *testing.T) {
 	home := t.TempDir()
+	cwd := t.TempDir()
 	writeSkillAt(t, home, "global", "global skill", "tool", "body")
+	writeSkillAt(t, cwd, "project", "project skill", "tool", "project body")
+	writeSkillAt(t, home, "shared", "global version", "tool", "global shared body")
+	writeSkillAt(t, cwd, "shared", "project version", "tool", "project shared body")
 	command := exec.Command(os.Args[0], "-test.run=TestSkillMCPCommandHelper")
+	command.Dir = cwd
 	command.Env = append(os.Environ(), "GO_WANT_SKILL_MCP_HELPER=1", "HOME="+home)
 	client := mcp.NewClient(&mcp.Implementation{Name: "skill-command-test", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: command}, nil)
@@ -243,8 +177,23 @@ func TestSkillMCPCommandTransport(t *testing.T) {
 		t.Fatalf("connect command transport: %v", err)
 	}
 	output := callSkillTool(t, session, "skill_list", map[string]any{})
-	if got := output["skills"].([]any); len(got) != 1 || got[0].(map[string]any)["name"] != "global" {
+	if got := output["skills"].([]any); len(got) != 3 {
 		t.Fatalf("skills = %#v", got)
+	}
+	byName := make(map[string]map[string]any)
+	for _, candidate := range output["skills"].([]any) {
+		skill := candidate.(map[string]any)
+		byName[skill["name"].(string)] = skill
+	}
+	wantProjectSource, err := filepath.EvalSymlinks(filepath.Join(cwd, ".agents", "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byName["project"]["source"] != wantProjectSource {
+		t.Fatalf("project skill = %#v", byName["project"])
+	}
+	if byName["shared"]["description"] != "project version" {
+		t.Fatalf("shared skill = %#v", byName["shared"])
 	}
 	if err := session.Close(); err != nil {
 		t.Fatalf("close session: %v", err)

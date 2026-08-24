@@ -4,17 +4,12 @@ Skills are directories containing a SKILL.md file with YAML frontmatter
 the only skill identity; directory names are storage locations, not aliases.
 
 ## Discovery path
+
+The CLI searches these directories in order; a same-named current-directory
+skill overrides a global one:
+
+  ./.agents/skills
   ~/.agents/skills
-
-## Configuration
-
-Additional directories can be configured in ~/.config/ttal/skills.toml.
-Configured entries are appended after the built-in default, in the order
-listed, so the default wins on name collisions. A leading ~ expands to
-your home directory. Example:
-
-    # Extra directories to search after ~/.agents/skills.
-    global = ["~/work/skills", "/srv/shared-skills"]
 
 ## Subcommands
   list   List all discovered skills as name and description

@@ -8,7 +8,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/skill"
 )
 
@@ -47,12 +46,10 @@ type skillGetOutput struct {
 	Skill skillDetailOutput `json:"skill"`
 }
 
-// skillMCPService serves skill tools. Skills are discovered from the global
-// ~/.agents/skills directory plus configured extras. loadCfg reloads the
-// skills.toml config on every request so edits take effect without a restart.
+// skillMCPService serves skill tools from the MCP process's startup directory
+// and the user's home directory, in that order.
 type skillMCPService struct {
-	home    string
-	loadCfg func() (skill.Config, error)
+	paths []string
 }
 
 func skillBoolPointer(value bool) *bool { return &value }
@@ -73,20 +70,11 @@ func skillTool(name, title, description string) *mcp.Tool {
 }
 
 func (s skillMCPService) catalog() (skill.Catalog, error) {
-	cfg, err := s.loadCfg()
+	skills, err := skill.ListSkills(s.paths)
 	if err != nil {
 		return skill.Catalog{}, err
 	}
-	roots := skill.GlobalDiscoveryPaths(s.home, cfg)
-	dirs := make([]string, 0, len(roots))
-	for _, root := range roots {
-		dirs = append(dirs, root.Dir)
-	}
-	globalSkills, err := skill.ListSkills(dirs)
-	if err != nil {
-		return skill.Catalog{}, err
-	}
-	return skill.NewCatalog(globalSkills), nil
+	return skill.NewCatalog(skills), nil
 }
 
 func skillSummaries(skills []skill.Skill) []skillSummaryOutput {
@@ -102,11 +90,8 @@ func skillSummaries(skills []skill.Skill) []skillSummaryOutput {
 	return result
 }
 
-func newSkillMCPServer(home string, loadCfg func() (skill.Config, error)) *mcp.Server {
-	if loadCfg == nil {
-		loadCfg = func() (skill.Config, error) { return skill.LoadConfig(config.SkillsConfigPath()) }
-	}
-	service := skillMCPService{home: home, loadCfg: loadCfg}
+func newSkillMCPServer(cwd, home string) *mcp.Server {
+	service := skillMCPService{paths: skill.DiscoveryPaths(cwd, home)}
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-skill", Version: "1.0.0"}, nil)
 
 	mcp.AddTool(server, skillTool(
@@ -174,11 +159,15 @@ func newMCPCmd() *cobra.Command {
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("determine current directory: %w", err)
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("determine home directory: %w", err)
 			}
-			return newSkillMCPServer(home, nil).Run(cmd.Context(), &mcp.StdioTransport{})
+			return newSkillMCPServer(cwd, home).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }

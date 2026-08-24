@@ -36,11 +36,6 @@ func OGConfigPath() string {
 	return filepath.Join(DefaultConfigDir(), "og.toml")
 }
 
-// SkillsConfigPath returns the path to skills.toml.
-func SkillsConfigPath() string {
-	return filepath.Join(DefaultConfigDir(), "skills.toml")
-}
-
 // DefaultReferencesPath returns ~/code/references.
 func DefaultReferencesPath() string {
 	home, err := os.UserHomeDir()

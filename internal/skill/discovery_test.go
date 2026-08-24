@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -35,126 +36,15 @@ func writeSkillFile(t *testing.T, root, path, dirName, frontmatterName, desc, ca
 	}
 }
 
-func TestGlobalDiscoveryPaths_Order(t *testing.T) {
-	paths := GlobalDiscoveryPaths("/home/user", Config{})
-	want := []DiscoveryPath{
-		{Dir: "/home/user/.agents/skills", Builtin: true},
+func TestDiscoveryPaths_PrefersCurrentDirectory(t *testing.T) {
+	cwd := "/work/project"
+	home := "/home/user"
+	want := []string{
+		"/work/project/.agents/skills",
+		"/home/user/.agents/skills",
 	}
-	if len(paths) != len(want) {
-		t.Fatalf("got %d paths, want %d", len(paths), len(want))
-	}
-	for i := range paths {
-		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
-		}
-	}
-}
-
-func TestGlobalDiscoveryPaths_ConfigExtras(t *testing.T) {
-	cfg := Config{
-		Global: []string{"/home/user/work/skills", "/srv/shared/skills", "/srv/shared/skills"},
-	}
-	paths := GlobalDiscoveryPaths("/home/user", cfg)
-	want := []DiscoveryPath{
-		{Dir: "/home/user/.agents/skills", Builtin: true},
-		{Dir: "/home/user/work/skills"},
-		{Dir: "/srv/shared/skills"},
-	}
-	if len(paths) != len(want) {
-		t.Fatalf("got %d paths, want %d", len(paths), len(want))
-	}
-	for i := range paths {
-		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
-		}
-	}
-}
-
-func TestGlobalDiscoveryPaths_ExpandsTilde(t *testing.T) {
-	cfg := Config{
-		Global: []string{"~/work/skills", "~", "/srv/shared/skills", "~/work/skills"},
-	}
-	paths := GlobalDiscoveryPaths("/home/user", cfg)
-	want := []DiscoveryPath{
-		{Dir: "/home/user/.agents/skills", Builtin: true},
-		{Dir: "/home/user/work/skills"},
-		{Dir: "/home/user"},
-		{Dir: "/srv/shared/skills"},
-	}
-	if len(paths) != len(want) {
-		t.Fatalf("got %d paths, want %d", len(paths), len(want))
-	}
-	for i := range paths {
-		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
-		}
-	}
-}
-
-func TestGlobalDiscoveryPaths_SkipsTildeWhenHomeEmpty(t *testing.T) {
-	cfg := Config{
-		Global: []string{"~/work/skills", "/srv/shared/skills", "~"},
-	}
-	paths := GlobalDiscoveryPaths("", cfg)
-	want := []DiscoveryPath{
-		{Dir: ".agents/skills", Builtin: true},
-		{Dir: "/srv/shared/skills"},
-	}
-	if len(paths) != len(want) {
-		t.Fatalf("got %d paths, want %d", len(paths), len(want))
-	}
-	for i := range paths {
-		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %#v, want %#v", i, paths[i], want[i])
-		}
-	}
-	for _, p := range paths {
-		if p.Dir == "." {
-			t.Fatalf("tilde entry resolved to current directory: %#v", paths)
-		}
-	}
-}
-
-func TestLoadConfig_MissingFile(t *testing.T) {
-	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "does-not-exist.toml"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(cfg.Global) != 0 {
-		t.Fatalf("cfg = %#v, want empty", cfg)
-	}
-}
-
-func TestLoadConfig_TrimsDropsBlanksAndKeepsTilde(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skills.toml")
-	content := `
-global = ["~/work/skills", "  ", "/srv/shared/skills", " ~/other/skills "]
-`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	wantGlobal := []string{"~/work/skills", "/srv/shared/skills", "~/other/skills"}
-	if len(cfg.Global) != len(wantGlobal) {
-		t.Fatalf("Global = %v, want %v", cfg.Global, wantGlobal)
-	}
-	for i := range wantGlobal {
-		if cfg.Global[i] != wantGlobal[i] {
-			t.Errorf("Global[%d] = %q, want %q", i, cfg.Global[i], wantGlobal[i])
-		}
-	}
-}
-
-func TestLoadConfig_InvalidTOML(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skills.toml")
-	if err := os.WriteFile(path, []byte("global = [not closed"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadConfig(path); err == nil {
-		t.Fatal("expected error for invalid TOML")
+	if got := DiscoveryPaths(cwd, home); !reflect.DeepEqual(got, want) {
+		t.Fatalf("DiscoveryPaths() = %v, want %v", got, want)
 	}
 }
 
