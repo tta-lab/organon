@@ -1,8 +1,8 @@
 export interface NativeTarget {
-  packageOS: "darwin" | "linux" | "win32";
+  packageOS: "darwin" | "linux";
   packageCPU: "arm64" | "x64";
   packageSuffix: string;
-  goos: "darwin" | "linux" | "windows";
+  goos: "darwin" | "linux";
   goarch: "arm64" | "amd64";
   fileMarker: RegExp;
   tools: string[];

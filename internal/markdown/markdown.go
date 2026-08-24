@@ -9,10 +9,21 @@ import (
 	"github.com/yuin/goldmark/ast"
 	goldmarktext "github.com/yuin/goldmark/text"
 
-	"github.com/tta-lab/organon/internal/fetch"
 	"github.com/tta-lab/organon/internal/id"
 	"github.com/tta-lab/organon/internal/tree"
 )
+
+// maxContentChars is the rune limit applied by truncateContent.
+const maxContentChars = 30_000
+
+// truncateContent truncates content to maxContentChars runes.
+func truncateContent(s string) string {
+	if utf8.RuneCountInString(s) <= maxContentChars {
+		return s
+	}
+	return string([]rune(s)[:maxContentChars]) + "\n[content truncated at " +
+		fmt.Sprintf("%d", maxContentChars) + " characters]"
+}
 
 // mdHeading holds metadata for one parsed markdown heading.
 type mdHeading struct {
@@ -222,12 +233,12 @@ func RenderContent(
 
 	if showTree || (!full && charCount > treeThreshold) {
 		if len(headings) == 0 {
-			return &MarkdownResult{Content: fetch.TruncateContent(string(source)), Mode: "full"}, nil
+			return &MarkdownResult{Content: truncateContent(string(source)), Mode: "full"}, nil
 		}
 		return &MarkdownResult{Content: renderTree(headings, source), Mode: "tree"}, nil
 	}
 
-	return &MarkdownResult{Content: fetch.TruncateContent(string(source)), Mode: "full"}, nil
+	return &MarkdownResult{Content: truncateContent(string(source)), Mode: "full"}, nil
 }
 
 // formatNum formats an integer with thousands separators.

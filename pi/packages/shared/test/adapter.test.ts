@@ -47,40 +47,36 @@ async function waitForProcessExit(pid: number): Promise<void> {
 describe("platform detection", () => {
   it("detects the current host as one of the supported triples", () => {
     const triple = detectPlatform();
-    expect(["darwin", "linux", "win32"]).toContain(triple.os);
+    expect(["darwin", "linux"]).toContain(triple.os);
     expect(["arm64", "x64"]).toContain(triple.arch);
   });
 
   it("names the host native package for a tool", () => {
     const { os, arch } = detectPlatform();
-    const tool = os === "win32" ? "web" : "project";
-    expect(nativePackageName(tool)).toBe(`@tta-lab/pi-${tool}-${os}-${arch}`);
+    expect(nativePackageName("project")).toBe(`@tta-lab/pi-project-${os}-${arch}`);
   });
 });
 
 describe("binary resolution", () => {
   it("resolves the host native package's bin/<tool> via the resolver", () => {
     const { os, arch } = detectPlatform();
-    const tool = os === "win32" ? "web" : "project";
-    const resolved = resolveBinaryPath(tool, {
+    const resolved = resolveBinaryPath("project", {
       resolve: (specifier) => {
-        expect(specifier).toBe(`@tta-lab/pi-${tool}-${os}-${arch}/package.json`);
+        expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
         return join(here, "fake-node-modules", specifier);
       },
     });
-    const executable = os === "win32" ? `${tool}.exe` : tool;
-    expect(resolved.replaceAll("\\", "/").endsWith(`/bin/${executable}`)).toBe(true);
+    expect(resolved.replaceAll("\\", "/").endsWith(`/bin/project`)).toBe(true);
   });
 
   it("throws an actionable error when the native package is missing", () => {
-    const tool = detectPlatform().os === "win32" ? "web" : "project";
     expect(() =>
-      resolveBinaryPath(tool, {
+      resolveBinaryPath("project", {
         resolve: () => {
           throw new Error("Cannot find module");
         },
       }),
-    ).toThrow(new RegExp(`native package @tta-lab/pi-${tool}-`));
+    ).toThrow(/native package @tta-lab\/pi-project-/);
   });
 });
 
@@ -99,32 +95,12 @@ function withPlatform<T>(platform: NodeJS.Platform, arch: NodeJS.Architecture, r
   }
 }
 
-describe("Windows web binary resolution", () => {
-  it("resolves win32/x64 web.exe through a path containing spaces", () => {
-    const directory = mkdtempSync(join(tmpdir(), "organon web native path "));
-    try {
-      const { resolved, packageName } = withPlatform("win32", "x64", () => ({
-        resolved: resolveBinaryPath("web", {
-          resolve: (specifier) => {
-            expect(specifier).toBe("@tta-lab/pi-web-win32-x64/package.json");
-            return join(directory, "node_modules", "@tta-lab", "pi-web-win32-x64", "package.json");
-          },
-        }),
-        packageName: nativePackageName("web"),
-      }));
-      expect(resolved).toBe(
-        join(directory, "node_modules", "@tta-lab", "pi-web-win32-x64", "bin", "web.exe"),
-      );
-      expect(packageName).toBe("@tta-lab/pi-web-win32-x64");
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("does not advertise Windows natives for other tools", () => {
+describe("unsupported Windows hosts", () => {
+  it("rejects every tool on win32/x64", () => {
+    expect(() => withPlatform("win32", "x64", () => detectPlatform())).toThrow(/not supported/);
     expect(() =>
       withPlatform("win32", "x64", () => resolveBinaryPath("project", { resolve: () => "" })),
-    ).toThrow(/pi-web only/);
+    ).toThrow(/not supported/);
   });
 });
 

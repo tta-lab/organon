@@ -6,8 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tta-lab/organon/internal/fetch"
 )
 
 const testDoc = `# My Document
@@ -151,12 +149,12 @@ func TestFormatNum(t *testing.T) {
 
 func TestTruncateContent_Short(t *testing.T) {
 	s := "hello world"
-	assert.Equal(t, s, fetch.TruncateContent(s))
+	assert.Equal(t, s, truncateContent(s))
 }
 
 func TestTruncateContent_Long(t *testing.T) {
 	s := strings.Repeat("a", 31000)
-	result := fetch.TruncateContent(s)
+	result := truncateContent(s)
 	assert.True(t, len(result) < len(s))
 	assert.Contains(t, result, "truncated")
 }

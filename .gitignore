@@ -33,7 +33,6 @@ go.work.sum
 /src
 /token
 /url
-/web
 
 # GoReleaser release output
 /dist/

@@ -1,6 +1,6 @@
 # Organon Quick Reference
 
-Three CLI tools for AI agents: `src` (symbol-aware source reading/editing), `web` (web search and page fetching), and `skill` (filesystem-based skill discovery).
+CLI tools for AI agents: `src` (symbol-aware source reading/editing), `skill` (filesystem-based skill discovery), and `project` (project management).
 
 ## src
 
@@ -27,21 +27,6 @@ EDIT
 Markdown files (.md, .markdown, .mdx) use heading-based sections (not tree-sitter). `comment` not supported for markdown.
 
 `src edit` works on any text file regardless of language support — escape hatch for config files, unsupported languages, or targeted text replacement without symbol IDs.
-
-## web
-
-```bash
-web search "<query>"              # search (10 results)
-web fetch <url>                   # fetch page (auto-tree if >5000 chars)
-web fetch <url> --tree            # force heading tree
-web fetch <url> -s <id>           # read section by ID
-web fetch <url> --full            # full content, skip auto-tree
-web fetch <url> --tree-threshold 8000  # custom auto-tree threshold
-```
-
-Search backends: `EXA_API_KEY` → Exa, then `BRAVE_API_KEY` → Brave. Search fails when neither is configured; an empty key causes an error.
-
-Fetch backend: `BROWSER_GATEWAY_URL` → browser gateway (no cache). Otherwise defuddle CLI with daily cache at `~/.cache/organon/scrapes/`.
 
 ## skill
 

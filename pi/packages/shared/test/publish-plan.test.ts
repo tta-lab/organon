@@ -91,10 +91,8 @@ describe("release publish plan", () => {
     expect(plan.length).toBe(nativeCount + mainCount);
     expect(plan.slice(0, nativeCount).every((entry) => entry.kind === "native")).toBe(true);
     expect(plan.slice(nativeCount).every((entry) => entry.kind === "main")).toBe(true);
-    expect(plan.some((entry) => entry.name === "@tta-lab/pi-web-win32-x64")).toBe(true);
-    expect(plan.some((entry) => entry.name === "@tta-lab/dsh-web" && entry.kind === "main")).toBe(
-      true,
-    );
+    expect(plan.some((entry) => entry.name.startsWith("@tta-lab/pi-web"))).toBe(false);
+    expect(plan.some((entry) => entry.name.startsWith("@tta-lab/dsh-web"))).toBe(false);
     expect(
       plan.filter((entry) => entry.kind === "native").some((entry) => entry.name.includes("dsh")),
     ).toBe(false);
@@ -103,10 +101,10 @@ describe("release publish plan", () => {
     );
   });
 
-  it("normalizes Windows executable artifact names", () => {
-    expect(artifactMatchesTool("web", "web")).toBe(true);
-    expect(artifactMatchesTool("web.exe", "web")).toBe(true);
-    expect(artifactMatchesTool("web.exe", "src")).toBe(false);
+  it("normalizes executable artifact names", () => {
+    expect(artifactMatchesTool("project", "project")).toBe(true);
+    expect(artifactMatchesTool("project.exe", "project")).toBe(true);
+    expect(artifactMatchesTool("project.exe", "src")).toBe(false);
   });
 
   it("selects beta for prereleases and latest for stable versions", () => {
