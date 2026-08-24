@@ -5,19 +5,21 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/tta-lab/organon/internal/skill"
 )
 
 func runSkill(t *testing.T, args []string) (stdout, stderr string, err error) {
 	t.Helper()
 	var outBuf, errBuf bytes.Buffer
 	home := os.Getenv("HOME")
-	paths := []string{}
-	if home != "" {
-		paths, _, _ = resolvePaths(home) //nolint:errcheck // test isolation
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		t.Fatalf("get working directory: %v", cwdErr)
 	}
+	paths := skill.DiscoveryPaths(cwd, home)
 	cmd := newRootCmd(&outBuf, &errBuf, paths)
 	cmd.SetArgs(args)
 	err = cmd.Execute()
@@ -93,6 +95,42 @@ func TestSkillList_PrintsModelFriendlyBullets(t *testing.T) {
 	for _, unwanted := range []string{"NAME", "CATEGORY", "SOURCE", "..."} {
 		if strings.Contains(stdout, unwanted) {
 			t.Fatalf("stdout should not contain %q, got: %q", unwanted, stdout)
+		}
+	}
+}
+
+func TestSkillList_PrefersCurrentDirectorySkills(t *testing.T) {
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeSkillAt(t, cwd, "project-only", "from project", "tool", "project body")
+	writeSkillAt(t, cwd, "shared", "project version", "tool", "project shared body")
+	writeSkillAt(t, home, "global-only", "from home", "tool", "global body")
+	writeSkillAt(t, home, "shared", "global version", "tool", "global shared body")
+
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalCwd) })
+
+	stdout, _, err := runSkill(t, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var skills []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &skills); err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 3 {
+		t.Fatalf("skills = %#v, want three", skills)
+	}
+	for _, candidate := range skills {
+		if candidate["name"] == "shared" && candidate["description"] != "project version" {
+			t.Fatalf("shared skill = %#v, want project version", candidate)
 		}
 	}
 }
@@ -330,6 +368,7 @@ func TestListCmd_JSONOutput_Empty(t *testing.T) {
 func TestFindCmd_JSONOutput(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Chdir(t.TempDir())
 
 	writeSkillAt(t, tmpHome, "breathe", "Refresh context window", "agent", "some body")
 
@@ -359,6 +398,7 @@ func TestFindCmd_JSONOutput(t *testing.T) {
 func TestFindCmd_JSONOutput_NoMatch(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Chdir(t.TempDir())
 
 	stdout, stderr, err := runSkill(t, []string{"find", "nonexistent", "--json"})
 	if err != nil {
@@ -434,38 +474,5 @@ func TestSkillList_EmptyDescriptionRendersNameAndDescription(t *testing.T) {
 	want := "Available skills:\n- no-category-skill: A skill with no category\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
-	}
-}
-
-func TestResolvePaths_WarnsOnMissingConfiguredDir(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	configDir := filepath.Join(tmpHome, ".config", "ttal")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(tmpHome, "present", "skills"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	content := "global = [\"~/missing/skills\", \"~/present/skills\"]\n"
-	if err := os.WriteFile(filepath.Join(configDir, "skills.toml"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	paths, warnings, err := resolvePaths(tmpHome)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "missing") {
-		t.Fatalf("warnings = %v, want exactly one about the missing dir", warnings)
-	}
-	wantPaths := []string{
-		filepath.Join(tmpHome, ".agents", "skills"),
-		filepath.Join(tmpHome, "missing", "skills"),
-		filepath.Join(tmpHome, "present", "skills"),
-	}
-	if !reflect.DeepEqual(paths, wantPaths) {
-		t.Fatalf("paths = %v, want %v", paths, wantPaths)
 	}
 }

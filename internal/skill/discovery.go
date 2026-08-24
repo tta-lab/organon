@@ -12,6 +12,15 @@ import (
 
 const maximumSkillBytes = 1024 * 1024
 
+// DiscoveryPaths returns project-local and user-global skill directories in
+// priority order. A same-named local skill overrides a global one.
+func DiscoveryPaths(cwd, home string) []string {
+	return []string{
+		filepath.Join(cwd, ".agents", "skills"),
+		filepath.Join(home, ".agents", "skills"),
+	}
+}
+
 // Skill represents a discovered skill with its metadata and source location.
 type Skill struct {
 	Name        string
@@ -32,65 +41,6 @@ func newSkill(name string, meta Meta, source, path, body string) Skill {
 		Path:        path,
 		Body:        strings.TrimSpace(body),
 	}
-}
-
-// DiscoveryPath is one skills root directory. Builtin marks the ~/.agents/skills
-// default; configured extras are not built-in and may legitimately be absent on
-// a given machine (worth warning about, but not fatal).
-type DiscoveryPath struct {
-	Dir     string
-	Builtin bool
-}
-
-// GlobalDiscoveryPaths returns user-global discovery paths in priority order,
-// starting with the built-in .agents convention followed by configured extras.
-// A leading "~" in a configured entry expands against home; when home is empty
-// such entries are skipped rather than resolved to the current directory.
-func GlobalDiscoveryPaths(home string, cfg Config) []DiscoveryPath {
-	paths := make([]DiscoveryPath, 0, len(cfg.Global)+1)
-	paths = append(paths, DiscoveryPath{Dir: filepath.Join(home, ".agents", "skills"), Builtin: true})
-	for _, extra := range cfg.Global {
-		if expanded, ok := expandHome(extra, home); ok {
-			paths = append(paths, DiscoveryPath{Dir: expanded})
-		}
-	}
-	return dedupePaths(paths)
-}
-
-// expandHome expands a leading "~" against home. It reports false (entry
-// skipped) when the entry starts with "~" but home is empty, so a "~" entry
-// never silently resolves to ".".
-func expandHome(path, home string) (string, bool) {
-	switch {
-	case path == "~":
-		if home == "" {
-			return "", false
-		}
-		return home, true
-	case strings.HasPrefix(path, "~"+string(filepath.Separator)):
-		if home == "" {
-			return "", false
-		}
-		return filepath.Join(home, path[2:]), true
-	default:
-		return path, true
-	}
-}
-
-// dedupePaths removes duplicate discovery directories while preserving order.
-func dedupePaths(paths []DiscoveryPath) []DiscoveryPath {
-	seen := make(map[string]bool, len(paths))
-	out := make([]DiscoveryPath, 0, len(paths))
-	for _, p := range paths {
-		dir := filepath.Clean(p.Dir)
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		p.Dir = dir
-		out = append(out, p)
-	}
-	return out
 }
 
 // ListSkills walks all discovery paths and returns all skills, deduplicated by name.
