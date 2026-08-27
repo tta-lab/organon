@@ -313,9 +313,7 @@ func validateClonedRepository(ctx context.Context, directory string, source clon
 	if err != nil {
 		return fmt.Errorf("validate cloned repository: %w", err)
 	}
-	realRoot, rootErr := filepath.EvalSymlinks(root)
-	realDirectory, directoryErr := filepath.EvalSymlinks(directory)
-	if rootErr != nil || directoryErr != nil || filepath.Clean(realRoot) != filepath.Clean(realDirectory) {
+	if !sameRealPath(root, directory) {
 		return fmt.Errorf("cloned repository top-level %q does not match destination %q", root, directory)
 	}
 	remote, err := controlledGitOutput(ctx, directory, "remote", "get-url", remoteOrigin)

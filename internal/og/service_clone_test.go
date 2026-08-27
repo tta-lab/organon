@@ -39,6 +39,32 @@ func TestGitCloneDerivesProjectPathAndRegistersAlias(t *testing.T) {
 	}
 }
 
+func TestGitCloneAcceptsCaseInsensitiveCloneParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	parent := filepath.Join(home, "code", "projects", "LamplitIsles")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "code", "projects", "lamplitisles")); err != nil {
+		t.Skip("filesystem is case-sensitive")
+	}
+	store := writeCloneProjects(t, "")
+	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
+		return createClonedRepository(ctx, invocation)
+	})
+
+	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{}).GitClone(Request{
+		URL: "https://github.com/LamplitIsles/kepos-imagegen.git",
+	})
+	if err != nil {
+		t.Fatalf("GitClone: %v", err)
+	}
+	if resp.Clone == nil || !resp.Clone.Registered {
+		t.Fatalf("clone result = %+v", resp.Clone)
+	}
+}
+
 func assertTemporaryCloneInvocation(t *testing.T, got cloneInvocation, wantPath string) {
 	t.Helper()
 	if got.Destination == wantPath {
