@@ -85,6 +85,9 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 		{key: "core.askPass", value: ""},
 		{key: "http.sslVerify", value: "true"},
 	}
+	if proxy := gitProxyFromEnvironment(baseEnv); proxy != "" {
+		configs = append(configs, configPair{key: "http.proxy", value: proxy})
+	}
 	if token != "" {
 		configs = append(configs, configPair{
 			key:   credentialHelperConfig,
@@ -106,6 +109,18 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 		env = append(env, "GIT_TOKEN_INJECT="+token)
 	}
 	return env
+}
+
+func gitProxyFromEnvironment(baseEnv []string) string {
+	for _, name := range []string{"HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"} {
+		for i := len(baseEnv) - 1; i >= 0; i-- {
+			candidateName, value, _ := strings.Cut(baseEnv[i], "=")
+			if candidateName == name && value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func filterControlledGitEnv(baseEnv []string) []string {
