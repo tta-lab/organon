@@ -239,9 +239,9 @@ func resolveRegisteredRepo(
 }
 
 func sameRealPath(left, right string) bool {
-	realLeft, leftErr := filepath.EvalSymlinks(left)
-	realRight, rightErr := filepath.EvalSymlinks(right)
-	return leftErr == nil && rightErr == nil && filepath.Clean(realLeft) == filepath.Clean(realRight)
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func tokenEnvFor(provider gitprovider.ProviderType) string {
