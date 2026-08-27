@@ -35,6 +35,20 @@ func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	}
 }
 
+func TestGitHubAppGitEnvInjectsHTTPSProxy(t *testing.T) {
+	env := GitHubAppGitEnv(
+		[]string{"PATH=/bin", "HTTPS_PROXY=http://proxy.invalid:7890"},
+		"https://github.com/tta-lab/organon.git",
+		"tta-lab",
+		"organon",
+		"",
+	)
+	configs := gitConfigPairs(t, env)
+	if got := configs["http.proxy"]; got != "http://proxy.invalid:7890" {
+		t.Fatalf("http.proxy = %q, want HTTPS proxy", got)
+	}
+}
+
 func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 	base := []string{
 		"PATH=/bin",
