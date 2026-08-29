@@ -15,6 +15,19 @@ func aliases(entries []Entry) []string {
 	return result
 }
 
+func openReferenceCatalog(t *testing.T) *Catalog {
+	t.Helper()
+	catalog, err := OpenCatalog(writeProjectFile(t, `[fb]
+name = "FlickNote Backend"
+path = "/projects/flick-backend"
+remote = "https://example.com/owner/flick-backend.git"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
 func TestCatalogResolveMatchesAlternateIdentitiesCaseInsensitively(t *testing.T) {
 	path := writeProjectFile(t, `[fb]
 name = "FlickNote Backend"
@@ -216,6 +229,39 @@ remote = "https://example.com/owner/one.git"
 	}
 	if len(got) != 0 {
 		t.Fatalf("Find unrelated = %v, want empty", aliases(got))
+	}
+}
+
+func TestCatalogFindWithReferencesIncludesUniqueReference(t *testing.T) {
+	catalog := openReferenceCatalog(t)
+	referencePath := "/references/github.com/tta-lab/reference-only"
+	entries, err := catalog.FindWithReferences("reference-only", DefaultFindLimit, []Entry{{
+		Alias:     "reference-only",
+		Name:      "tta-lab/reference-only",
+		Path:      referencePath,
+		Reference: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !entries[0].Reference || entries[0].Path != referencePath {
+		t.Fatalf("FindWithReferences() = %+v", entries)
+	}
+}
+
+func TestCatalogFindWithReferencesPrefersRegisteredProjectForSameName(t *testing.T) {
+	catalog := openReferenceCatalog(t)
+	entries, err := catalog.FindWithReferences("flick-backend", DefaultFindLimit, []Entry{{
+		Alias:     "flick-backend",
+		Name:      "other/flick-backend",
+		Path:      "/references/github.com/other/flick-backend",
+		Reference: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Reference || entries[0].Path != "/projects/flick-backend" {
+		t.Fatalf("FindWithReferences() = %+v, want registered project path", entries)
 	}
 }
 

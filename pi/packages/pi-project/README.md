@@ -1,9 +1,10 @@
 # @tta-lab/pi-project
 
-A [Pi](https://pi.dev) extension for discovering registered Organon projects.
+A [Pi](https://pi.dev) extension for discovering registered Organon projects
+and locally cloned reference repositories.
 Its `project_list`, `project_find`, and `project_get` tools list projects, find
-matching registrations, and return the full record for a selected project
-without MCP configuration.
+matching projects and references, and return the full record for a selected
+project without MCP configuration.
 
 ## Install
 

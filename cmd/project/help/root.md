@@ -1,4 +1,4 @@
-Manage registered projects — list, find, get, resolve, and navigate.
+Manage registered projects and discover local reference repositories.
 
 Existing project references resolve case-insensitively from a canonical alias,
 checkout basename, or remote repository basename. Alias matches take priority;
@@ -11,7 +11,7 @@ for discovery but do not authorize an operation.
   project list --json                  # JSON output
 
 ## Find
-  project find <query>...              # ranked active-project discovery
+  project find <query>...              # ranked project and reference discovery
   project find <query>... --limit 16   # bound the result count (maximum 32)
   project find <query>... --json        # JSON output
 

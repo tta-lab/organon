@@ -7,6 +7,60 @@ import (
 	"strings"
 )
 
+// Entry identifies one repository under the references filesystem tree.
+type Entry struct {
+	Host  string
+	Owner string
+	Repo  string
+	Path  string
+}
+
+// List returns every locally cloned reference repository in deterministic order.
+func List(referencesPath string) ([]Entry, error) {
+	hosts, err := os.ReadDir(referencesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Entry{}, nil
+		}
+		return nil, fmt.Errorf("reading references directory %s: %w", referencesPath, err)
+	}
+	var entries []Entry
+	for _, host := range hosts {
+		if !host.IsDir() {
+			continue
+		}
+		hostPath := filepath.Join(referencesPath, host.Name())
+		owners, readErr := os.ReadDir(hostPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("reading reference host directory %s: %w", hostPath, readErr)
+		}
+		for _, owner := range owners {
+			if !owner.IsDir() {
+				continue
+			}
+			ownerPath := filepath.Join(hostPath, owner.Name())
+			repos, repoErr := os.ReadDir(ownerPath)
+			if repoErr != nil {
+				return nil, fmt.Errorf("reading reference owner directory %s: %w", ownerPath, repoErr)
+			}
+			for _, repo := range repos {
+				if !repo.IsDir() || isCloneTemporaryDirectory(repo.Name()) {
+					continue
+				}
+				entries = append(entries, Entry{
+					Host: host.Name(), Owner: owner.Name(), Repo: repo.Name(),
+					Path: filepath.Join(ownerPath, repo.Name()),
+				})
+			}
+		}
+	}
+	return entries, nil
+}
+
+func isCloneTemporaryDirectory(name string) bool {
+	return strings.HasPrefix(name, ".") && strings.Contains(name, ".clone-")
+}
+
 // Resolve resolves target as either a bare repo name or an org/repo
 // GitHub reference. Resolution is local-only and never clones.
 func Resolve(target, referencesPath string) (string, error) {
@@ -51,27 +105,17 @@ func isSafePathPart(part string) bool {
 // one match is found. Errors with disambiguation list on multiple matches.
 func FindClonedRepo(name, referencesPath string) (string, error) {
 	var matches []string
-
-	hosts, err := os.ReadDir(referencesPath)
+	entries, err := List(referencesPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf(
-				"repo %q not found as org/repo; references directory does not exist at %s",
-				name, referencesPath,
-			)
-		}
 		return "", fmt.Errorf(
 			"repo %q not found as org/repo; could not read references directory %s: %w",
 			name, referencesPath, err,
 		)
 	}
-
-	for _, host := range hosts {
-		if !host.IsDir() {
-			continue
+	for _, entry := range entries {
+		if entry.Repo == name {
+			matches = append(matches, entry.Path)
 		}
-		hostPath := filepath.Join(referencesPath, host.Name())
-		matches = append(matches, scanHostDir(name, hostPath)...)
 	}
 
 	switch len(matches) {
@@ -102,30 +146,4 @@ func FindClonedRepo(name, referencesPath string) (string, error) {
 			name, strings.Join(options, "\n  "),
 		)
 	}
-}
-
-func scanHostDir(name, hostPath string) []string {
-	var matches []string
-	orgs, err := os.ReadDir(hostPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", hostPath, err)
-		return nil
-	}
-	for _, org := range orgs {
-		if !org.IsDir() {
-			continue
-		}
-		orgPath := filepath.Join(hostPath, org.Name())
-		repos, err := os.ReadDir(orgPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", orgPath, err)
-			continue
-		}
-		for _, repo := range repos {
-			if repo.IsDir() && repo.Name() == name {
-				matches = append(matches, filepath.Join(orgPath, repo.Name()))
-			}
-		}
-	}
-	return matches
 }

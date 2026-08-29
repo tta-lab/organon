@@ -31,6 +31,16 @@ const projects = [
     archived: true,
   },
 ];
+const references = [
+  {
+    alias: "reference-only",
+    name: "tta-lab/reference-only",
+    path: "/home/neil/code/references/github.com/tta-lab/reference-only",
+    remote: "",
+    archived: false,
+    reference: true,
+  },
+];
 switch (cmd) {
   case "list": {
     const includeArchived = args.includes("--include-archived");
@@ -47,9 +57,11 @@ switch (cmd) {
     const visible =
       query === "missing"
         ? []
-        : projects.filter(
-            (p) => !p.archived && ["runtime", "limited"].includes(query) && p.alias === "len",
-          );
+        : query === "reference"
+          ? references
+          : projects.filter(
+              (p) => !p.archived && ["runtime", "limited"].includes(query) && p.alias === "len",
+            );
     process.stdout.write(JSON.stringify({ projects: visible }) + "\n");
     break;
   }

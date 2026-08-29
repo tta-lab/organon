@@ -21,6 +21,10 @@ func main() {
 	}
 }
 
+func discoveryStore() *project.Store {
+	return project.NewDiscoveryStore(config.ProjectsPath(), config.DefaultReferencesPath())
+}
+
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
@@ -81,15 +85,19 @@ func printProjectBullets(entries []project.Entry) {
 
 func printProjectEntries(entries []project.Entry) {
 	for _, e := range entries {
+		referenceSuffix := ""
+		if e.Reference {
+			referenceSuffix = " [reference]"
+		}
 		if e.Name != "" && e.Path != "" {
-			fmt.Printf("- %s: %s (path: %s)\n", e.Alias, e.Name, e.Path)
+			fmt.Printf("- %s%s: %s (path: %s)\n", e.Alias, referenceSuffix, e.Name, e.Path)
 			continue
 		}
 		if e.Name != "" {
-			fmt.Printf("- %s: %s\n", e.Alias, e.Name)
+			fmt.Printf("- %s%s: %s\n", e.Alias, referenceSuffix, e.Name)
 			continue
 		}
-		fmt.Printf("- %s: %s\n", e.Alias, e.Path)
+		fmt.Printf("- %s%s: %s\n", e.Alias, referenceSuffix, e.Path)
 	}
 }
 
@@ -100,11 +108,11 @@ func newFindCmd() *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "find <query>...",
-		Short: "Find active projects by relevance",
+		Short: "Find projects and references by relevance",
 		Long:  helpFind,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries, err := project.NewStore(config.ProjectsPath()).Find(strings.Join(args, " "), limit)
+			entries, err := discoveryStore().Find(strings.Join(args, " "), limit)
 			if err != nil {
 				return err
 			}
@@ -115,10 +123,10 @@ func newFindCmd() *cobra.Command {
 				return json.NewEncoder(os.Stdout).Encode(projectListOutput{Projects: entries})
 			}
 			if len(entries) == 0 {
-				fmt.Println("No active projects found.")
+				fmt.Println("No active projects or references found.")
 				return nil
 			}
-			fmt.Println("Matching active projects:")
+			fmt.Println("Matching projects and references:")
 			printProjectEntries(entries)
 			return nil
 		},
@@ -126,7 +134,7 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	cmd.Flags().IntVar(
 		&limit, "limit", project.DefaultFindLimit,
-		"Maximum number of active projects to return (maximum 32)",
+		"Maximum number of projects and references to return (maximum 32)",
 	)
 	return cmd
 }

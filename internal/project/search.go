@@ -24,6 +24,22 @@ type projectSearchRank struct {
 
 // Find returns active projects ranked for a natural-language query.
 func (c *Catalog) Find(query string, limit int) ([]Entry, error) {
+	return findEntries(c.activeEntries, query, limit)
+}
+
+// FindWithReferences searches active projects plus local reference repositories.
+// A registered project shadows a reference with the same repository identity.
+func (c *Catalog) FindWithReferences(query string, limit int, references []Entry) ([]Entry, error) {
+	entries := append([]Entry(nil), c.activeEntries...)
+	for _, reference := range references {
+		if !registeredProjectShadowsReference(c.activeEntries, reference) {
+			entries = append(entries, reference)
+		}
+	}
+	return findEntries(entries, query, limit)
+}
+
+func findEntries(entries []Entry, query string, limit int) ([]Entry, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("query must not be blank")
@@ -38,8 +54,8 @@ func (c *Catalog) Find(query string, limit int) ([]Entry, error) {
 		return []Entry{}, nil
 	}
 
-	ranked := make([]projectSearchRank, 0, len(c.activeEntries))
-	for _, entry := range c.activeEntries {
+	ranked := make([]projectSearchRank, 0, len(entries))
+	for _, entry := range entries {
 		if rank, ok := rankProject(entry, queryNormalized, queryTokens); ok {
 			ranked = append(ranked, rank)
 		}
@@ -55,6 +71,18 @@ func (c *Catalog) Find(query string, limit int) ([]Entry, error) {
 		result = append(result, rank.entry)
 	}
 	return result, nil
+}
+
+func registeredProjectShadowsReference(projects []Entry, reference Entry) bool {
+	referenceName := filepath.Base(reference.Path)
+	for _, entry := range projects {
+		for _, identity := range []string{entry.Alias, filepath.Base(entry.Path), remoteBasename(entry.Remote)} {
+			if strings.EqualFold(identity, referenceName) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func rankProject(entry Entry, query string, queryTokens []string) (projectSearchRank, bool) {
@@ -154,6 +182,12 @@ func projectSearchLess(left, right projectSearchRank) bool {
 	}
 	if left.distance != right.distance {
 		return left.distance < right.distance
+	}
+	if left.entry.Reference != right.entry.Reference {
+		return !left.entry.Reference
+	}
+	if left.entry.Alias == right.entry.Alias {
+		return left.entry.Path < right.entry.Path
 	}
 	return left.entry.Alias < right.entry.Alias
 }

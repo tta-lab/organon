@@ -61,6 +61,54 @@ func TestFindClonedRepo(t *testing.T) {
 	}
 }
 
+func TestListReturnsReferenceRepositoriesInDeterministicOrder(t *testing.T) {
+	references := t.TempDir()
+	paths := []string{
+		filepath.Join(references, "gitlab.com", "example", "zeta"),
+		filepath.Join(references, "github.com", "tta-lab", "organon"),
+		filepath.Join(references, "github.com", "other", "alpha"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(
+		filepath.Join(references, "github.com", "tta-lab", ".organon.clone-123456789"),
+		0755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := List(references)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("List() = %+v, want 3 entries without clone temporary directory", entries)
+	}
+	want := []Entry{
+		{Host: "github.com", Owner: "other", Repo: "alpha", Path: paths[2]},
+		{Host: "github.com", Owner: "tta-lab", Repo: "organon", Path: paths[1]},
+		{Host: "gitlab.com", Owner: "example", Repo: "zeta", Path: paths[0]},
+	}
+	for i := range want {
+		if entries[i] != want[i] {
+			t.Fatalf("entry %d = %+v, want %+v", i, entries[i], want[i])
+		}
+	}
+}
+
+func TestListMissingRootIsEmpty(t *testing.T) {
+	entries, err := List(filepath.Join(t.TempDir(), "missing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries == nil || len(entries) != 0 {
+		t.Fatalf("List() = %+v, want non-nil empty slice", entries)
+	}
+}
+
 func TestFindClonedRepoNotFound(t *testing.T) {
 	dir := t.TempDir()
 	refsPath := filepath.Join(dir, "references")
