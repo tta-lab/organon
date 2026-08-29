@@ -7,6 +7,56 @@ import (
 	"strings"
 )
 
+// Entry identifies one repository under the references filesystem tree.
+type Entry struct {
+	Host  string
+	Owner string
+	Repo  string
+	Path  string
+}
+
+// List returns every locally cloned reference repository in deterministic order.
+func List(referencesPath string) ([]Entry, error) {
+	hosts, err := os.ReadDir(referencesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Entry{}, nil
+		}
+		return nil, fmt.Errorf("reading references directory %s: %w", referencesPath, err)
+	}
+	var entries []Entry
+	for _, host := range hosts {
+		if !host.IsDir() {
+			continue
+		}
+		hostPath := filepath.Join(referencesPath, host.Name())
+		owners, readErr := os.ReadDir(hostPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("reading reference host directory %s: %w", hostPath, readErr)
+		}
+		for _, owner := range owners {
+			if !owner.IsDir() {
+				continue
+			}
+			ownerPath := filepath.Join(hostPath, owner.Name())
+			repos, repoErr := os.ReadDir(ownerPath)
+			if repoErr != nil {
+				return nil, fmt.Errorf("reading reference owner directory %s: %w", ownerPath, repoErr)
+			}
+			for _, repo := range repos {
+				if !repo.IsDir() {
+					continue
+				}
+				entries = append(entries, Entry{
+					Host: host.Name(), Owner: owner.Name(), Repo: repo.Name(),
+					Path: filepath.Join(ownerPath, repo.Name()),
+				})
+			}
+		}
+	}
+	return entries, nil
+}
+
 // Resolve resolves target as either a bare repo name or an org/repo
 // GitHub reference. Resolution is local-only and never clones.
 func Resolve(target, referencesPath string) (string, error) {

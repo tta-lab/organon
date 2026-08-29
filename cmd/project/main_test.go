@@ -401,8 +401,54 @@ remote = "https://example.com/owner/old-backend.git"
 	}
 
 	stdout, err = runProject(t, []string{"find", "no-such-project"})
-	if err != nil || stdout != "No active projects found.\n" {
+	if err != nil || stdout != "No active projects or references found.\n" {
 		t.Fatalf("human empty find = %q, err = %v", stdout, err)
+	}
+}
+
+func TestProjectFindIncludesReferencesAndPrefersRegisteredPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeProjectsConfig(t, home, `[demo]
+name = "Demo project"
+path = "/projects/demo-project"
+remote = "https://github.com/example/demo-project.git"
+`)
+	referenceRoot := filepath.Join(home, "code", "references", "github.com", "other")
+	shadowedReference := filepath.Join(referenceRoot, "demo-project")
+	referenceOnly := filepath.Join(referenceRoot, "reference-only")
+	for _, path := range []string{shadowedReference, referenceOnly} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout, err := runProject(t, []string{"find", "demo-project", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output projectListOutput
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Projects) != 1 || output.Projects[0].Reference || output.Projects[0].Path != "/projects/demo-project" {
+		t.Fatalf("shadowed find = %+v, want registered project", output.Projects)
+	}
+
+	stdout, err = runProject(t, []string{"find", "reference-only", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Projects) != 1 || !output.Projects[0].Reference || output.Projects[0].Path != referenceOnly {
+		t.Fatalf("reference find = %+v", output.Projects)
+	}
+
+	stdout, err = runProject(t, []string{"find", "reference-only"})
+	if err != nil || !strings.Contains(stdout, "reference-only [reference]") {
+		t.Fatalf("human reference find = %q, err = %v", stdout, err)
 	}
 }
 

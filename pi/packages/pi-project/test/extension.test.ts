@@ -65,7 +65,7 @@ describe("pi-project extension", () => {
     ).toEqual(["len", "orientation", "ttal"]);
   });
 
-  it("finds active projects and gets exact references", async () => {
+  it("finds active projects and local references, then gets exact project references", async () => {
     const found = await call("find", { query: "runtime", limit: 16 });
     expect(
       (found.details as { projects: Array<{ alias: string }> }).projects.map((p) => p.alias),
@@ -74,9 +74,17 @@ describe("pi-project extension", () => {
       "- len: Lenos CLI runtime (/home/neil/code/projects/tta-lab/lenos)",
     );
 
+    const reference = await call("find", { query: "reference" });
+    expect(
+      (reference.details as { projects: Array<{ reference?: boolean }> }).projects[0]?.reference,
+    ).toBe(true);
+    expect((reference.content[0] as { text: string }).text).toContain("reference-only [reference]");
+
     const empty = await call("find", { query: "missing" });
     expect((empty.details as { projects: unknown[] }).projects).toEqual([]);
-    expect((empty.content[0] as { text: string }).text).toContain("No active projects found");
+    expect((empty.content[0] as { text: string }).text).toContain(
+      "No active projects or references found",
+    );
 
     const result = await call("get", { project: "lenos" });
     const details = result.details as { project: Record<string, unknown> };

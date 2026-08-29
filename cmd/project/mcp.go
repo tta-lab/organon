@@ -7,7 +7,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/tta-lab/organon/internal/config"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -20,7 +19,7 @@ type projectGetInput struct {
 }
 
 type projectFindInput struct {
-	Query string `json:"query" jsonschema:"non-blank natural-language query for active projects"`
+	Query string `json:"query" jsonschema:"non-blank natural-language query for active projects and references"`
 	Limit *int   `json:"limit,omitempty" jsonschema:"maximum results; defaults to 8 and is capped at 32"`
 }
 
@@ -81,9 +80,9 @@ func newProjectMCPServer(projects *project.Store) *mcp.Server {
 	}
 	mcp.AddTool(server, discoveryTool(
 		"project_find",
-		"Find active projects",
-		"Find active projects by alias, display name, checkout name, or repository name. "+
-			"Results are ranked and return canonical aliases.",
+		"Find projects and references",
+		"Find active projects and locally cloned references by alias, display name, checkout name, or repository name. "+
+			"A registered project takes precedence over a same-named reference.",
 	), func(
 		_ context.Context, _ *mcp.CallToolRequest, input projectFindInput,
 	) (*mcp.CallToolResult, projectListOutput, error) {
@@ -114,7 +113,7 @@ func newMCPCmd() *cobra.Command {
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return newProjectMCPServer(project.NewStore(config.ProjectsPath())).Run(cmd.Context(), &mcp.StdioTransport{})
+			return newProjectMCPServer(discoveryStore()).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }

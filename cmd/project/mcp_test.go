@@ -30,7 +30,13 @@ name = "TTAL"
 path = "/work/code/projects/tta-lab/ttal-cli"
 remote = "https://github.com/tta-lab/ttal-cli.git"
 `)
-	return newProjectMCPServer(project.NewStore(filepath.Join(home, ".config", "ttal", "projects.toml")))
+	references := filepath.Join(home, "code", "references")
+	if err := os.MkdirAll(filepath.Join(references, "github.com", "tta-lab", "reference-only"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return newProjectMCPServer(project.NewDiscoveryStore(
+		filepath.Join(home, ".config", "ttal", "projects.toml"), references,
+	))
 }
 
 func connectProjectMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
@@ -294,6 +300,12 @@ func TestProjectMCPFindsActiveProjectsAndReturnsEmptyResult(t *testing.T) {
 	projects := output["projects"].([]any)
 	if len(projects) != 1 || projects[0].(map[string]any)["alias"] != "organon" {
 		t.Fatalf("find output = %#v", output)
+	}
+
+	output = projectMCPStructuredCall(t, session, "project_find", map[string]any{"query": "reference-only"})
+	projects = output["projects"].([]any)
+	if len(projects) != 1 || projects[0].(map[string]any)["reference"] != true {
+		t.Fatalf("reference find output = %#v", output)
 	}
 
 	output = projectMCPStructuredCall(t, session, "project_find", map[string]any{"query": "unrelated"})

@@ -24,13 +24,12 @@ export const projectListSchema = Type.Object(
 export const projectFindSchema = Type.Object(
   {
     query: Type.String({
-      description: "Non-blank natural-language query for active projects",
+      description: "Non-blank natural-language query for active projects and references",
       minLength: 1,
     }),
     limit: Type.Optional(
       Type.Integer({
-        description:
-          "Maximum active projects; defaults to 8 and is capped at 32 by the core finder",
+        description: "Maximum results; defaults to 8 and is capped at 32 by the core finder",
         minimum: 1,
         default: 8,
       }),
@@ -66,6 +65,7 @@ export interface ProjectRecord {
   path: string;
   remote?: string;
   archived: boolean;
+  reference?: boolean;
 }
 
 function requireNonBlankString(input: unknown, field: string): string {
@@ -82,7 +82,8 @@ function requireNonBlankString(input: unknown, field: string): string {
 
 function renderProject(p: ProjectRecord): string {
   const label = p.name && p.name !== "" ? p.name : p.alias;
-  return `${p.alias}: ${label} (${p.path})`;
+  const kind = p.reference ? " [reference]" : "";
+  return `${p.alias}${kind}: ${label} (${p.path})`;
 }
 
 function makeProjectTool(options: {
@@ -161,11 +162,11 @@ export function projectFindTool() {
     name: "project_find",
     label: "Project find",
     description:
-      "Find active registered Organon projects by alias, display name, checkout name, or repository name. Fuzzy matches are advisory and never select a project.",
+      "Find active Organon projects and locally cloned references by alias, display name, checkout name, or repository name. Registered projects take precedence over same-named references.",
     promptSnippet: "Find active projects with project_find",
     promptGuidelines: [
-      "Use project_find to discover active projects by alias, display name, checkout name, or repository name.",
-      "Use project_get with a canonical alias from the results to target one project.",
+      "Use project_find to discover active projects and local references by alias, display name, checkout name, or repository name.",
+      "Use a registered result's canonical alias with project_get; reference results expose their local path directly.",
     ],
     parameters: projectFindSchema,
     args(params) {
@@ -186,10 +187,10 @@ export function projectFindTool() {
       const lines = data.projects.map((p) => `- ${renderProject(p)}`);
       const raw =
         lines.length === 0
-          ? "No active projects found."
-          : "Matching active projects:\n" + lines.join("\n");
+          ? "No active projects or references found."
+          : "Matching projects and references:\n" + lines.join("\n");
       return modelTextResult(data, raw, {
-        hint: "Use project_get with a canonical alias from the results to target one project.",
+        hint: "Use project_get for registered results; reference results expose their local path directly.",
       });
     },
   });

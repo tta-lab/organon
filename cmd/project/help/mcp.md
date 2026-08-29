@@ -6,16 +6,18 @@ case-insensitive project reference: canonical alias, checkout basename, or
 remote repository basename. It returns the canonical alias and preserves the
 archive marker. Display names and paths are not project references.
 
-`project_find` searches active projects only by alias, display name, checkout
-basename, or remote repository basename. It returns ranked `{projects: [...]}`
-results with a default limit of 8 and a maximum of 32. Empty searches are
-rejected; unmatched queries return an empty array.
+`project_find` searches active projects and locally cloned references by alias,
+display name, checkout basename, or remote repository basename. Registered
+projects shadow same-named references. It returns ranked `{projects: [...]}`
+results with a default limit of 8 and a maximum of 32. Reference results include
+`reference: true`; empty searches are rejected and unmatched queries return an
+empty array.
 
 Tools:
 
   project_list             # list projects, optionally including archived
   project_get              # get one project by exact project reference
-  project_find             # find ranked active projects
+  project_find             # find ranked active projects and references
 
 Ambiguous and unknown references never select a project automatically. Errors
 include exact candidates or up to three active suggestions and point to

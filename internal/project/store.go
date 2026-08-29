@@ -13,17 +13,24 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/reporef"
 )
 
 const registryLockTimeout = 5 * time.Second
 
 // Store reads and updates one projects.toml registry.
 type Store struct {
-	path string
+	path           string
+	referencesPath string
 }
 
 // NewStore returns a hot project registry backed by path.
 func NewStore(path string) *Store { return &Store{path: path} }
+
+// NewDiscoveryStore returns a hot registry whose Find also searches local references.
+func NewDiscoveryStore(path, referencesPath string) *Store {
+	return &Store{path: path, referencesPath: referencesPath}
+}
 
 // Snapshot reads and validates the current registry contents.
 func (s *Store) Snapshot() (*Catalog, error) { return OpenCatalog(s.path) }
@@ -55,13 +62,29 @@ func (s *Store) Resolve(reference string) (Entry, error) {
 	return catalog.Resolve(reference)
 }
 
-// Find reads the current registry and returns ranked active projects.
+// Find returns ranked active projects and local reference repositories.
 func (s *Store) Find(query string, limit int) ([]Entry, error) {
 	catalog, err := s.Snapshot()
 	if err != nil {
 		return nil, err
 	}
-	return catalog.Find(query, limit)
+	if s.referencesPath == "" {
+		return catalog.Find(query, limit)
+	}
+	references, err := reporef.List(s.referencesPath)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, 0, len(references))
+	for _, reference := range references {
+		entries = append(entries, Entry{
+			Alias:     reference.Repo,
+			Name:      reference.Owner + "/" + reference.Repo,
+			Path:      reference.Path,
+			Reference: true,
+		})
+	}
+	return catalog.FindWithReferences(query, limit, entries)
 }
 
 // GetByPath reads the current registry and returns an exact cleaned path.

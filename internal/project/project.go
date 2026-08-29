@@ -2,13 +2,14 @@ package project
 
 import "errors"
 
-// Entry represents a project from projects.toml.
+// Entry represents a registered project or locally cloned reference.
 type Entry struct {
-	Alias    string `toml:"-"    json:"alias"`
-	Name     string `toml:"name" json:"name"`
-	Path     string `toml:"path" json:"path"`
-	Remote   string `toml:"remote" json:"remote"`
-	Archived bool   `toml:"-"    json:"archived"`
+	Alias     string `toml:"-"    json:"alias"`
+	Name      string `toml:"name" json:"name"`
+	Path      string `toml:"path" json:"path"`
+	Remote    string `toml:"remote" json:"remote"`
+	Archived  bool   `toml:"-"    json:"archived"`
+	Reference bool   `toml:"-"    json:"reference,omitempty"`
 }
 
 // Load reads and validates projects.toml from path.
