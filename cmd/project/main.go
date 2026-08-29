@@ -85,19 +85,19 @@ func printProjectBullets(entries []project.Entry) {
 
 func printProjectEntries(entries []project.Entry) {
 	for _, e := range entries {
-		kind := ""
+		referenceSuffix := ""
 		if e.Reference {
-			kind = " [reference]"
+			referenceSuffix = " [reference]"
 		}
 		if e.Name != "" && e.Path != "" {
-			fmt.Printf("- %s%s: %s (path: %s)\n", e.Alias, kind, e.Name, e.Path)
+			fmt.Printf("- %s%s: %s (path: %s)\n", e.Alias, referenceSuffix, e.Name, e.Path)
 			continue
 		}
 		if e.Name != "" {
-			fmt.Printf("- %s%s: %s\n", e.Alias, kind, e.Name)
+			fmt.Printf("- %s%s: %s\n", e.Alias, referenceSuffix, e.Name)
 			continue
 		}
-		fmt.Printf("- %s%s: %s\n", e.Alias, kind, e.Path)
+		fmt.Printf("- %s%s: %s\n", e.Alias, referenceSuffix, e.Path)
 	}
 }
 

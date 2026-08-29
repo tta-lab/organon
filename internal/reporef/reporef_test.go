@@ -73,13 +73,19 @@ func TestListReturnsReferenceRepositoriesInDeterministicOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.MkdirAll(
+		filepath.Join(references, "github.com", "tta-lab", ".organon.clone-123456789"),
+		0755,
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	entries, err := List(references)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 3 {
-		t.Fatalf("List() = %+v, want 3 entries", entries)
+		t.Fatalf("List() = %+v, want 3 entries without clone temporary directory", entries)
 	}
 	want := []Entry{
 		{Host: "github.com", Owner: "other", Repo: "alpha", Path: paths[2]},

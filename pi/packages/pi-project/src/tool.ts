@@ -82,8 +82,8 @@ function requireNonBlankString(input: unknown, field: string): string {
 
 function renderProject(p: ProjectRecord): string {
   const label = p.name && p.name !== "" ? p.name : p.alias;
-  const kind = p.reference ? " [reference]" : "";
-  return `${p.alias}${kind}: ${label} (${p.path})`;
+  const referenceSuffix = p.reference ? " [reference]" : "";
+  return `${p.alias}${referenceSuffix}: ${label} (${p.path})`;
 }
 
 function makeProjectTool(options: {
@@ -163,7 +163,7 @@ export function projectFindTool() {
     label: "Project find",
     description:
       "Find active Organon projects and locally cloned references by alias, display name, checkout name, or repository name. Registered projects take precedence over same-named references.",
-    promptSnippet: "Find active projects with project_find",
+    promptSnippet: "Find active projects and references with project_find",
     promptGuidelines: [
       "Use project_find to discover active projects and local references by alias, display name, checkout name, or repository name.",
       "Use a registered result's canonical alias with project_get; reference results expose their local path directly.",
