@@ -4,48 +4,11 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/og"
 )
-
-func runPRCreate(cmd *cobra.Command, args []string) error {
-	body, err := io.ReadAll(cmd.InOrStdin())
-	if err != nil {
-		return fmt.Errorf("read PR body: %w", err)
-	}
-	title := strings.Join(args, " ")
-	if err := og.ValidatePRTitle(title); err != nil {
-		return err
-	}
-	runtime, err := runtimeFor(cmd)
-	if err != nil {
-		return err
-	}
-	workDir, alias, err := resolveWorkDir(cmd, runtime)
-	if err != nil {
-		return err
-	}
-	bodyText := string(body)
-	resp, err := runtime.executor.PRCreate(requestFor(cmd, og.Request{
-		WorkDir: workDir,
-		Title:   &title,
-		Body:    &bodyText,
-	}))
-	if err != nil {
-		return err
-	}
-	if err := og.ValidatePRResponse(resp, 0); err != nil {
-		return err
-	}
-	if jsonFlag(cmd) {
-		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
-	}
-	printProjectResponse(cmd, alias, resp)
-	return nil
-}
 
 func runPRView(cmd *cobra.Command, args []string) error {
 	return runPRWithOutput(
@@ -72,55 +35,6 @@ func runPRGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return runPRWithOutput(cmd, og.Request{Index: index}, og.Executor.PRGet)
-}
-
-func runPRModify(cmd *cobra.Command, args []string) error {
-	title, _ := cmd.Flags().GetString("title")
-	clearBody, _ := cmd.Flags().GetBool("clear-body")
-	bodyBytes, err := io.ReadAll(cmd.InOrStdin())
-	if err != nil {
-		return fmt.Errorf("read PR body: %w", err)
-	}
-	index, err := optionalPRID(cmd)
-	if err != nil {
-		return err
-	}
-	var titleInput, bodyInput *string
-	if cmd.Flags().Changed("title") {
-		titleInput = &title
-	}
-	if clearBody {
-		empty := ""
-		bodyInput = &empty
-	} else if len(bodyBytes) > 0 {
-		body := string(bodyBytes)
-		bodyInput = &body
-	}
-	if err := og.ValidatePRModifyInput(titleInput, bodyInput); err != nil {
-		return err
-	}
-	runtime, err := runtimeFor(cmd)
-	if err != nil {
-		return err
-	}
-	workDir, alias, err := resolveWorkDir(cmd, runtime)
-	if err != nil {
-		return err
-	}
-	resp, err := runtime.executor.PRModify(requestFor(cmd, og.Request{
-		WorkDir: workDir, Index: index, Title: titleInput, Body: bodyInput,
-	}))
-	if err != nil {
-		return err
-	}
-	if err := og.ValidatePRModifyResponse(resp, index, titleInput, bodyInput); err != nil {
-		return err
-	}
-	if jsonFlag(cmd) {
-		return printJSON(cmd, ogPRJSON{Project: alias, PR: *resp.PR})
-	}
-	printProjectResponse(cmd, alias, resp)
-	return nil
 }
 
 func runPRComment(cmd *cobra.Command, args []string) error {

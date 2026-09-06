@@ -12,6 +12,8 @@ then reuses the configured OG service for its lifetime. All pull request tools
 require a project reference. Get, modify, comment, checks, log, and failures
 accept an optional positive PR ID and use the registered checkout's current
 branch when it is omitted. Structured results return the canonical alias.
+Unlike the shell `og pr` command, this typed interface also exposes
+`pr_create` and `pr_modify` for pull-request mutations.
 
 Tools:
 
