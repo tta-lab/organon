@@ -72,21 +72,29 @@ returned `action_id` is informational for audit and the web inbox, never an
 input. Surface `inbox_url` for `status=pending` and wait. For an approved
 temporary failure or local `status=unavailable` (approval state unknown; no
 forge call), use `next_action=retry_same_request` and repeat that request
-without new approval. `status=executed` is complete; rejected, expired, and
+without new approval. `status=executed` with no receipt or cleanup error is
+complete; rejected, expired, and
 `execute_failed` are terminal and require new approval for another attempt.
 If a deterministic `execute_failed` receipt could not be recorded, the result
 stays approved and `retry_same_request` revalidates/reports it. An executed
 result with `receipt_error` uses `next_action=repair_receipt`: repeat the same
-request only to repair the receipt; it must not merge again. Follow
-`next_action`, `completion`, and `detail` as the machine/readable contract and
-consider the operation complete only when executed has no receipt error. Impri
-provider/API availability failures remain approved and retryable. For real
-execution, CI state `success` or `not_configured` permits the forge gate;
-`pending` is retryable, `failure`/`error` is terminal, and unknown or
-unverifiable state fails closed.
+request only to repair the receipt; it must not merge again. An executed result
+with `cleanup_error` uses `next_action=retry_same_request`: the forge merge and
+receipt are complete, so repeat the exact request to finish checkout cleanup and
+never invoke the forge merge again. Follow `next_action`, `completion`, and
+`detail` as the machine/readable contract and consider the operation complete
+only when executed has neither receipt nor cleanup error. Impri provider/API
+availability failures remain approved and retryable. For real execution, CI
+state `success` or `not_configured` permits the forge gate; `pending` is
+retryable, `failure`/`error` is terminal, and unknown or unverifiable state
+fails closed. A successful real merge automatically pulls the registered
+single-checkout default branch and removes matching approved local and origin
+head refs; do not run a separate `og pull` afterward. Dry-run remains
+non-destructive, and worktree coordination is outside this version.
 
 The CLI/MCP transport boundary and its rationale are authoritative in the
-README guidance. `og pull` remains the separate branch/worktree cleanup step.
+README guidance. `og pull` remains available for its existing guarded closed-PR
+workflow, while successful real merge cleanup is automatic.
 Telegram, webhooks, a daemon, and Impri key provisioning or rotation are
 outside this version.
 

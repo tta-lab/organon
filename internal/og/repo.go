@@ -511,7 +511,48 @@ func localTagExists(ctx context.Context, workDir, tag string) bool {
 	return err == nil
 }
 
-func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) error {
+// branchCleanupTarget is the identity that a guarded cleanup is allowed to
+// remove. HeadSHA is optional for the legacy closed-PR pull workflow; an
+// automatic merge always supplies it and requires exact ref matches.
+type branchCleanupTarget struct {
+	BaseBranch          string
+	HeadBranch          string
+	HeadSHA             string
+	AllowMissingRemote  bool
+	AllowMissingLocal   bool
+	RequireExactHeadSHA bool
+}
+
+type branchCleanupRefs struct {
+	LocalExists  bool
+	RemoteExists bool
+}
+
+// ensureBranchCleanupTarget performs the non-destructive checks shared by
+// closed-PR cleanup and automatic approved-merge cleanup. It fetches origin so
+// remote-tracking refs are current, then verifies the worktree and target refs
+// before any switch, pull, or deletion is attempted.
+func ensureBranchCleanupTarget(ctxInfo *repoContext, target branchCleanupTarget) error {
+	if err := validateBranchCleanupTarget(ctxInfo, target); err != nil {
+		return err
+	}
+	if err := ensureCleanupWorktreeClean(ctxInfo); err != nil {
+		return err
+	}
+	if err := refreshCleanupRemote(ctxInfo); err != nil {
+		return err
+	}
+	if err := ensureCleanupDefaultRef(ctxInfo, target); err != nil {
+		return err
+	}
+	refs, err := verifyBranchCleanupRefs(ctxInfo, target)
+	if err != nil {
+		return err
+	}
+	return validateCleanupRefs(ctxInfo, target, refs)
+}
+
+func ensureCleanupWorktreeClean(ctxInfo *repoContext) error {
 	ctx := operationContext(ctxInfo)
 	out, err := gitOutput(ctx, ctxInfo.WorkDir, "status", "--porcelain")
 	if err != nil {
@@ -520,62 +561,311 @@ func ensureCleanBranchForCleanup(ctxInfo *repoContext, allowMissingRemote bool) 
 	if strings.TrimSpace(out) != "" {
 		return fmt.Errorf("refusing closed PR branch cleanup: worktree has uncommitted changes")
 	}
+	return nil
+}
+
+func refreshCleanupRemote(ctxInfo *repoContext) error {
 	if err := runGitWithCreds(ctxInfo, githubapp.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot refresh origin: %w", err)
 	}
-	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
-	if err := runGit(ctx, ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef); err != nil {
-		if allowMissingRemote {
-			return nil
-		}
+	return nil
+}
+
+func ensureCleanupDefaultRef(ctxInfo *repoContext, target branchCleanupTarget) error {
+	ctx := operationContext(ctxInfo)
+	defaultRef := "refs/remotes/" + remoteOrigin + "/" + target.BaseBranch
+	if _, exists, err := readOptionalRef(ctx, ctxInfo.WorkDir, defaultRef); err != nil {
+		return fmt.Errorf("refusing closed PR branch cleanup: cannot inspect default branch: %w", err)
+	} else if !exists {
+		return fmt.Errorf("refusing closed PR branch cleanup: origin default branch %q is missing", target.BaseBranch)
+	}
+	return nil
+}
+
+func validateCleanupRefs(ctxInfo *repoContext, target branchCleanupTarget, refs branchCleanupRefs) error {
+	if err := rejectUnpushedCleanupCommits(ctxInfo, target, refs); err != nil {
+		return err
+	}
+	if !refs.RemoteExists && !target.AllowMissingRemote {
 		return fmt.Errorf(
 			"refusing closed PR branch cleanup: remote branch is missing; local branch may be the only remaining ref",
 		)
 	}
-	compareRef := remoteOrigin + "/" + ctxInfo.Branch + "..." + ctxInfo.Branch
-	ahead, err := gitOutput(ctx, ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
-	if err != nil {
-		return fmt.Errorf("refusing closed PR branch cleanup: cannot check local commits: %w", err)
+	if !refs.LocalExists && !target.AllowMissingLocal {
+		return fmt.Errorf("refusing closed PR branch cleanup: local branch is missing")
+	}
+	return nil
+}
+
+func rejectUnpushedCleanupCommits(
+	ctxInfo *repoContext, target branchCleanupTarget, refs branchCleanupRefs,
+) error {
+	if target.RequireExactHeadSHA || !refs.RemoteExists {
+		return nil
+	}
+	ctx := operationContext(ctxInfo)
+	compareRef := remoteOrigin + "/" + target.HeadBranch + "..." + target.HeadBranch
+	ahead, compareErr := gitOutput(ctx, ctxInfo.WorkDir, "rev-list", "--right-only", "--count", compareRef)
+	if compareErr != nil {
+		return fmt.Errorf(
+			"refusing closed PR branch cleanup: cannot check local commits: %w", compareErr,
+		)
 	}
 	if strings.TrimSpace(ahead) != "0" {
 		return fmt.Errorf(
 			"refusing closed PR branch cleanup: %s has %s local commit(s) not on origin/%s",
-			ctxInfo.Branch,
-			strings.TrimSpace(ahead),
-			ctxInfo.Branch,
+			target.HeadBranch, strings.TrimSpace(ahead), target.HeadBranch,
 		)
 	}
 	return nil
+}
+
+func validateBranchCleanupTarget(ctxInfo *repoContext, target branchCleanupTarget) error {
+	if ctxInfo == nil {
+		return fmt.Errorf("refusing closed PR branch cleanup: repository context is missing")
+	}
+	if target.BaseBranch == "" || target.HeadBranch == "" {
+		return fmt.Errorf("refusing closed PR branch cleanup: branch target is incomplete")
+	}
+	if err := validateBranchName(operationContext(ctxInfo), ctxInfo.WorkDir, target.BaseBranch); err != nil {
+		return fmt.Errorf("refusing closed PR branch cleanup: invalid default branch %q: %w", target.BaseBranch, err)
+	}
+	if err := validateBranchName(operationContext(ctxInfo), ctxInfo.WorkDir, target.HeadBranch); err != nil {
+		return fmt.Errorf("refusing closed PR branch cleanup: invalid head branch %q: %w", target.HeadBranch, err)
+	}
+	if target.BaseBranch == target.HeadBranch {
+		return fmt.Errorf("refusing closed PR branch cleanup: refusing to delete the default branch %q", target.BaseBranch)
+	}
+	if err := validateExactBranchCleanupTarget(ctxInfo, target); err != nil {
+		return err
+	}
+	if ctxInfo.DefaultBaseKnown && ctxInfo.DefaultBase != target.BaseBranch {
+		return fmt.Errorf(
+			"refusing closed PR branch cleanup: approved base branch %q does not match checkout default %q",
+			target.BaseBranch, ctxInfo.DefaultBase,
+		)
+	}
+	if ctxInfo.Branch != target.HeadBranch && ctxInfo.Branch != target.BaseBranch {
+		return fmt.Errorf(
+			"refusing closed PR branch cleanup: current branch %q is neither approved head %q nor default %q",
+			ctxInfo.Branch, target.HeadBranch, target.BaseBranch,
+		)
+	}
+	return nil
+}
+
+func validateExactBranchCleanupTarget(ctxInfo *repoContext, target branchCleanupTarget) error {
+	if !target.RequireExactHeadSHA {
+		return nil
+	}
+	if strings.TrimSpace(target.HeadSHA) == "" {
+		return fmt.Errorf("refusing closed PR branch cleanup: approved head SHA is missing")
+	}
+	if strings.TrimSpace(target.HeadSHA) != target.HeadSHA {
+		return fmt.Errorf("refusing closed PR branch cleanup: approved head SHA is invalid")
+	}
+	if !ctxInfo.DefaultBaseKnown {
+		return fmt.Errorf("refusing automatic merge cleanup: checkout default branch is unknown")
+	}
+	return nil
+}
+
+func validateBranchName(ctx context.Context, workDir, branch string) error {
+	if strings.TrimSpace(branch) == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("branch name is empty or starts with '-'")
+	}
+	if err := runGit(ctx, workDir, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("branch name is not a valid Git ref")
+	}
+	return nil
+}
+
+func verifyBranchCleanupRefs(
+	ctxInfo *repoContext, target branchCleanupTarget,
+) (branchCleanupRefs, error) {
+	ctx := operationContext(ctxInfo)
+	localRef := "refs/heads/" + target.HeadBranch
+	remoteRef := "refs/remotes/" + remoteOrigin + "/" + target.HeadBranch
+	localSHA, localExists, err := readOptionalRef(ctx, ctxInfo.WorkDir, localRef)
+	if err != nil {
+		return branchCleanupRefs{}, fmt.Errorf("refusing closed PR branch cleanup: cannot inspect local head: %w", err)
+	}
+	remoteSHA, remoteExists, err := readOptionalRef(ctx, ctxInfo.WorkDir, remoteRef)
+	if err != nil {
+		return branchCleanupRefs{}, fmt.Errorf("refusing closed PR branch cleanup: cannot inspect origin head: %w", err)
+	}
+	if target.RequireExactHeadSHA {
+		if localExists && !sameGitObjectID(localSHA, target.HeadSHA) {
+			return branchCleanupRefs{}, fmt.Errorf(
+				"refusing automatic merge cleanup: local head %q moved from approved SHA", target.HeadBranch,
+			)
+		}
+		if remoteExists && !sameGitObjectID(remoteSHA, target.HeadSHA) {
+			return branchCleanupRefs{}, fmt.Errorf(
+				"refusing automatic merge cleanup: origin/%s moved from approved SHA", target.HeadBranch,
+			)
+		}
+	}
+	return branchCleanupRefs{LocalExists: localExists, RemoteExists: remoteExists}, nil
+}
+
+func readOptionalRef(ctx context.Context, workDir, ref string) (string, bool, error) {
+	err := runGit(ctx, workDir, "show-ref", "--verify", "--quiet", ref)
+	if err != nil {
+		if exitCode(err) == 1 {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	sha, err := gitOutput(ctx, workDir, "rev-parse", "--verify", ref)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(sha) == "" {
+		return "", false, fmt.Errorf("empty ref value")
+	}
+	return strings.TrimSpace(sha), true, nil
+}
+
+func sameGitObjectID(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
 func cleanupClosedPRBranch(ctxInfo *repoContext, prMerged bool) error {
 	if err := requireGitPushTarget(ctxInfo, "closed PR branch cleanup"); err != nil {
 		return err
 	}
-	if err := ensureCleanBranchForCleanup(ctxInfo, prMerged); err != nil {
+	return cleanupBranch(ctxInfo, branchCleanupTarget{
+		BaseBranch:         ctxInfo.DefaultBase,
+		HeadBranch:         ctxInfo.Branch,
+		AllowMissingRemote: prMerged,
+	})
+}
+
+// cleanupApprovedMergeBranch applies the same guarded policy to an approved
+// PR snapshot. Every present ref must still point at the approved head SHA;
+// missing refs are already-cleaned state and are skipped.
+func cleanupApprovedMergeBranch(ctxInfo *repoContext, approved PRMergeSnapshot) error {
+	if ctxInfo == nil {
+		return fmt.Errorf("refusing automatic merge cleanup: repository context is missing")
+	}
+	if err := requireGitPushTarget(ctxInfo, "automatic merge cleanup"); err != nil {
 		return err
 	}
+	target, err := approvedMergeCleanupTarget(ctxInfo, approved)
+	if err != nil {
+		return err
+	}
+	return cleanupBranch(ctxInfo, target)
+}
+
+func approvedMergeCleanupTarget(
+	ctxInfo *repoContext, approved PRMergeSnapshot,
+) (branchCleanupTarget, error) {
+	if ctxInfo == nil {
+		return branchCleanupTarget{}, fmt.Errorf("refusing automatic merge cleanup: repository context is missing")
+	}
+	if !mergeSnapshotRepositoryMatches(ctxInfo, approved) {
+		return branchCleanupTarget{}, fmt.Errorf(
+			"refusing automatic merge cleanup: approved repository does not match checkout",
+		)
+	}
+	target := branchCleanupTarget{
+		BaseBranch:          approved.BaseBranch,
+		HeadBranch:          approved.Head,
+		HeadSHA:             approved.HeadSHA,
+		AllowMissingRemote:  true,
+		AllowMissingLocal:   true,
+		RequireExactHeadSHA: true,
+	}
+	if target.BaseBranch != ctxInfo.DefaultBase {
+		return branchCleanupTarget{}, fmt.Errorf(
+			"refusing automatic merge cleanup: approved base branch %q does not match checkout default %q",
+			target.BaseBranch, ctxInfo.DefaultBase,
+		)
+	}
+	if err := validateBranchCleanupTarget(ctxInfo, target); err != nil {
+		return branchCleanupTarget{}, err
+	}
+	return target, nil
+}
+
+func cleanupBranch(ctxInfo *repoContext, target branchCleanupTarget) error {
+	if err := ensureBranchCleanupTarget(ctxInfo, target); err != nil {
+		return err
+	}
+	if err := transitionCleanupBranch(ctxInfo, target); err != nil {
+		return err
+	}
+	refs, err := verifyBranchCleanupRefs(ctxInfo, target)
+	if err != nil {
+		return err
+	}
+	if err := deleteCleanupRemote(ctxInfo, target, refs); err != nil {
+		return err
+	}
+	return deleteCleanupLocal(ctxInfo, target)
+}
+
+func transitionCleanupBranch(ctxInfo *repoContext, target branchCleanupTarget) error {
 	ctx := operationContext(ctxInfo)
-	remoteExists := remoteBranchExists(ctxInfo)
-	if err := runGit(ctx, ctxInfo.WorkDir, "switch", ctxInfo.DefaultBase); err != nil {
-		return err
-	}
-	if err := runGitWithCreds(
-		ctxInfo, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, ctxInfo.DefaultBase,
-	); err != nil {
-		return err
-	}
-	if remoteExists {
-		if err := runGitWithCreds(
-			ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", ctxInfo.Branch,
-		); err != nil {
+	if ctxInfo.Branch != target.BaseBranch {
+		if err := runGit(ctx, ctxInfo.WorkDir, "switch", "--", target.BaseBranch); err != nil {
 			return err
 		}
 	}
-	return runGit(ctx, ctxInfo.WorkDir, "branch", "-D", ctxInfo.Branch)
+	if err := runGitWithCreds(
+		ctxInfo, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, target.BaseBranch,
+	); err != nil {
+		return err
+	}
+	return nil
 }
 
-func remoteBranchExists(ctxInfo *repoContext) bool {
-	remoteRef := "refs/remotes/" + remoteOrigin + "/" + ctxInfo.Branch
-	return runGit(operationContext(ctxInfo), ctxInfo.WorkDir, "show-ref", "--verify", "--quiet", remoteRef) == nil
+func deleteCleanupRemote(
+	ctxInfo *repoContext, target branchCleanupTarget, refs branchCleanupRefs,
+) error {
+	ctx := operationContext(ctxInfo)
+	if !refs.RemoteExists {
+		return nil
+	}
+	if target.RequireExactHeadSHA {
+		lease := "--force-with-lease=refs/heads/" + target.HeadBranch + ":" + target.HeadSHA
+		if err := runGitWithCreds(
+			ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", lease, "--", target.HeadBranch,
+		); err != nil {
+			return err
+		}
+	} else if err := runGitWithCreds(
+		ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", target.HeadBranch,
+	); err != nil {
+		return err
+	}
+	if target.RequireExactHeadSHA {
+		_, stillExists, err := readOptionalRef(
+			ctx, ctxInfo.WorkDir, "refs/remotes/"+remoteOrigin+"/"+target.HeadBranch,
+		)
+		if err != nil {
+			return fmt.Errorf("refusing automatic merge cleanup: cannot verify origin head deletion: %w", err)
+		}
+		if stillExists {
+			return fmt.Errorf("refusing automatic merge cleanup: origin/%s still exists after deletion", target.HeadBranch)
+		}
+	}
+	return nil
+}
+
+func deleteCleanupLocal(ctxInfo *repoContext, target branchCleanupTarget) error {
+	ctx := operationContext(ctxInfo)
+	latest, exists, err := readOptionalRef(ctx, ctxInfo.WorkDir, "refs/heads/"+target.HeadBranch)
+	if err != nil {
+		return fmt.Errorf("refusing automatic merge cleanup: cannot recheck local head: %w", err)
+	}
+	if target.RequireExactHeadSHA && exists && !sameGitObjectID(latest, target.HeadSHA) {
+		return fmt.Errorf("refusing automatic merge cleanup: local head %q moved from approved SHA", target.HeadBranch)
+	}
+	if exists {
+		return runGit(ctx, ctxInfo.WorkDir, "branch", "-D", "--", target.HeadBranch)
+	}
+	return nil
 }

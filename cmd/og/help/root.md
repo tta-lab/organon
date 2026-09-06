@@ -16,15 +16,21 @@ Merge is squash-only and always goes through Impri. Configure the optional
 inbox URL, and records a mock execution only after a web approval. Use
 `--wait --timeout 30s`; repeat the same project, PR, and mode request to recover
 the idempotent action. The returned action ID is audit/web identification only.
-Real
-merges use the same gate and recheck the PR, CI, and head SHA immediately
-before the forge call; CI must be `success` or explicit `not_configured`.
+Real merges use the same gate and recheck the PR, CI, and head SHA immediately
+before the forge call; CI must be `success` or explicit `not_configured`. After
+the forge merge, og automatically fast-forwards the registered single-checkout
+default branch and removes only local and `origin` head refs that still match
+the approved SHA. Dry-run approval remains non-destructive and performs no
+checkout switch, pull, or branch deletion.
 Rejection, expiry, timeout, and execution failure leave
 the PR untouched. Temporary provider/API failures keep the approved action
 retryable; repeat the same request. If Impri approval state cannot be read, the
 outcome is `unavailable` and no forge call was made; repeat the same request.
-`og pull` remains the separate step for
-closed-PR branch and worktree cleanup. Impri configuration is read only from this `og.toml`; no
+If an executed result contains `cleanup_error`, the forge merge and Impri
+receipt are already complete: repeat the same project, PR, and mode request to
+finish cleanup, and do not run the forge merge again. `og pull` remains
+available for its existing guarded closed-PR workflow. Worktree coordination is
+outside this version. Impri configuration is read only from this `og.toml`; no
 `IMPRI_*` environment-variable fallback or second config file exists.
 
 `og clone <project-reference>` clones the registered remote to the registered

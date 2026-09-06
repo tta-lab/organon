@@ -78,7 +78,10 @@ func newPRCmd() *cobra.Command {
 func newPRMergeCmd() *cobra.Command {
 	cmd := newRunnableCmd("merge", "Approval-gated squash merge", runPRMerge)
 	cmd.Long = "Submit a pull-request snapshot to Impri and execute only after web approval. " +
-		"Use --dry-run for the non-destructive mock merge; --wait polls until the decision or timeout."
+		"Use --dry-run for the non-destructive mock merge; --wait polls until the decision or timeout. " +
+		"Real merges automatically fast-forward the registered single-checkout default branch and " +
+		"remove the approved head refs; dry-run performs no checkout cleanup. Repeat the same request " +
+		"after a partial cleanup and never invoke the forge merge again."
 	cmd.Flags().String("pr-id", "", "PR number override")
 	cmd.Flags().Bool("dry-run", false, "approve and record a mock merge without changing the forge")
 	cmd.Flags().Bool("wait", false, "wait for the Impri approval decision")
@@ -165,7 +168,9 @@ func newGitPullCmd() *cobra.Command {
 When the current feature branch has a closed PR, og returns to the default
 branch and deletes the feature branch locally and remotely. Cleanup refuses a
 dirty worktree, unpushed local commits, or a closed-unmerged branch whose remote
-ref is already missing.`
+ref is already missing. A successful real og pr merge performs the same
+single-checkout cleanup automatically; repeat that exact merge request when the
+result reports incomplete cleanup.`
 	return cmd
 }
 

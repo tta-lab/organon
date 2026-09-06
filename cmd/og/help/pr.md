@@ -23,17 +23,21 @@ Behavior:
   `pr.ci.state`; `not_configured` is an explicit no-check state whose policy
   message says a merge may proceed without checks.
 - `og pr merge [--pr-id <number>]` creates or repeats an idempotent Impri approval action.
-  The immutable action includes the forge, repository, PR number, head SHA,
-  base branch, squash method, and execution mode. Use `--dry-run` for the
-  non-destructive PoC, `--wait --timeout <duration>` to poll, or
-  Always surface the printed Impri inbox URL for
-  web approval. Only an approved action executes; rejected, expired, pending,
+  The immutable action includes the forge, repository, PR number, head branch,
+  head SHA, base branch, squash method, and execution mode. Use `--dry-run` for the
+  non-destructive mock merge, or `--wait --timeout <duration>` to poll.
+  Always surface the printed Impri inbox URL for web approval. Only an approved action executes; rejected, expired, pending,
   and timed-out actions do not touch the forge. Real mode revalidates that the
   PR is open, mergeable, has CI state `success` or `not_configured`, and is
-  still at the approved SHA. If the result is
+  still at the approved SHA. After the forge merge, real mode automatically
+  pulls the registered checkout's default branch and removes only matching
+  local and `origin` head refs. Dry-run never switches, pulls, or deletes
+  branches. If the result is
   approved and retryable, repeat the same project, PR, and mode request after the provider recovers;
-  executed means complete, while rejected/expired/execute_failed require new
-  approval. If Impri state is temporarily unavailable, no forge call was made:
+  an `executed` result with `cleanup_error` means the forge merge and receipt
+  are complete but checkout cleanup remains; repeat the same request and do not
+  merge again. A fully executed result with no cleanup or receipt error is
+  complete, while rejected/expired/execute_failed require new approval. If Impri state is temporarily unavailable, no forge call was made:
   repeat the same request. A failed execute_failed receipt write also remains
   approved and is revalidated on repetition. An executed receipt error is repaired
   by repeating the same request and never invokes a second merge. The returned
@@ -51,8 +55,9 @@ The section is read only from this existing `og.toml`; `IMPRI_*` environment
 variables and a second Impri config file are not supported.
 
 Telegram notifications, webhooks, a polling daemon, API-key provisioning or
-rotation, and branch/worktree cleanup are outside this version. Run `og pull`
-separately when the existing guarded closed-PR cleanup is wanted.
+rotation, and worktree coordination are outside this version. `og pull` remains
+available for its existing guarded closed-PR workflow, but is not a second step
+after a successful real merge.
 
 GitHub API calls use a repository-scoped App installation token minted in the
 OG process. GitHub tokens supplied through the environment or request payload

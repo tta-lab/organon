@@ -138,8 +138,8 @@ const (
 
 // PRMergeSnapshot is the immutable forge identity submitted for approval.
 // Fields such as state and CIState are descriptive; the provider, forge,
-// repository, PR number, PR URL, head SHA, base branch, method, and mode form
-// the authorization identity.
+// repository, PR number, PR URL, head branch, head SHA, base branch, method,
+// and mode form the authorization identity.
 type PRMergeSnapshot struct {
 	Provider      string `json:"provider"`
 	ForgeBaseURL  string `json:"forge_base_url"`
@@ -159,6 +159,8 @@ type PRMergeSnapshot struct {
 }
 
 // PRMergeResult is the approval and execution state returned by CLI and MCP.
+// An executed result can remain retryable when receipt or automatic checkout
+// cleanup has not finished; cleanup errors are distinct from receipt errors.
 type PRMergeResult struct {
 	ActionID     string          `json:"action_id"`
 	Status       string          `json:"status"`
@@ -169,6 +171,7 @@ type PRMergeResult struct {
 	Completion   string          `json:"completion"`
 	Detail       string          `json:"detail,omitempty"`
 	ReceiptError string          `json:"receipt_error,omitempty"`
+	CleanupError string          `json:"cleanup_error,omitempty"`
 }
 
 // PRMergeRetryableError carries the structured merge outcome alongside its

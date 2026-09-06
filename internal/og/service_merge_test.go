@@ -19,6 +19,13 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	checkoutBranch := gitOut(t, repo, "branch", "--show-current")
+	var credentialedGitCalls [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		credentialedGitCalls = append(credentialedGitCalls, append([]string(nil), args...))
+		return nil
+	})
+	t.Cleanup(restoreGit)
 
 	var status atomic.Value
 	status.Store(PRMergeStatusPending)
@@ -118,6 +125,12 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 	}
 	if atomic.LoadInt32(&dryRuns) != 1 || atomic.LoadInt32(&resultReports) != 1 {
 		t.Fatalf("dry runs = %d, reports = %d", dryRuns, resultReports)
+	}
+	if got := gitOut(t, repo, "branch", "--show-current"); got != checkoutBranch {
+		t.Fatalf("dry-run checkout branch = %q, want %q", got, checkoutBranch)
+	}
+	if len(credentialedGitCalls) != 0 {
+		t.Fatalf("dry-run credentialed Git cleanup calls = %v, want none", credentialedGitCalls)
 	}
 }
 
@@ -283,6 +296,14 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	featureSHA := setupMergeCleanupRepo(t, repo)
+	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
+		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
+			gitRun(t, ctxInfo.WorkDir, "update-ref", "-d", "refs/remotes/origin/feature/merge")
+		}
+		return nil
+	})
+	t.Cleanup(restoreGit)
 	var actionPayload any
 	var actionGets int
 	var merged atomic.Bool
@@ -328,18 +349,18 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 				}
 				return &gitprovider.PullRequest{
 					Index: index, State: state, Merged: merged.Load(), Mergeable: true,
-					Head: "feature/merge", HeadSHA: "abc123", Base: "main",
+					Head: "feature/merge", HeadSHA: featureSHA, Base: "main",
 					HTMLURL: "https://github.com/tta-lab/organon/pull/7",
 				}, nil
 			},
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
-				if ref != "abc123" {
+				if ref != featureSHA {
 					t.Fatalf("CI ref = %q", ref)
 				}
 				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
 			},
 			mergePR: func(owner, repo string, index int64, headSHA string) error {
-				if index != 7 || headSHA != "abc123" {
+				if index != 7 || headSHA != featureSHA {
 					t.Fatalf("merge identity = %s/%s #%d %s", owner, repo, index, headSHA)
 				}
 				mergeCalls.Add(1)
@@ -350,7 +371,7 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 	}
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 
-	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
 		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	pending, err := service.PRMerge(Request{WorkDir: repo, Index: 7})
@@ -653,11 +674,16 @@ func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *te
 //nolint:gocyclo
 func TestPRMergeKeepsApprovalOnTemporaryCIFailure(t *testing.T) {
 	service, repo, resultReports, addMergeCall, mergeCalls := newRetryMergeFixture(t, "act-ci")
+	featureSHA := gitOut(t, repo, "rev-parse", "refs/heads/feature/merge")
 	var ciCalls int
 	oldProvider := newProviderFunc
 	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
-			getPR: exactMergePR,
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				pr, err := exactMergePR(owner, repo, index)
+				pr.HeadSHA = featureSHA
+				return pr, err
+			},
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
 				ciCalls++
 				if ciCalls == 1 {
@@ -695,11 +721,16 @@ func TestPRMergeKeepsApprovalOnTemporaryCIFailure(t *testing.T) {
 //nolint:gocyclo
 func TestPRMergeRetriesAmbiguousMergeFailureWithoutConsumingApproval(t *testing.T) {
 	service, repo, resultReports, addMergeCall, mergeCalls := newRetryMergeFixture(t, "act-merge")
+	featureSHA := gitOut(t, repo, "rev-parse", "refs/heads/feature/merge")
 	var calls int
 	oldProvider := newProviderFunc
 	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
-			getPR: exactMergePR,
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				pr, err := exactMergePR(owner, repo, index)
+				pr.HeadSHA = featureSHA
+				return pr, err
+			},
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
 				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
 			},
@@ -737,12 +768,14 @@ func TestPRMergeRetriesAmbiguousMergeFailureWithoutConsumingApproval(t *testing.
 
 func TestPRMergeRepairsReceiptWhenMergeErrorWasActuallySuccessful(t *testing.T) {
 	service, repo, resultReports, addMergeCall, mergeCalls := newRetryMergeFixture(t, "act-merged")
+	featureSHA := gitOut(t, repo, "rev-parse", "refs/heads/feature/merge")
 	var merged bool
 	oldProvider := newProviderFunc
 	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
 			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
 				pr, err := exactMergePR(owner, repo, index)
+				pr.HeadSHA = featureSHA
 				pr.Merged = merged
 				if merged {
 					pr.State = "merged"
@@ -837,6 +870,17 @@ func exactMergePR(owner, repo string, index int64) (*gitprovider.PullRequest, er
 	}, nil
 }
 
+func setupMergeCleanupRepo(t *testing.T, repo string) string {
+	t.Helper()
+	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+branchMain)
+	featureSHA := gitOut(t, repo, "rev-parse", "refs/heads/feature/merge")
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/merge", featureSHA)
+	return featureSHA
+}
+
 func newRetryMergeFixture(t *testing.T, actionID string) (
 	Service, string, func() int, func(), func() int,
 ) {
@@ -844,6 +888,14 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	setupMergeCleanupRepo(t, repo)
+	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
+		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
+			gitRun(t, ctxInfo.WorkDir, "update-ref", "-d", "refs/remotes/origin/feature/merge")
+		}
+		return nil
+	})
+	t.Cleanup(restoreGit)
 	var actionPayload any
 	var resultReports int
 	var mergeCalls int
@@ -888,14 +940,14 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 		}, nil
 	}
 	t.Cleanup(func() { newProviderFunc = oldProvider })
-	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
 		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	return service, repo, func() int { return resultReports }, func() { mergeCalls++ },
 		func() int { return mergeCalls }
 }
 
-func runApprovedRealMergeScenario(
+func runApprovedRealMergeScenario( //nolint:gocyclo
 	t *testing.T, mutate func(*gitprovider.PullRequest), ciState string, mergeErr error,
 ) (Response, int, error) {
 	t.Helper()
@@ -905,6 +957,14 @@ func runApprovedRealMergeScenario(
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	featureSHA := setupMergeCleanupRepo(t, repo)
+	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
+		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
+			gitRun(t, ctxInfo.WorkDir, "update-ref", "-d", "refs/remotes/origin/feature/merge")
+		}
+		return nil
+	})
+	t.Cleanup(restoreGit)
 	var actionPayload any
 	var mergeCalls int
 	var actionGets int
@@ -940,7 +1000,7 @@ func runApprovedRealMergeScenario(
 				providerCalls++
 				pr := &gitprovider.PullRequest{
 					Index: index, State: "open", Mergeable: true,
-					Head: "feature/merge", HeadSHA: "abc123", Base: "main",
+					Head: "feature/merge", HeadSHA: featureSHA, Base: "main",
 					HTMLURL: "https://github.com/tta-lab/organon/pull/7",
 				}
 				if providerCalls > 1 && mutate != nil {
@@ -959,7 +1019,7 @@ func runApprovedRealMergeScenario(
 	}
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 
-	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
 		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {

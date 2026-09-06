@@ -237,6 +237,15 @@ func validatePRMergeOutcome(merge PRMergeResult) error { //nolint:gocyclo
 }
 
 func validateExecutedPRMergeOutcome(merge PRMergeResult) error {
+	if merge.CleanupError != "" {
+		if merge.ReceiptError != "" {
+			return fmt.Errorf("og returned both receipt and cleanup errors for one executed merge")
+		}
+		if !merge.Retryable || merge.NextAction != PRMergeNextRetry {
+			return fmt.Errorf("og returned an invalid cleanup-retry merge state")
+		}
+		return nil
+	}
 	if merge.ReceiptError != "" {
 		if !merge.Retryable || merge.NextAction != PRMergeNextRepairReceipt {
 			return fmt.Errorf("og returned an invalid receipt-repair merge state")

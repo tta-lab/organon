@@ -51,7 +51,10 @@ action ID is informational for audit/web identification, not an input.
 Agents must show that URL and wait for approval rather than invoking forge
 tooling directly. Follow the structured `next_action` and `completion` fields:
 pending waits, an approved temporary failure repeats the same request,
-executed is complete, an `unavailable` result means Impri state is unknown and
+executed is complete only when `receipt_error` and `cleanup_error` are absent,
+an executed `cleanup_error` means the forge merge and receipt are complete but
+checkout cleanup remains, and the same request is safe to repeat without a
+second forge merge. An `unavailable` result means Impri state is unknown and
 the same request retries without a forge call, terminal rejection/expiry/failure
 needs new approval, and `receipt_error` retries only to repair the receipt. If
 an execute_failed receipt write fails, the result remains approved and repetition
@@ -62,8 +65,9 @@ its flags are short scalars; create/modify remain typed MCP/Pi-only to avoid
 multiline shell quoting ambiguity, and both merge adapters share this gate.
 
 Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,
-API-key provisioning/rotation, and branch/worktree cleanup are outside this
-version; `og pull` remains the separate cleanup step.
+API-key provisioning/rotation, and worktree coordination are outside this
+version. Real merge performs guarded single-checkout cleanup automatically;
+`og pull` remains available for its existing closed-PR workflow.
 
 Example MCP client configuration:
 

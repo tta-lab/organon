@@ -282,11 +282,14 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		"pr_merge", "Approval-gated squash merge",
 		"Submit an immutable pull-request snapshot to Impri. Surface the inbox link "+
 			"and execute only after web approval; dry-run records a mock merge and "+
-			"real mode performs a squash merge. Structured outcomes route pending or "+
+			"real mode performs a squash merge followed by guarded single-checkout "+
+			"default-branch pull and approved-head cleanup. Dry-run performs no Git "+
+			"cleanup. Structured outcomes route pending or "+
 			"wait-timeout to the inbox, approved temporary failures to repeating the same "+
 			"request, temporarily unavailable Impri approval state to the same retry "+
 			"without a forge call, executed to completion, terminal rejection/expiry/failure "+
-			"to a new approval, and receipt errors to receipt repair without another merge. "+
+			"to a new approval, receipt errors to receipt repair, and cleanup errors to "+
+			"the same request without another merge. "+
 			"If an execute_failed receipt cannot be recorded, the result stays approved and "+
 			"the same request must be repeated to revalidate and report it.",
 		false, true, true,

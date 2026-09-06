@@ -374,6 +374,7 @@ func mergeIdempotencyKey(snapshot PRMergeSnapshot) (string, error) {
 		Repo          string `json:"repo"`
 		PRNumber      int64  `json:"pr_number"`
 		HeadSHA       string `json:"head_sha"`
+		Head          string `json:"head"`
 		BaseBranch    string `json:"base_branch"`
 		MergeMethod   string `json:"merge_method"`
 		ExecutionMode string `json:"execution_mode"`
@@ -381,7 +382,7 @@ func mergeIdempotencyKey(snapshot PRMergeSnapshot) (string, error) {
 	}{
 		Provider: snapshot.Provider, ForgeBaseURL: snapshot.ForgeBaseURL,
 		Owner: snapshot.Owner, Repo: snapshot.Repo, PRNumber: snapshot.PRNumber,
-		HeadSHA: snapshot.HeadSHA, BaseBranch: snapshot.BaseBranch,
+		HeadSHA: snapshot.HeadSHA, Head: snapshot.Head, BaseBranch: snapshot.BaseBranch,
 		MergeMethod: snapshot.MergeMethod, ExecutionMode: snapshot.ExecutionMode, PRURL: snapshot.PRURL,
 	}
 	data, err := json.Marshal(identity)
@@ -404,6 +405,7 @@ func mergeActionPayload(snapshot PRMergeSnapshot) map[string]any {
 		"merge_method":   snapshot.MergeMethod,
 		"execution_mode": snapshot.ExecutionMode,
 		"pr_url":         snapshot.PRURL,
+		"head":           snapshot.Head,
 		"title":          snapshot.Title,
 	}
 }
@@ -456,7 +458,7 @@ func markdownMergeTitle(title string) string {
 }
 
 func mergePreview(snapshot PRMergeSnapshot) string {
-	mode := "real squash merge"
+	mode := "real squash merge followed by guarded single-checkout cleanup"
 	if snapshot.ExecutionMode == PRMergeModeDryRun {
 		mode = "dry-run mock merge (the forge will not be changed)"
 	}
@@ -470,6 +472,7 @@ func mergePreview(snapshot PRMergeSnapshot) string {
 		"- Repository: `" + snapshot.Owner + "/" + snapshot.Repo + "`",
 		"- Pull request: `#" + strconv.FormatInt(snapshot.PRNumber, 10) + "`",
 		"- PR title: " + markdownMergeTitle(snapshot.Title),
+		"- Head branch: `" + snapshot.Head + "`",
 		"- Head SHA: `" + snapshot.HeadSHA + "`",
 		"- Base branch: `" + snapshot.BaseBranch + "`",
 		"- Merge method: `squash`",

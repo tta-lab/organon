@@ -170,6 +170,12 @@ func renderPRMergeResult(cmd *cobra.Command, alias string, merge og.PRMergeResul
 	if merge.Detail != "" {
 		cmd.Printf("  %s\n", merge.Detail)
 	}
+	if merge.ReceiptError != "" {
+		cmd.Printf("  Receipt error: %s\n", merge.ReceiptError)
+	}
+	if merge.CleanupError != "" {
+		cmd.Printf("  Cleanup error: %s\n", merge.CleanupError)
+	}
 	if merge.NextAction != "" {
 		cmd.Printf("  Next action: %s\n", merge.NextAction)
 	}

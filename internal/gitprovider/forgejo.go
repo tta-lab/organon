@@ -120,7 +120,8 @@ func (p *ForgejoProvider) GetPR(owner, repo string, index int64) (*PullRequest, 
 }
 
 // MergePullRequest performs a squash merge guarded by the expected head SHA.
-// Branch deletion remains disabled; cleanup is a separate og pull operation.
+// Organon's og service performs guarded checkout cleanup after the receipt is
+// recorded, so the provider leaves branch deletion to that shared policy.
 func (p *ForgejoProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
 	merged, _, err := p.client.MergePullRequest(owner, repo, index, forgejo_sdk.MergePullRequestOption{
 		Style:                  forgejo_sdk.MergeStyleSquash,

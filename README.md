@@ -118,8 +118,8 @@ Organon reads this optional section only from `og.toml`; there is no Impri
 environment-variable fallback or second configuration file.
 
 `og pr merge --dry-run --pr-id 123 --json` submits an immutable `git.merge_pr`
-action containing the provider, forge, repository, PR number, head SHA, base
-branch, squash method, and execution mode. The structured result includes the
+action containing the provider, forge, repository, PR number, head branch, head
+SHA, base branch, squash method, and execution mode. The structured result includes the
 action ID and Impri inbox URL. An operator approves or rejects the card in the
 web inbox; agents may use `--wait --timeout 30s` and repeat the same
 `project`, PR ID, and mode request to recover the action. The returned action ID
@@ -136,16 +136,28 @@ expired, timed-out, malformed, stale, and failed actions do not merge.
 Provider/network/API availability failures leave an approved action retryable;
 repeat the same request without new approval. Deterministic guard or executor
 failures are terminal `execute_failed`. A successful attempt is reported as
-`executed`; if receipt reporting fails, the response identifies the merged
-outcome and a repeated request repairs the receipt without merging twice. If
+`executed`; real mode then records the receipt, fast-forwards the registered
+single-checkout default branch, and removes only local and `origin` head refs
+that still match the approved SHA. Dry-run performs no checkout switch, pull,
+or branch deletion. If receipt reporting fails, the response identifies the
+merged outcome and a repeated request repairs the receipt without merging twice.
+If cleanup fails after the receipt, the response remains `executed` with a
+secret-free `cleanup_error`, `retryable=true`, and `next_action=retry_same_request`.
+Repeat the exact same project, PR, and mode request; the forge merge is already
+complete and must not run again. Completion requires the executed receipt,
+successful default-branch pull, and absence of matching approved head refs. If
 Impri approval GET or wait polling is temporarily unavailable, the result is
 the local `unavailable` state: no forge call was made, and the same request is
 retryable. If an `execute_failed` receipt cannot be recorded, the result stays
 approved and retryable; repeating the request revalidates and reports the
 deterministic failure rather than pretending Impri accepted it.
 
-The operation never deletes branches or worktrees; run the existing `og pull`
-closed-PR cleanup separately. Telegram, webhooks, a daemon, and Impri API-key
+Automatic cleanup supports the registered normal single-checkout workflow. It
+refuses dirty or unrelated checkouts and any local/remote head ref that moved
+away from the approved SHA; worktree coordination is outside this version and
+normal Git worktree refusal remains an error. `og pull` remains available for
+its existing guarded closed-PR workflow, but is not a second step after a
+successful real merge. Telegram, webhooks, a daemon, and Impri API-key
 provisioning or rotation are outside this version. The final operator PoC uses
 the configured deployed Impri instance, a web-approved dry-run card, and no
 real merge.
@@ -337,15 +349,20 @@ should default to MCP, and both adapters call the identical Impri approval-gated
 domain operation.
 
 Merge callers consume the structured result fields `status`, `retryable`,
-`next_action`, `completion`, `detail`, `action_id`, `inbox_url`, and
+`next_action`, `completion`, `detail`, `action_id`, `inbox_url`,
+`receipt_error`, `cleanup_error`, and
 `snapshot`. The `action_id` is audit/web identification only. Surface the inbox
 and wait for pending actions; `retry_same_request` means repeat the exact same
-project, PR ID, and mode request; treat executed as complete; and obtain a new
-approval after rejection, expiry, or terminal execution failure. The local
+project, PR ID, and mode request; treat executed with no receipt or cleanup
+error as complete; and obtain a new approval after rejection, expiry, or
+terminal execution failure. The local
 `unavailable` status means approval state is unknown, no forge call was made,
 and the same request is retryable. An executed result with `receipt_error` uses
 `repair_receipt` and is repeated only to repair the Impri receipt, never to
-merge again. Completion means executed with no receipt error.
+merge again. An executed result with `cleanup_error` uses
+`retry_same_request`; it reports that the forge merge is complete and cleanup
+must finish without another forge call. Completion means executed with neither
+receipt nor cleanup error.
 MCP current-
 branch workflows use the registered checkout's current branch. Force push uses
 force-with-lease and is rejected on the default branch. Pull retains the CLI's

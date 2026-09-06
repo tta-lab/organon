@@ -260,6 +260,8 @@ func TestCleanupRevalidatesRemoteAfterBranchSwitch(t *testing.T) {
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
 	conditional := filepath.Join(t.TempDir(), "main-remote.config")
 	if err := os.WriteFile(conditional, []byte(
 		"[url \"https://attacker.invalid/tta-lab/example.git\"]\n"+
@@ -585,6 +587,8 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
 	featureSHA := gitOut(t, repo, "rev-parse", "feature/x")
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", featureSHA)
 	broker := &recordingBroker{}
@@ -632,11 +636,76 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 	}
 }
 
+func TestGitPullMergedBranchCleanupRecreatesMissingDefaultBranch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "token")
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
+	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+branchMain)
+	featureSHA := gitOut(t, repo, "rev-parse", "feature/x")
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", featureSHA)
+	gitRun(t, repo, "branch", "-D", branchMain)
+	if err := gitCmd(repo, "rev-parse", "--verify", "refs/heads/"+branchMain); err == nil {
+		t.Fatal("local default branch unexpectedly exists")
+	}
+	if err := gitCmd(repo, "rev-parse", "--verify", "refs/remotes/origin/"+branchMain); err != nil {
+		t.Fatalf("origin default branch missing: %v", err)
+	}
+	var calls [][]string
+	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
+			gitRun(t, repo, "update-ref", "-d", "refs/remotes/origin/feature/x")
+		}
+		return nil
+	})
+	defer restoreGit()
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{
+					Index: 5, Head: "feature/x", Base: branchMain, State: "closed", Merged: true,
+				}, nil
+			},
+		}, nil
+	})
+	defer restoreProvider()
+
+	if _, err := NewService(&recordingBroker{}).GitPull(Request{WorkDir: repo}); err != nil {
+		t.Fatalf("GitPull with missing local default: %v", err)
+	}
+	if got := gitOut(t, repo, "branch", "--show-current"); got != branchMain {
+		t.Fatalf("current branch = %q, want %q", got, branchMain)
+	}
+	if err := gitCmd(repo, "rev-parse", "--verify", "refs/heads/"+branchMain); err != nil {
+		t.Fatalf("recreated default branch missing: %v", err)
+	}
+	if err := gitCmd(repo, "rev-parse", "--verify", "refs/heads/feature/x"); err == nil {
+		t.Fatal("feature branch still exists locally")
+	}
+	if err := gitCmd(repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/feature/x"); err == nil {
+		t.Fatal("feature branch still exists remotely")
+	}
+	want := [][]string{
+		{"fetch", "--prune", remoteOrigin},
+		{"pull", "--ff-only", remoteOrigin, branchMain},
+		{"push", remoteOrigin, "--delete", "feature/x"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("git calls = %v, want %v", calls, want)
+	}
+}
+
 func TestGitPullClosedUnmergedBranchCleanup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
 	featureSHA := gitOut(t, repo, "rev-parse", "feature/x")
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", featureSHA)
 	var calls [][]string
@@ -678,6 +747,8 @@ func TestGitPullClosedUnmergedBranchKeepsOnlyRemainingLocalRef(t *testing.T) {
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
 	gitRun(t, repo, "branch", branchMain)
+	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, _ ...string) error { return nil })
 	defer restoreGit()
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
