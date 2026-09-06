@@ -104,6 +104,20 @@ process. GitHub authentication uses repository-scoped installation tokens minted
 App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
 continues to use its existing token environment variables.
 
+Controlled `og` Git transport honors only a supported user-global `http.version`
+value (`HTTP/1.1` or `HTTP/2`); all other global and system Git configuration
+remains isolated. To select HTTP/1.1 for a proxy path with HTTP/2 framing
+failures, run:
+
+```bash
+git config --global http.version HTTP/1.1
+```
+
+This is a transport preference for HTTP/2 framing failures, not a fix for TCP
+443, TLS handshake, proxy-node, routing, or forge availability failures. No
+API/MCP schema, deployment, or secret-handling behavior changes with this
+exception.
+
 Pull-request merging is approval-gated through Impri. Configure the optional
 operator-owned section in the existing `~/.config/ttal/og.toml`; the API key is
 never accepted by a tool request or shown in output:

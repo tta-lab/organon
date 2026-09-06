@@ -10,9 +10,19 @@ import (
 )
 
 const (
-	credentialHelperConfig = "credential.helper"
-	forgejoTokenEnv        = "FORGEJO_TOKEN"
+	credentialHelperConfig   = "credential.helper"
+	askPassConfig            = "core.askPass"
+	forgejoTokenEnv          = "FORGEJO_TOKEN"
+	globalHTTPVersionKey     = "http.version"
+	globalHTTPVersionTimeout = time.Second
+	sslVerifyConfig          = "http.sslVerify"
+	trueConfigValue          = "true"
 )
+
+type gitConfigPair struct {
+	key   string
+	value string
+}
 
 // GitCredEnvWithToken returns environment variables for git network operations
 // using an already-resolved token. Use this when a caller has a single
@@ -39,34 +49,21 @@ func GitCredEnvWithToken(token string) []string {
 
 // AnonymousGitEnv returns a complete child environment with credential sources disabled.
 func AnonymousGitEnv(baseEnv []string) []string {
-	clean := controlledCredentialEnv(baseEnv)
-	return append(clean,
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=3",
-		"GIT_CONFIG_KEY_0=credential.helper",
-		"GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=core.askPass",
-		"GIT_CONFIG_VALUE_1=",
-		"GIT_CONFIG_KEY_2=http.sslVerify",
-		"GIT_CONFIG_VALUE_2=true",
-	)
+	return controlledGitEnv(baseEnv, []gitConfigPair{
+		{key: credentialHelperConfig, value: ""},
+		{key: askPassConfig, value: ""},
+		{key: sslVerifyConfig, value: trueConfigValue},
+	})
 }
 
 // ForgejoGitEnv returns a complete child environment using only the resolved token.
 func ForgejoGitEnv(baseEnv []string, token string) []string {
-	env := controlledCredentialEnv(baseEnv)
-	env = append(env,
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=4",
-		"GIT_CONFIG_KEY_0=credential.helper",
-		"GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=core.askPass",
-		"GIT_CONFIG_VALUE_1=",
-		"GIT_CONFIG_KEY_2=credential.helper",
-		"GIT_CONFIG_VALUE_2=!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
-		"GIT_CONFIG_KEY_3=http.sslVerify",
-		"GIT_CONFIG_VALUE_3=true",
-	)
+	env := controlledGitEnv(baseEnv, []gitConfigPair{
+		{key: credentialHelperConfig, value: ""},
+		{key: askPassConfig, value: ""},
+		{key: credentialHelperConfig, value: "!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f"},
+		{key: sslVerifyConfig, value: trueConfigValue},
+	})
 	if token != "" {
 		env = append(env, "GIT_TOKEN_INJECT="+token)
 	}
@@ -76,27 +73,36 @@ func ForgejoGitEnv(baseEnv []string, token string) []string {
 // GitHubAppGitEnv returns a complete child-process environment that routes a
 // GitHub origin through canonical HTTPS and uses only the supplied App token.
 func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
-	env := controlledCredentialEnv(baseEnv)
-	env = append(env, "GIT_TERMINAL_PROMPT=0")
-
-	type configPair struct{ key, value string }
-	configs := []configPair{
+	configs := []gitConfigPair{
 		{key: credentialHelperConfig, value: ""},
-		{key: "core.askPass", value: ""},
-		{key: "http.sslVerify", value: "true"},
+		{key: askPassConfig, value: ""},
+		{key: sslVerifyConfig, value: trueConfigValue},
 	}
 	if proxy := gitProxyFromEnvironment(baseEnv); proxy != "" {
-		configs = append(configs, configPair{key: "http.proxy", value: proxy})
+		configs = append(configs, gitConfigPair{key: "http.proxy", value: proxy})
 	}
 	if token != "" {
-		configs = append(configs, configPair{
+		configs = append(configs, gitConfigPair{
 			key:   credentialHelperConfig,
 			value: "!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
 		})
 	}
 	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
 	if remoteURL != canonicalURL {
-		configs = append(configs, configPair{key: "url." + canonicalURL + ".insteadOf", value: remoteURL})
+		configs = append(configs, gitConfigPair{key: "url." + canonicalURL + ".insteadOf", value: remoteURL})
+	}
+	env := controlledGitEnv(baseEnv, configs)
+	if token != "" {
+		env = append(env, "GIT_TOKEN_INJECT="+token)
+	}
+	return env
+}
+
+func controlledGitEnv(baseEnv []string, configs []gitConfigPair) []string {
+	env := controlledCredentialEnv(baseEnv)
+	env = append(env, "GIT_TERMINAL_PROMPT=0")
+	if version := globalHTTPVersion(baseEnv); version != "" {
+		configs = append(configs, gitConfigPair{key: globalHTTPVersionKey, value: version})
 	}
 	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(configs)))
 	for i, config := range configs {
@@ -105,10 +111,39 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 			fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, config.value),
 		)
 	}
-	if token != "" {
-		env = append(env, "GIT_TOKEN_INJECT="+token)
-	}
 	return env
+}
+
+func globalHTTPVersion(baseEnv []string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), globalHTTPVersionTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "config", "--global", "--get-all", globalHTTPVersionKey)
+	lookupEnv := filterControlledGitEnv(baseEnv)
+	lookupEnv = append(lookupEnv,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
+	)
+	cmd.Env = lookupEnv
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	value := string(out)
+	if strings.HasSuffix(value, "\n") {
+		value = strings.TrimSuffix(value, "\n")
+		value = strings.TrimSuffix(value, "\r")
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return ""
+	}
+	switch value {
+	case "HTTP/1.1", "HTTP/2":
+		return value
+	default:
+		return ""
+	}
 }
 
 func gitProxyFromEnvironment(baseEnv []string) string {

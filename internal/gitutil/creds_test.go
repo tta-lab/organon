@@ -2,9 +2,123 @@ package gitutil
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestControlledGitEnvironmentsRespectSupportedGlobalHTTPVersion(t *testing.T) {
+	for _, version := range []string{"HTTP/1.1", "HTTP/2"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			writeGlobalGitConfig(t, home, "[http]\n\tversion = "+version+"\n")
+			base := []string{
+				"PATH=" + os.Getenv("PATH"),
+				"HOME=" + home,
+				"GIT_CONFIG_GLOBAL=" + filepath.Join(t.TempDir(), "ambient-global"),
+				"GIT_CONFIG_SYSTEM=" + filepath.Join(t.TempDir(), "ambient-system"),
+				"GIT_CONFIG_NOSYSTEM=0",
+				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_KEY_0=http.version",
+				"GIT_CONFIG_VALUE_0=HTTP/3",
+			}
+			environments := map[string][]string{
+				"anonymous": AnonymousGitEnv(base),
+				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"forgejo":   ForgejoGitEnv(base, ""),
+			}
+			for name, env := range environments {
+				t.Run(name, func(t *testing.T) {
+					configs := gitConfigPairs(t, env)
+					if got := configs[globalHTTPVersionKey]; got != version {
+						t.Fatalf("http.version = %q, want %q; configs = %#v", got, version, configs)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestControlledGitEnvironmentsIgnoreMissingAndUnsupportedGlobalHTTPVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "missing"},
+		{name: "unsupported", config: "[http]\n\tversion = HTTP/3\n"},
+		{name: "multiple", config: "[http]\n\tversion = HTTP/1.1\n\tversion = HTTP/2\n"},
+		{name: "malformed", config: "[http\nversion = HTTP/1.1\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tt.config != "" {
+				writeGlobalGitConfig(t, home, tt.config)
+			}
+			base := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+			environments := map[string][]string{
+				"anonymous": AnonymousGitEnv(base),
+				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"forgejo":   ForgejoGitEnv(base, ""),
+			}
+			for name, env := range environments {
+				t.Run(name, func(t *testing.T) {
+					configs := gitConfigPairs(t, env)
+					if _, ok := configs[globalHTTPVersionKey]; ok {
+						t.Fatalf("unsupported global http.version was injected: %#v", configs)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestControlledGitEnvironmentsIgnoreUnavailableGitForGlobalHTTPVersion(t *testing.T) {
+	tests := []struct {
+		name         string
+		unexecutable bool
+	}{
+		{name: "unavailable"},
+		{name: "unexecutable", unexecutable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := t.TempDir()
+			if tt.unexecutable {
+				gitPath := filepath.Join(gitDir, "git")
+				if err := os.WriteFile(gitPath, []byte("#!/bin/sh\necho should-not-run\n"), 0o600); err != nil {
+					t.Fatalf("write unexecutable git: %v", err)
+				}
+			}
+			t.Setenv("PATH", gitDir)
+			base := []string{"PATH=" + gitDir, "HOME=" + t.TempDir()}
+			environments := map[string][]string{
+				"anonymous": AnonymousGitEnv(base),
+				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"forgejo":   ForgejoGitEnv(base, ""),
+			}
+			for name, env := range environments {
+				t.Run(name, func(t *testing.T) {
+					if env == nil {
+						t.Fatal("controlled environment is nil")
+					}
+					configs := gitConfigPairs(t, env)
+					if _, ok := configs[globalHTTPVersionKey]; ok {
+						t.Fatalf("unavailable Git injected http.version: %#v", configs)
+					}
+				})
+			}
+		})
+	}
+}
+
+func writeGlobalGitConfig(t *testing.T, home, contents string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write global git config: %v", err)
+	}
+}
 
 func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	tests := []struct {
@@ -191,8 +305,13 @@ func TestAnonymousGitEnvClearsAmbientCredentials(t *testing.T) {
 }
 
 func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
+	home := t.TempDir()
+	writeGlobalGitConfig(t, home, "[http]\n\tversion = HTTP/1.1\n")
+	proxy := "http://proxy.invalid:7890"
 	base := []string{
 		"PATH=/bin",
+		"HOME=" + home,
+		"HTTPS_PROXY=" + proxy,
 		"GIT_TRACE=1",
 		"GIT_TRACE_CURL=1",
 		"GIT_CURL_VERBOSE=1",
@@ -237,8 +356,19 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 				t.Fatal("controlled Git environment retained ambient global/system configuration")
 			}
 			configs := gitConfigPairs(t, env)
+			if configs[globalHTTPVersionKey] != "HTTP/1.1" {
+				t.Fatalf("controlled git configs = %#v, want supported global http.version", configs)
+			}
 			if _, disabled := configs["core.hooksPath"]; disabled || configs["http.sslVerify"] != "true" {
 				t.Fatalf("controlled git configs = %#v, want normal hooks and TLS verification enabled", configs)
+			}
+			if envValue(env, "HTTPS_PROXY") != proxy {
+				t.Fatalf("controlled Git environment lost explicit proxy: %v", env)
+			}
+			if name == "github" {
+				if configs["http.proxy"] != proxy {
+					t.Fatalf("GitHub controlled git configs = %#v, want explicit proxy", configs)
+				}
 			}
 		})
 	}
