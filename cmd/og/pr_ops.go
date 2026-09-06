@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -120,14 +119,11 @@ func runPRMerge(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	actionID, _ := cmd.Flags().GetString("action-id")
-	if actionID != "" && actionID != strings.TrimSpace(actionID) {
-		return fmt.Errorf("action ID must not contain surrounding whitespace")
-	}
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	wait, _ := cmd.Flags().GetBool("wait")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	req := og.Request{Index: index, ActionID: actionID, DryRun: dryRun, Wait: wait, Timeout: timeout}
-	if err := og.ValidatePRMergeRequest(req); err != nil {
+	if req, err = og.NormalizePRMergeRequest(req); err != nil {
 		return err
 	}
 	runtime, err := runtimeFor(cmd)
@@ -163,7 +159,11 @@ func renderPRMergeResult(cmd *cobra.Command, alias string, merge og.PRMergeResul
 	if alias != "" {
 		cmd.Printf("Project %s:\n", alias)
 	}
-	cmd.Printf("PR #%d merge approval: %s\n", merge.Snapshot.PRNumber, merge.Status)
+	if merge.Snapshot.PRNumber > 0 {
+		cmd.Printf("PR #%d merge approval: %s\n", merge.Snapshot.PRNumber, merge.Status)
+	} else {
+		cmd.Printf("PR merge approval: %s\n", merge.Status)
+	}
 	cmd.Printf("  Action: %s\n", merge.ActionID)
 	if merge.InboxURL != "" {
 		cmd.Printf("  Impri inbox: %s\n", merge.InboxURL)

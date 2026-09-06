@@ -151,7 +151,7 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 		reference.Default = json.RawMessage("false")
 	}
 	if timeout := schema.Properties["timeout_seconds"]; timeout != nil {
-		timeout.Minimum = jsonschema.Ptr(1.0)
+		timeout.Minimum = jsonschema.Ptr(0.0)
 		timeout.Maximum = jsonschema.Ptr(86400.0)
 		timeout.Default = json.RawMessage("30")
 	}
@@ -285,8 +285,11 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 			"and execute only after web approval; dry-run records a mock merge and "+
 			"real mode performs a squash merge. Structured outcomes route pending or "+
 			"wait-timeout to the inbox, approved temporary failures to retrying the same "+
-			"action_id, executed to completion, terminal rejection/expiry/failure to a "+
-			"new approval, and receipt errors to receipt repair without another merge.",
+			"action_id, temporarily unavailable Impri approval state to the same retry "+
+			"without a forge call, executed to completion, terminal rejection/expiry/failure "+
+			"to a new approval, and receipt errors to receipt repair without another merge. "+
+			"If an execute_failed receipt cannot be recorded, the result stays approved and "+
+			"the same action must be resumed to revalidate and report it.",
 		false, true, true,
 	), false), prMergeHandler(projects, executor))
 
@@ -470,12 +473,6 @@ func prMergeHandler(
 		if err != nil {
 			return nil, ogPRMergeOutput{}, err
 		}
-		if input.ActionID != strings.TrimSpace(input.ActionID) {
-			return nil, ogPRMergeOutput{}, fmt.Errorf("action ID must not contain surrounding whitespace")
-		}
-		if input.TimeoutSeconds != nil && *input.TimeoutSeconds <= 0 {
-			return nil, ogPRMergeOutput{}, fmt.Errorf("timeout_seconds must be positive")
-		}
 		timeout := time.Duration(0)
 		if input.TimeoutSeconds != nil {
 			timeout = time.Duration(*input.TimeoutSeconds) * time.Second
@@ -484,7 +481,7 @@ func prMergeHandler(
 			Index: prID, ActionID: input.ActionID, DryRun: input.DryRun,
 			Wait: input.Wait, Timeout: timeout,
 		}
-		if err := og.ValidatePRMergeRequest(req); err != nil {
+		if req, err = og.NormalizePRMergeRequest(req); err != nil {
 			return nil, ogPRMergeOutput{}, err
 		}
 		resp, canonical, err := callProject(ctx, projects, input.Project, req, executor.PRMerge)

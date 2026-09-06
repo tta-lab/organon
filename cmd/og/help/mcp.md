@@ -50,8 +50,11 @@ contains the immutable approved snapshot, action ID, status, and inbox URL.
 Agents must show that URL and wait for approval rather than invoking forge
 tooling directly. Follow the structured `next_action` and `completion` fields:
 pending waits, an approved temporary failure retries the same action ID,
-executed is complete, terminal rejection/expiry/failure needs new approval,
-and `receipt_error` retries only to repair the receipt. Real mode is
+executed is complete, an `unavailable` result means Impri state is unknown and
+the same action retries without a forge call, terminal rejection/expiry/failure
+needs new approval, and `receipt_error` retries only to repair the receipt. If
+an execute_failed receipt write fails, the result remains approved and resume
+revalidates/reports it. Real mode is
 squash-only and revalidates the PR and CI. The CLI also supports merge because
 its flags are short scalars; create/modify remain typed MCP/Pi-only to avoid
 multiline shell quoting ambiguity, and both merge adapters share this gate.

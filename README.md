@@ -130,7 +130,12 @@ Provider/network/API availability failures leave an approved action resumable;
 retry the same action ID without new approval. Deterministic guard or executor
 failures are terminal `execute_failed`. A successful attempt is reported as
 `executed`; if receipt reporting fails, the response identifies the merged
-outcome and a retry repairs the receipt without merging twice.
+outcome and a retry repairs the receipt without merging twice. If Impri approval
+GET or wait polling is temporarily unavailable, the result is the local
+`unavailable` state: no forge call was made, and retry the same action ID. If
+an `execute_failed` receipt cannot be recorded, the result stays approved and
+retryable; resuming revalidates and reports the deterministic failure rather
+than pretending Impri accepted it.
 
 The operation never deletes branches or worktrees; run the existing `og pull`
 closed-PR cleanup separately. Telegram, webhooks, a daemon, and Impri API-key
@@ -329,6 +334,9 @@ Merge callers consume the structured result fields `status`, `resumable`,
 `snapshot`. Surface the inbox and wait for pending actions; retry the same
 `action_id` for an approved temporary failure; treat executed as complete; and
 obtain a new approval after rejection, expiry, or terminal execution failure.
+The local `unavailable` status means approval state is unknown, no forge call
+was made, and the same action is retryable. A failed `execute_failed` receipt
+write also remains approved until a resume records it.
 An executed result with `receipt_error` is retried only to repair the Impri
 receipt, never to merge again. Completion means executed with no receipt error.
 MCP current-

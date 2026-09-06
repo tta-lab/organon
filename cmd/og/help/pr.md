@@ -30,8 +30,10 @@ Behavior:
   PR is open, green, mergeable, and still at the approved SHA. If the result is
   approved and retryable, retry the same action ID after the provider recovers;
   executed means complete, while rejected/expired/execute_failed require new
-  approval. A receipt error is repaired with the same action ID and never
-  invokes a second merge.
+  approval. If Impri state is temporarily unavailable, no forge call was made:
+  retry the same action ID. A failed execute_failed receipt write also remains
+  approved and is revalidated on resume. An executed receipt error is repaired
+  with the same action ID and never invokes a second merge.
 
 Configure Impri in the existing user-owned `~/.config/ttal/og.toml`:
 

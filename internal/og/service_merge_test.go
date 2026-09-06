@@ -334,6 +334,185 @@ func TestPRMergeRejectsWrongTargetOnResumeAndAfterWait(t *testing.T) { //nolint:
 	}
 }
 
+func TestPRMergeReportsUnavailableWhenResumeReadFails(t *testing.T) { //nolint:gocyclo
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var providerCalls atomic.Int32
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		providerCalls.Add(1)
+		return fakeProvider{getPR: exactMergePR}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/actions/act-unavailable" || r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, "temporary Impri outage", http.StatusBadGateway)
+	}))
+	t.Cleanup(server.Close)
+
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	response, err := service.PRMerge(Request{
+		WorkDir: repo, Index: 7, ActionID: "act-unavailable",
+	})
+	var retryErr *PRMergeRetryableError
+	if err == nil || !errors.As(err, &retryErr) || response.Merge == nil {
+		t.Fatalf("response = %+v, err = %v, want structured retryable outcome", response, err)
+	}
+	merge := response.Merge
+	if merge.Status != PRMergeStatusUnavailable || merge.ActionID != "act-unavailable" ||
+		!merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRetry ||
+		merge.InboxURL == "" || merge.ReceiptError != "" {
+		t.Fatalf("unavailable merge = %+v", merge)
+	}
+	for _, want := range []string{
+		"approval state is temporarily unavailable", "no forge call was made", "retry the same action ID",
+	} {
+		if !strings.Contains(merge.Detail, want) {
+			t.Fatalf("unavailable detail = %q, want %q", merge.Detail, want)
+		}
+	}
+	if err := ValidatePRMergeResponse(response, 7); err != nil {
+		t.Fatalf("validate unavailable response: %v", err)
+	}
+	if providerCalls.Load() != 0 {
+		t.Fatalf("provider calls = %d, want no forge call", providerCalls.Load())
+	}
+}
+
+func TestPRMergeReportsUnavailableWhenWaitPollFails(t *testing.T) { //nolint:gocyclo
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var payload any
+	var gets atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			payload = body["payload"]
+			writeMergeAction(t, w, "act-wait-unavailable", PRMergeStatusPending, payload)
+		case r.URL.Path == "/v1/actions/act-wait-unavailable" && r.Method == http.MethodGet:
+			if gets.Add(1) == 1 {
+				writeMergeAction(t, w, "act-wait-unavailable", PRMergeStatusPending, payload)
+				return
+			}
+			http.Error(w, "temporary Impri poll outage", http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: exactMergePR}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	var dryRuns atomic.Int32
+	service := NewServiceWithConfigAndDryRunExecutor(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	}, func(context.Context, PRMergeSnapshot) error {
+		dryRuns.Add(1)
+		return nil
+	})
+	response, err := service.PRMerge(Request{
+		WorkDir: repo, Index: 7, DryRun: true, Wait: true, Timeout: time.Second,
+	})
+	var retryErr *PRMergeRetryableError
+	if err == nil || !errors.As(err, &retryErr) || response.Merge == nil {
+		t.Fatalf("response = %+v, err = %v, want structured retryable outcome", response, err)
+	}
+	merge := response.Merge
+	if merge.Status != PRMergeStatusUnavailable || merge.ActionID != "act-wait-unavailable" ||
+		!merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRetry ||
+		merge.Snapshot.PRNumber != 7 || merge.Snapshot.PRURL == "" {
+		t.Fatalf("unavailable wait merge = %+v", merge)
+	}
+	if !strings.Contains(merge.Detail, "no forge call was made") || dryRuns.Load() != 0 {
+		t.Fatalf("unavailable wait detail = %q, dry runs = %d", merge.Detail, dryRuns.Load())
+	}
+	if err := ValidatePRMergeResponse(response, 7); err != nil {
+		t.Fatalf("validate unavailable wait response: %v", err)
+	}
+}
+
+func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *testing.T) { //nolint:gocyclo
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var actionPayload any
+	var receiptAttempts atomic.Int32
+	var receiptStatuses []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			actionPayload = body["payload"]
+			writeMergeAction(t, w, "act-failure-receipt", PRMergeStatusPending, actionPayload)
+		case r.URL.Path == "/v1/actions/act-failure-receipt" && r.Method == http.MethodGet:
+			writeMergeAction(t, w, "act-failure-receipt", PRMergeStatusApproved, actionPayload)
+		case r.URL.Path == "/v1/actions/act-failure-receipt/result" && r.Method == http.MethodPost:
+			var body struct {
+				Status string `json:"status"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			receiptStatuses = append(receiptStatuses, body.Status)
+			if receiptAttempts.Add(1) == 1 {
+				http.Error(w, "temporary receipt outage", http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+			pr, err := exactMergePR(owner, repo, index)
+			pr.Mergeable = false
+			return pr, err
+		}}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	first, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-failure-receipt"})
+	var retryErr *PRMergeRetryableError
+	if err == nil || !errors.As(err, &retryErr) || first.Merge == nil ||
+		first.Merge.Status != PRMergeStatusApproved || !first.Merge.Resumable ||
+		!first.Merge.Retryable || first.Merge.NextAction != PRMergeNextRetry ||
+		first.Merge.ReceiptError != "" || !strings.Contains(first.Merge.Detail, "could not be recorded") {
+		t.Fatalf("unrecorded failure response = %+v, err = %v", first, err)
+	}
+	second, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-failure-receipt"})
+	if err != nil || second.Merge == nil || second.Merge.Status != PRMergeStatusExecuteFailed ||
+		second.Merge.Resumable || second.Merge.Retryable || second.Merge.NextAction != PRMergeNextNewApproval {
+		t.Fatalf("recorded failure response = %+v, err = %v", second, err)
+	}
+	if len(receiptStatuses) != 2 || receiptStatuses[0] != PRMergeStatusExecuteFailed ||
+		receiptStatuses[1] != PRMergeStatusExecuteFailed {
+		t.Fatalf("receipt statuses = %v, want two execute_failed attempts", receiptStatuses)
+	}
+}
+
 //nolint:gocyclo
 func TestPRMergeKeepsApprovalOnTemporaryRefetchFailure(t *testing.T) {
 	service, repo, resultReports, _, mergeCalls, providerGets := newRetryMergeFixture(t, "act-refetch")

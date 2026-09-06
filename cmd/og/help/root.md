@@ -18,7 +18,9 @@ inbox URL, and records a mock execution only after a web approval. Use
 merges use the same gate and recheck the PR, CI, and head SHA immediately
 before the forge call. Rejection, expiry, timeout, and execution failure leave
 the PR untouched. Temporary provider/API failures keep the approved action
-resumable; retry its same action ID. `og pull` remains the separate step for
+resumable; retry its same action ID. If Impri approval state cannot be read,
+the outcome is `unavailable` and no forge call was made; retry the same action.
+`og pull` remains the separate step for
 closed-PR branch and worktree cleanup. Impri configuration is read only from this `og.toml`; no
 `IMPRI_*` environment-variable fallback or second config file exists.
 

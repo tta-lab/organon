@@ -261,6 +261,100 @@ func TestCLIPRMergeRetryableErrorPrintsRecoveryOutcome(t *testing.T) {
 	}
 }
 
+func TestCLIPRMergeUsesSharedTimeoutNormalization(t *testing.T) {
+	projects := testProjectStore(t)
+	var got og.Request
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		got = req
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-timeout", Status: og.PRMergeStatusPending,
+			InboxURL:  "http://impri.example/actions",
+			Snapshot:  og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+			Resumable: true, NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and resume this action_id after Impri records approved or rejected",
+		}}, nil
+	}}
+	if _, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7", "--wait", "--timeout", "0s"); err != nil {
+		t.Fatalf("zero timeout merge: %v", err)
+	}
+	if got.Timeout != og.DefaultPRMergeTimeout {
+		t.Fatalf("CLI timeout = %s, want %s", got.Timeout, og.DefaultPRMergeTimeout)
+	}
+	called := false
+	executor.prMerge = func(req og.Request) (og.Response, error) {
+		called = true
+		return og.Response{}, nil
+	}
+	_, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7", "--wait", "--timeout=-1s")
+	if err == nil || !strings.Contains(err.Error(), "merge timeout must not be negative") {
+		t.Fatalf("negative timeout error = %v", err)
+	}
+	if called {
+		t.Fatal("CLI executor called for negative timeout")
+	}
+}
+
+func TestCLIPRMergeUnavailableOutcomesRenderRecoveryContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot og.PRMergeSnapshot
+		args     []string
+	}{
+		{name: "resume GET", args: []string{"--action-id", "act-unavailable"}},
+		{name: "wait poll", args: []string{"--action-id", "act-unavailable", "--wait"}, snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projects := testProjectStore(t)
+			merge := og.PRMergeResult{
+				ActionID: "act-unavailable", Status: og.PRMergeStatusUnavailable,
+				InboxURL: "http://impri.example/actions", Snapshot: tc.snapshot,
+				Resumable: true, Retryable: true, NextAction: og.PRMergeNextRetry,
+				Completion: "retry this action_id when Impri approval state is available; completion requires a known Impri status",
+				Detail:     "Impri approval state is temporarily unavailable; no forge call was made; retry the same action ID",
+			}
+			executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+				return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+			}}
+			args := append([]string{"pr", "merge", "--project", "ko", "--pr-id", "7"}, tc.args...)
+			stdout, _, err := runDirectCLI(t, executor, projects, "", args...)
+			if err == nil || !strings.Contains(stdout, "unavailable") ||
+				!strings.Contains(stdout, "no forge call was made") ||
+				!strings.Contains(stdout, "retry_same_action") {
+				t.Fatalf("stdout = %q, err = %v, want unavailable recovery contract", stdout, err)
+			}
+		})
+	}
+}
+
+func TestCLIPRMergeFailedReceiptRendersApprovedRetryOutcome(t *testing.T) {
+	projects := testProjectStore(t)
+	merge := og.PRMergeResult{
+		ActionID: "act-failed-receipt", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Resumable: true, Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "resume this action_id to revalidate and record the deterministic " +
+			"execute_failed result; completion is confirmed when Impri reports execute_failed",
+		Snapshot: og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+		Detail: "impri action act-failed-receipt remains approved; retry with the same action ID: " +
+			"deterministic execution failure could not be recorded in Impri; " +
+			"resume the same action ID to revalidate and report it",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7", "--action-id", "act-failed-receipt")
+	if err == nil || !strings.Contains(stdout, "approved") ||
+		!strings.Contains(stdout, "could not be recorded") ||
+		!strings.Contains(stdout, "retry_same_action") || strings.Contains(stdout, "repair_receipt") {
+		t.Fatalf("stdout = %q, err = %v, want approved receipt-retry outcome", stdout, err)
+	}
+}
+
 func TestCLIForwardsCloneSelectorsToDomain(t *testing.T) {
 	projects := testProjectStore(t)
 	var cloneRequest og.Request

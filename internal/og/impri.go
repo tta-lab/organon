@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +22,7 @@ const (
 	impriAPIVersionPath = "/v1"
 	impriActionsPath    = "/actions"
 	impriPollInterval   = 250 * time.Millisecond
-	impriDefaultWait    = 30 * time.Second
+	impriDefaultWait    = DefaultPRMergeTimeout
 	impriMaxBodyBytes   = 1 << 20
 )
 
@@ -126,6 +127,16 @@ func (c *impriClient) reportResult(
 
 func (c *impriClient) inboxURL() string {
 	return c.rootURL + impriActionsPath
+}
+
+// retryableImpriReadError distinguishes transport/service outages from a
+// response-contract violation. A malformed action must still fail closed so a
+// wrong kind or target can never be treated as an approved action.
+func retryableImpriReadError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return !strings.Contains(err.Error(), "decode Impri action")
 }
 
 func (c *impriClient) requestJSON(

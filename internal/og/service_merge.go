@@ -52,7 +52,9 @@ func newServiceWithDryRunExecutor(
 func defaultDryRunMergeExecutor(context.Context, PRMergeSnapshot) error { return nil }
 
 func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
-	if err := ValidatePRMergeRequest(req); err != nil {
+	var err error
+	req, err = NormalizePRMergeRequest(req)
+	if err != nil {
 		return Response{}, err
 	}
 	ctxInfo, err := s.resolvePRContextForRequest(req)
@@ -76,7 +78,11 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	if strings.TrimSpace(req.ActionID) != "" {
 		action, err = client.getAction(operationContext(ctxInfo), req.ActionID)
 		if err != nil {
-			return Response{}, err
+			if !retryableImpriReadError(err) {
+				return Response{}, err
+			}
+			return retryableImpriUnavailable(req.ActionID, client.inboxURL(), PRMergeSnapshot{},
+				"approval state could not be read")
 		}
 		if action.ID != req.ActionID {
 			return Response{}, fmt.Errorf("impri action ID does not match the requested action")
@@ -285,10 +291,15 @@ func (s Service) processMergeAction(
 	status := action.Status
 	waitTimedOut := false
 	if status == PRMergeStatusPending && req.Wait {
+		waitingAction := action
 		var err error
 		action, waitTimedOut, err = waitForImpriAction(operationContext(ctxInfo), client, action.ID, req.Timeout)
 		if err != nil {
-			return Response{}, err
+			if !retryableImpriReadError(err) {
+				return Response{}, err
+			}
+			return retryableImpriUnavailable(waitingAction.ID, waitingAction.InboxURL, snapshot,
+				"approval state could not be read while waiting")
 		}
 		if action.TargetURL != snapshot.PRURL {
 			return Response{}, fmt.Errorf("impri action target_url does not match the approved PR snapshot")
@@ -487,14 +498,37 @@ func (s Service) recoverMergeAfterProviderError(
 }
 
 func retryableMergeError(action impriAction, snapshot PRMergeSnapshot, detail string) (Response, error) {
+	return retryableMergeErrorWithCompletion(action, snapshot, detail,
+		"resume this action_id after the temporary failure; execution completes only when status is executed")
+}
+
+func retryableMergeErrorWithCompletion(
+	action impriAction, snapshot PRMergeSnapshot, detail, completion string,
+) (Response, error) {
 	result := PRMergeResult{
 		ActionID: action.ID, Status: PRMergeStatusApproved, InboxURL: action.InboxURL,
 		Snapshot: snapshot, Resumable: true, Retryable: true,
 		NextAction: PRMergeNextRetry,
-		Completion: "resume this action_id after the temporary failure; execution completes only when status is executed",
+		Completion: completion,
 		Detail:     fmt.Sprintf("impri action %s remains approved; retry with the same action ID: %s", action.ID, detail),
 	}
 	return Response{Error: result.Detail, Message: result.Detail, Merge: &result}, &PRMergeRetryableError{Result: result}
+}
+
+func retryableImpriUnavailable(
+	actionID, inboxURL string, snapshot PRMergeSnapshot, detail string,
+) (Response, error) {
+	result := PRMergeResult{
+		ActionID: actionID, Status: PRMergeStatusUnavailable, InboxURL: inboxURL,
+		Snapshot: snapshot, Resumable: true, Retryable: true,
+		NextAction: PRMergeNextRetry,
+		Completion: "retry this action_id when Impri approval state is available; " +
+			"completion requires a known Impri status",
+		Detail: fmt.Sprintf("Impri approval state is temporarily unavailable for action %s; "+
+			"no forge call was made; retry the same action ID: %s", actionID, detail),
+	}
+	return Response{Error: result.Detail, Message: result.Detail, Merge: &result},
+		&PRMergeRetryableError{Result: result}
 }
 
 func unsupportedProviderSetup(ctxInfo *repoContext, err error) bool {
@@ -529,6 +563,14 @@ func (s Service) reportExecution(
 	setMergeOutcome(result)
 	reportErr := client.reportResult(operationContext(ctxInfo), action.ID, status, detail, mergeActionPayload(snapshot))
 	if reportErr != nil {
+		if status != PRMergeStatusExecuted {
+			return retryableMergeErrorWithCompletion(action, snapshot,
+				"deterministic execution failure could not be recorded in Impri; "+
+					"resume the same action ID to revalidate and report it: "+detail+
+					"; Impri receipt error: "+reportErr.Error(),
+				"resume this action_id to revalidate and record the deterministic "+
+					"execute_failed result; completion is confirmed when Impri reports execute_failed")
+		}
 		result.ReceiptError = reportErr.Error()
 		result.Resumable = true
 		result.Retryable = true
@@ -560,5 +602,11 @@ func setMergeOutcome(result *PRMergeResult) {
 	case PRMergeStatusExecuted:
 		result.NextAction = PRMergeNextNone
 		result.Completion = "the approved merge is complete; do not execute this action again"
+	case PRMergeStatusUnavailable:
+		result.Resumable = true
+		result.Retryable = true
+		result.NextAction = PRMergeNextRetry
+		result.Completion = "retry this action_id when Impri approval state is available; " +
+			"completion requires a known Impri status"
 	}
 }

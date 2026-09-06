@@ -83,21 +83,32 @@ func ValidatePRLogTail(tail int) error {
 	return nil
 }
 
-// ValidatePRMergeRequest checks transport-independent merge arguments.
-func ValidatePRMergeRequest(req Request) error {
+// NormalizePRMergeRequest validates transport-independent merge arguments and
+// applies their shared defaults. The normalized request is what every adapter
+// and the service must execute.
+func NormalizePRMergeRequest(req Request) (Request, error) {
 	if req.Index < 0 {
-		return fmt.Errorf("PR ID must not be negative")
+		return Request{}, fmt.Errorf("PR ID must not be negative")
 	}
 	if strings.TrimSpace(req.ActionID) != req.ActionID {
-		return fmt.Errorf("action ID must not contain surrounding whitespace")
+		return Request{}, fmt.Errorf("action ID must not contain surrounding whitespace")
 	}
 	if req.Timeout < 0 {
-		return fmt.Errorf("merge timeout must not be negative")
+		return Request{}, fmt.Errorf("merge timeout must not be negative")
 	}
 	if req.Wait && req.Timeout > 24*time.Hour {
-		return fmt.Errorf("merge timeout must not exceed 24h")
+		return Request{}, fmt.Errorf("merge timeout must not exceed 24h")
 	}
-	return nil
+	if req.Wait && req.Timeout == 0 {
+		req.Timeout = DefaultPRMergeTimeout
+	}
+	return req, nil
+}
+
+// ValidatePRMergeRequest checks transport-independent merge arguments.
+func ValidatePRMergeRequest(req Request) error {
+	_, err := NormalizePRMergeRequest(req)
+	return err
 }
 
 // Response validators shared by the CLI, MCP, and Pi extension adapters so
@@ -177,18 +188,23 @@ func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 		return fmt.Errorf("og returned no pull request merge result")
 	}
 	merge := resp.Merge
-	if strings.TrimSpace(merge.ActionID) == "" || merge.Snapshot.PRNumber <= 0 ||
-		strings.TrimSpace(merge.Snapshot.PRURL) == "" {
+	if strings.TrimSpace(merge.ActionID) == "" {
 		return fmt.Errorf("og returned an invalid pull request merge result")
-	}
-	if expectedID > 0 && merge.Snapshot.PRNumber != expectedID {
-		return fmt.Errorf("og returned PR ID %d, want %d", merge.Snapshot.PRNumber, expectedID)
 	}
 	switch merge.Status {
 	case PRMergeStatusPending, PRMergeStatusApproved, PRMergeStatusRejected,
-		PRMergeStatusExpired, PRMergeStatusExecuted, PRMergeStatusExecuteFailed:
+		PRMergeStatusExpired, PRMergeStatusExecuted, PRMergeStatusExecuteFailed,
+		PRMergeStatusUnavailable:
 	default:
 		return fmt.Errorf("og returned invalid pull request merge status %q", merge.Status)
+	}
+	if merge.Status != PRMergeStatusUnavailable || merge.Snapshot.PRNumber != 0 {
+		if merge.Snapshot.PRNumber <= 0 || strings.TrimSpace(merge.Snapshot.PRURL) == "" {
+			return fmt.Errorf("og returned an invalid pull request merge result")
+		}
+		if expectedID > 0 && merge.Snapshot.PRNumber != expectedID {
+			return fmt.Errorf("og returned PR ID %d, want %d", merge.Snapshot.PRNumber, expectedID)
+		}
 	}
 	if merge.InboxURL == "" {
 		return fmt.Errorf("og returned pull request merge result without inbox URL")
@@ -199,7 +215,7 @@ func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 	return validatePRMergeOutcome(*merge)
 }
 
-func validatePRMergeOutcome(merge PRMergeResult) error {
+func validatePRMergeOutcome(merge PRMergeResult) error { //nolint:gocyclo
 	switch merge.Status {
 	case PRMergeStatusPending:
 		if !merge.Resumable || merge.Retryable || merge.NextAction != PRMergeNextWait {
@@ -208,6 +224,10 @@ func validatePRMergeOutcome(merge PRMergeResult) error {
 	case PRMergeStatusApproved:
 		if !merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRetry {
 			return fmt.Errorf("og returned an invalid retryable merge recovery state")
+		}
+	case PRMergeStatusUnavailable:
+		if !merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRetry {
+			return fmt.Errorf("og returned an invalid unavailable merge recovery state")
 		}
 	case PRMergeStatusRejected, PRMergeStatusExpired, PRMergeStatusExecuteFailed:
 		if merge.Resumable || merge.Retryable || merge.NextAction != PRMergeNextNewApproval {

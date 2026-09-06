@@ -71,11 +71,15 @@ Agents must treat `PRMergeResult` as the merge feedback contract: surface
 `inbox_url` while `status=pending` and wait; for `status=approved` with
 `retryable=true`, resume the same `action_id` without new approval; for
 `status=executed`, stop because the merge is complete; and for rejected,
-expired, or `execute_failed`, obtain a new approval for another attempt. An
-executed result with `receipt_error` is resumable only with the same
-`action_id` to repair the receipt; it must not merge again. Follow
-`next_action` and `completion` rather than parsing prose, and consider the
-operation complete only when `status=executed` has no receipt error. Impri
+expired, or `execute_failed`, obtain a new approval for another attempt. A
+local `status=unavailable` means Impri approval state could not be read: no
+forge call was made, and the same `action_id` is retryable. If recording a
+deterministic `execute_failed` receipt is unavailable, the result remains
+`status=approved` with `retry_same_action`; resume that action to revalidate
+and report the failure. An executed result with `receipt_error` is resumable
+only with the same `action_id` to repair the receipt; it must not merge again.
+Follow `next_action` and `completion` rather than parsing prose, and consider
+the operation complete only when `status=executed` has no receipt error. Impri
 provider/API availability failures remain approved and retryable.
 
 The CLI/MCP transport boundary and its rationale are authoritative in the

@@ -120,6 +120,9 @@ const (
 	PRMergeStatusExpired       = "expired"
 	PRMergeStatusExecuted      = "executed"
 	PRMergeStatusExecuteFailed = "execute_failed"
+	// PRMergeStatusUnavailable is a local outcome used when Impri's current
+	// approval state cannot be read. It is never sent to Impri as a result.
+	PRMergeStatusUnavailable = "unavailable"
 
 	// PRMergeNextAction values are machine-readable routing instructions for
 	// agents consuming PRMergeResult.
@@ -128,6 +131,10 @@ const (
 	PRMergeNextRepairReceipt = "repair_receipt"
 	PRMergeNextNone          = "none"
 	PRMergeNextNewApproval   = "new_approval_required"
+
+	// DefaultPRMergeTimeout is the shared wait timeout applied when a caller
+	// requests waiting but leaves its timeout unset or explicitly zero.
+	DefaultPRMergeTimeout = 30 * time.Second
 )
 
 // PRMergeSnapshot is the immutable forge identity submitted for approval.
