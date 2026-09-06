@@ -129,14 +129,24 @@ func (c *impriClient) inboxURL() string {
 	return c.rootURL + impriActionsPath
 }
 
-// retryableImpriReadError distinguishes transport/service outages from a
-// response-contract violation. A malformed action must still fail closed so a
-// wrong kind or target can never be treated as an approved action.
+// retryableImpriReadError distinguishes transient transport/service outages
+// from response-contract violations and deterministic HTTP failures. A
+// malformed action or 4xx response must still fail closed so a wrong kind,
+// target, credential, or missing action can never become an endless retry.
 func retryableImpriReadError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	return !strings.Contains(err.Error(), "decode Impri action")
+	var httpErr *impriHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.status == http.StatusTooManyRequests || httpErr.status >= http.StatusInternalServerError
+	}
+	var transportErr *impriTransportError
+	if errors.As(err, &transportErr) {
+		return true
+	}
+	var readErr *impriReadError
+	return errors.As(err, &readErr)
 }
 
 func (c *impriClient) requestJSON(
@@ -160,24 +170,74 @@ func (c *impriClient) requestJSON(
 	}
 	resp, err := c.http.Do(req) //nolint:gosec // base URL is validated operator configuration.
 	if err != nil {
-		return fmt.Errorf("request failed: %w", redactImpriError(err, c.apiKey))
+		redacted := redactImpriError(err, c.apiKey)
+		return &impriTransportError{
+			cause:   redacted,
+			message: fmt.Sprintf("request failed: %v", redacted),
+		}
 	}
 	defer resp.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, impriMaxBodyBytes))
 	if readErr != nil {
-		return fmt.Errorf("read response: %w", readErr)
+		redacted := redactImpriError(readErr, c.apiKey)
+		return &impriReadError{
+			cause:   redacted,
+			message: fmt.Sprintf("read response: %v", redacted),
+		}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("impri returned HTTP %d: %s", resp.StatusCode, safeImpriBody(data, c.apiKey))
+		return &impriHTTPError{
+			status:  resp.StatusCode,
+			message: fmt.Sprintf("impri returned HTTP %d: %s", resp.StatusCode, safeImpriBody(data, c.apiKey)),
+		}
 	}
 	if output == nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(data, output); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return &impriDecodeError{
+			cause:   err,
+			message: fmt.Sprintf("decode response: %v", err),
+		}
 	}
 	return nil
 }
+
+type impriTransportError struct {
+	cause   error
+	message string
+}
+
+func (e *impriTransportError) Error() string { return e.message }
+
+func (e *impriTransportError) Unwrap() error { return e.cause }
+
+type impriReadError struct {
+	cause   error
+	message string
+}
+
+func (e *impriReadError) Error() string { return e.message }
+
+func (e *impriReadError) Unwrap() error { return e.cause }
+
+type impriHTTPError struct {
+	status  int
+	message string
+}
+
+func (e *impriHTTPError) Error() string { return e.message }
+
+func (e *impriHTTPError) StatusCode() int { return e.status }
+
+type impriDecodeError struct {
+	cause   error
+	message string
+}
+
+func (e *impriDecodeError) Error() string { return e.message }
+
+func (e *impriDecodeError) Unwrap() error { return e.cause }
 
 func safeImpriBody(data []byte, secret string) string {
 	message := redactImpriText(strings.TrimSpace(string(data)), secret)

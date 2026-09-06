@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -381,6 +382,54 @@ func TestPRMergeReportsUnavailableWhenResumeReadFails(t *testing.T) { //nolint:g
 	}
 	if providerCalls.Load() != 0 {
 		t.Fatalf("provider calls = %d, want no forge call", providerCalls.Load())
+	}
+}
+
+func TestPRMergeClassifiesImpriHTTPReadFailures(t *testing.T) {
+	for _, test := range []struct {
+		status    int
+		retryable bool
+	}{
+		{status: http.StatusForbidden, retryable: false},
+		{status: http.StatusNotFound, retryable: false},
+		{status: http.StatusTooManyRequests, retryable: true},
+		{status: http.StatusBadGateway, retryable: true},
+	} {
+		t.Run(fmt.Sprintf("http-%d", test.status), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/actions/act-http-status" || r.Method != http.MethodGet {
+					t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+				}
+				http.Error(w, `{"error":"im_test_secret"}`, test.status)
+			}))
+			defer server.Close()
+			service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+				Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test_secret"},
+			})
+			response, err := service.PRMerge(Request{
+				WorkDir: repo, Index: 7, ActionID: "act-http-status",
+			})
+			if err == nil || strings.Contains(err.Error(), "im_test_secret") {
+				t.Fatalf("HTTP %d response = %+v, error = %v", test.status, response, err)
+			}
+			var retryErr *PRMergeRetryableError
+			gotRetryable := errors.As(err, &retryErr)
+			if gotRetryable != test.retryable {
+				t.Fatalf("HTTP %d response = %+v, error = %v, retryable = %v, want %v",
+					test.status, response, err, gotRetryable, test.retryable)
+			}
+			if test.retryable {
+				if response.Merge == nil || response.Merge.Status != PRMergeStatusUnavailable ||
+					response.Merge.NextAction != PRMergeNextRetry {
+					t.Fatalf("HTTP %d retry response = %+v", test.status, response)
+				}
+			} else if response.Merge != nil || strings.Contains(err.Error(), "temporarily unavailable") {
+				t.Fatalf("HTTP %d ordinary failure response = %+v, error = %v", test.status, response, err)
+			}
+		})
 	}
 }
 

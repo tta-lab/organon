@@ -3,6 +3,8 @@ package og
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,6 +87,65 @@ func TestImpriClientRedactsAPIKeyFromHTTPErrors(t *testing.T) {
 	_, err = client.getAction(context.Background(), "act-1")
 	if err == nil || strings.Contains(err.Error(), apiKey) || !strings.Contains(err.Error(), "502") {
 		t.Fatalf("getAction error = %v, want redacted HTTP status", err)
+	}
+}
+
+func TestImpriReadErrorRetryClassification(t *testing.T) {
+	const apiKey = "im_test_secret"
+	for _, test := range []struct {
+		status    int
+		retryable bool
+	}{
+		{status: http.StatusForbidden, retryable: false},
+		{status: http.StatusNotFound, retryable: false},
+		{status: http.StatusTooManyRequests, retryable: true},
+		{status: http.StatusBadGateway, retryable: true},
+	} {
+		t.Run(fmt.Sprintf("http-%d", test.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `{"error":"im_test_secret"}`, test.status)
+			}))
+			defer server.Close()
+			client, err := newImpriClientWithHTTPClient(context.Background(), &ogconfig.ImpriConfig{
+				BaseURL: server.URL, APIKey: apiKey,
+			}, server.Client())
+			if err != nil {
+				t.Fatalf("newImpriClient: %v", err)
+			}
+			_, err = client.getAction(context.Background(), "act-1")
+			gotRetryable := err != nil && retryableImpriReadError(err)
+			if err == nil || gotRetryable != test.retryable {
+				t.Fatalf("getAction error = %v, retryable = %v, want %v",
+					err, gotRetryable, test.retryable)
+			}
+			if strings.Contains(err.Error(), apiKey) {
+				t.Fatalf("HTTP %d error exposed API key: %v", test.status, err)
+			}
+			var httpErr *impriHTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode() != test.status {
+				t.Fatalf("getAction error type = %T, status = %v, want HTTP %d", err, httpErr, test.status)
+			}
+		})
+	}
+}
+
+func TestImpriDecodeErrorIsNotRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{"))
+	}))
+	defer server.Close()
+	client, err := newImpriClientWithHTTPClient(context.Background(), &ogconfig.ImpriConfig{
+		BaseURL: server.URL, APIKey: "im_test_secret",
+	}, server.Client())
+	if err != nil {
+		t.Fatalf("newImpriClient: %v", err)
+	}
+	_, err = client.getAction(context.Background(), "act-1")
+	gotRetryable := err != nil && retryableImpriReadError(err)
+	if err == nil || gotRetryable {
+		t.Fatalf("decode error = %v, retryable = %v, want ordinary fail-closed error",
+			err, gotRetryable)
 	}
 }
 
