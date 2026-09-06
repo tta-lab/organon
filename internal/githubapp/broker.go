@@ -220,7 +220,7 @@ func permissionsForPurpose(purpose Purpose) (*github.InstallationPermissions, er
 		return &github.InstallationPermissions{
 			Actions:      github.Ptr("read"),
 			Checks:       github.Ptr("read"),
-			Contents:     github.Ptr("read"),
+			Contents:     github.Ptr("write"),
 			PullRequests: github.Ptr("write"),
 		}, nil
 	case PurposeGitRead:

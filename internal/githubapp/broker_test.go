@@ -52,7 +52,7 @@ func TestBrokerDiscoversInstallationAndMintsPurposeScopedTokens(t *testing.T) {
 		purpose Purpose
 		want    map[string]string
 	}{
-		{PurposeAPI, map[string]string{"actions": "read", "checks": "read", "contents": "read", "pull_requests": "write"}},
+		{PurposeAPI, map[string]string{"actions": "read", "checks": "read", "contents": "write", "pull_requests": "write"}},
 		{PurposeGitRead, map[string]string{"contents": "read"}},
 		{PurposeGitWrite, map[string]string{"contents": "write", "workflows": "write"}},
 	}
