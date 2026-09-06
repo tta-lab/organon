@@ -149,7 +149,10 @@ gate. Pending, rejected,
 expired, timed-out, malformed, stale, and failed actions do not merge.
 Provider/network/API availability failures leave an approved action retryable;
 repeat the same request without new approval. Deterministic guard or executor
-failures are terminal `execute_failed`. A successful attempt is reported as
+failures end the approved action as terminal `execute_failed`; this does not
+mean the PR can never merge, only that a later attempt needs new approval. A
+rejected or expired action is automatically replaced when the same request is
+repeated, even if the immutable PR snapshot is unchanged. A successful attempt is reported as
 `executed`; real mode then records the receipt, fast-forwards the registered
 single-checkout default branch, and removes only local and `origin` head refs
 that still match the approved SHA. Dry-run performs no checkout switch, pull,
@@ -368,8 +371,9 @@ Merge callers consume the structured result fields `status`, `retryable`,
 `snapshot`. The `action_id` is audit/web identification only. Surface the inbox
 and wait for pending actions; `retry_same_request` means repeat the exact same
 project, PR ID, and mode request; treat executed with no receipt or cleanup
-error as complete; and obtain a new approval after rejection, expiry, or
-terminal execution failure. The local
+error as complete. Repeating the same request after rejection or expiry creates
+a replacement approval, while terminal execution failure ends only that
+approval action and needs new approval for a later merge attempt. The local
 `unavailable` status means approval state is unknown, no forge call was made,
 and the same request is retryable. An executed result with `receipt_error` uses
 `repair_receipt` and is repeated only to repair the Impri receipt, never to

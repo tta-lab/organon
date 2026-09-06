@@ -287,8 +287,9 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 			"cleanup. Structured outcomes route pending or "+
 			"wait-timeout to the inbox, approved temporary failures to repeating the same "+
 			"request, temporarily unavailable Impri approval state to the same retry "+
-			"without a forge call, executed to completion, terminal rejection/expiry/failure "+
-			"to a new approval, receipt errors to receipt repair, and cleanup errors to "+
+			"without a forge call, executed to completion, terminal rejection/expiry to a "+
+			"replacement approval, terminal execution failure to new approval, receipt errors "+
+			"to receipt repair, and cleanup errors to "+
 			"the same request without another merge. "+
 			"If an execute_failed receipt cannot be recorded, the result stays approved and "+
 			"the same request must be repeated to revalidate and report it.",

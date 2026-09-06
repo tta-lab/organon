@@ -36,11 +36,20 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
 				t.Fatal(err)
 			}
-			writeMergeAction(t, w, "act-dry-run", status.Load().(string), posted["payload"])
+			state := status.Load().(string)
+			if state == PRMergeStatusRejected {
+				writeMergeAction(t, w, "act-replacement", PRMergeStatusPending, posted["payload"])
+				return
+			}
+			writeMergeAction(t, w, "act-dry-run", state, posted["payload"])
 			return
 		}
 		if r.URL.Path == "/v1/actions/act-dry-run" && r.Method == http.MethodGet {
 			writeMergeAction(t, w, "act-dry-run", status.Load().(string), posted["payload"])
+			return
+		}
+		if r.URL.Path == "/v1/actions/act-replacement" && r.Method == http.MethodGet {
+			writeMergeAction(t, w, "act-replacement", PRMergeStatusPending, posted["payload"])
 			return
 		}
 		if r.URL.Path == "/v1/actions/act-dry-run/result" && r.Method == http.MethodPost {
@@ -105,10 +114,10 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 		t.Fatalf("dry runs after timeout = %d, want 0", dryRuns)
 	}
 	status.Store(PRMergeStatusRejected)
-	rejected, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
-	if err != nil || rejected.Merge == nil || rejected.Merge.Status != PRMergeStatusRejected ||
-		rejected.Merge.Retryable || rejected.Merge.NextAction != PRMergeNextNewApproval {
-		t.Fatalf("rejected response = %+v, err = %v", rejected, err)
+	replacement, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
+	if err != nil || replacement.Merge == nil || replacement.Merge.Status != PRMergeStatusPending ||
+		replacement.Merge.Retryable || replacement.Merge.NextAction != PRMergeNextWait {
+		t.Fatalf("replacement response = %+v, err = %v", replacement, err)
 	}
 	if atomic.LoadInt32(&dryRuns) != 0 {
 		t.Fatalf("dry runs after rejection = %d, want 0", dryRuns)
@@ -131,6 +140,77 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 	}
 	if len(credentialedGitCalls) != 0 {
 		t.Fatalf("dry-run credentialed Git cleanup calls = %v, want none", credentialedGitCalls)
+	}
+}
+
+func TestPRMergeCreatesNewApprovalAfterRejectionWithoutPRChange(t *testing.T) { //nolint:gocyclo
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+
+	var payload any
+	keys := make([]string, 0, 2)
+	actionsByKey := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			payload = body["payload"]
+			key, _ := body["idempotency_key"].(string)
+			keys = append(keys, key)
+			id := actionsByKey[key]
+			if id == "" {
+				id = "act-rejected"
+				if len(actionsByKey) == 1 {
+					id = "act-retry"
+				} else if len(actionsByKey) > 1 {
+					id = "act-retry-2"
+				}
+				actionsByKey[key] = id
+			}
+			status := PRMergeStatusRejected
+			if id == "act-retry-2" {
+				status = PRMergeStatusPending
+			}
+			writeMergeAction(t, w, id, status, payload)
+		case r.URL.Path == "/v1/actions/act-rejected" && r.Method == http.MethodGet:
+			writeMergeAction(t, w, "act-rejected", PRMergeStatusRejected, payload)
+		case r.URL.Path == "/v1/actions/act-retry" && r.Method == http.MethodGet:
+			writeMergeAction(t, w, "act-retry", PRMergeStatusRejected, payload)
+		case r.URL.Path == "/v1/actions/act-retry-2" && r.Method == http.MethodGet:
+			writeMergeAction(t, w, "act-retry-2", PRMergeStatusPending, payload)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	restoreProvider := stubNewProvider(t, func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: exactMergePR}, nil
+	})
+	t.Cleanup(restoreProvider)
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+
+	pending, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
+	if err != nil || pending.Merge == nil || pending.Merge.Status != PRMergeStatusPending ||
+		pending.Merge.ActionID != "act-retry-2" {
+		t.Fatalf("replacement request = %+v, err = %v", pending, err)
+	}
+	if len(keys) != 3 || keys[0] == "" || keys[1] == "" || keys[2] == "" ||
+		keys[0] == keys[1] || keys[1] == keys[2] || keys[0] == keys[2] {
+		t.Fatalf("idempotency keys = %q, want three distinct non-empty keys", keys)
+	}
+	repeated, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
+	if err != nil || repeated.Merge == nil || repeated.Merge.Status != PRMergeStatusPending ||
+		repeated.Merge.ActionID != "act-retry-2" {
+		t.Fatalf("repeated request = %+v, err = %v", repeated, err)
+	}
+	if len(keys) != 6 || keys[0] != keys[3] || keys[1] != keys[4] || keys[2] != keys[5] {
+		t.Fatalf("repeated idempotency keys = %q, want the same three keys", keys)
 	}
 }
 

@@ -393,6 +393,14 @@ func mergeIdempotencyKey(snapshot PRMergeSnapshot) (string, error) {
 	return "og-pr-merge-" + hex.EncodeToString(digest[:]), nil
 }
 
+// mergeRetryIdempotencyKey creates one stable replacement action for a terminal
+// approval. Repeating the same merge request reuses that replacement instead of
+// creating more approval cards.
+func mergeRetryIdempotencyKey(key, actionID string) string {
+	digest := sha256.Sum256([]byte(key + "\x00" + actionID))
+	return "og-pr-merge-retry-" + hex.EncodeToString(digest[:])
+}
+
 func mergeActionPayload(snapshot PRMergeSnapshot) map[string]any {
 	return map[string]any{
 		"provider":       snapshot.Provider,

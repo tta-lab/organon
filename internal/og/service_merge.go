@@ -96,34 +96,27 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	if keyErr != nil {
 		return Response{}, keyErr
 	}
-	action, err := client.createAction(operationContext(ctxInfo), impriCreateAction{
-		Kind:    PRMergeKind,
-		Title:   mergeActionTitle(snapshot),
-		Preview: impriPreview{Format: "markdown", Body: mergePreview(snapshot)},
-		Payload: mergeActionPayload(snapshot), TargetURL: snapshot.PRURL,
-		ExpiresIn: defaultImpriExpirySeconds, IdempotencyKey: key,
-	})
+	action, err := createMergeAction(operationContext(ctxInfo), client, snapshot, key)
 	if err != nil {
-		if action.ID != "" && retryableImpriReadError(err) {
-			inboxURL := action.InboxURL
-			if inboxURL == "" {
-				inboxURL = client.inboxURL()
-			}
-			return retryableImpriUnavailable(action.ID, inboxURL, snapshot,
-				"approval card was created but its canonical state could not be read")
+		if response, retryErr, unavailable := unavailableAfterCreateError(action, err, client, snapshot,
+			"approval card was created but its canonical state could not be read"); unavailable {
+			return response, retryErr
 		}
 		return Response{}, err
 	}
-	if action.TargetURL != snapshot.PRURL {
-		return Response{}, fmt.Errorf("impri action target_url does not match the proposed PR snapshot")
-	}
-	if action.Payload != nil {
-		returned, payloadErr := snapshotFromAction(action)
-		if payloadErr != nil {
-			return Response{}, payloadErr
+	for requiresNewApproval(action.Status) {
+		previousActionID := action.ID
+		action, err = createMergeAction(operationContext(ctxInfo), client, snapshot,
+			mergeRetryIdempotencyKey(key, previousActionID))
+		if err != nil {
+			if response, retryErr, unavailable := unavailableAfterCreateError(action, err, client, snapshot,
+				"replacement approval card was created but its canonical state could not be read"); unavailable {
+				return response, retryErr
+			}
+			return Response{}, err
 		}
-		if !mergeIdentityEqual(snapshot, returned) {
-			return Response{}, fmt.Errorf("impri action identity does not match the proposed PR snapshot")
+		if action.ID == previousActionID {
+			return Response{}, fmt.Errorf("replacement approval action did not advance from %s", previousActionID)
 		}
 	}
 
@@ -131,6 +124,52 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 		action.InboxURL = client.inboxURL()
 	}
 	return s.processMergeAction(ctxInfo, client, action, snapshot, req)
+}
+
+func createMergeAction(
+	ctx context.Context, client *impriClient, snapshot PRMergeSnapshot, key string,
+) (impriAction, error) {
+	action, err := client.createAction(ctx, impriCreateAction{
+		Kind:    PRMergeKind,
+		Title:   mergeActionTitle(snapshot),
+		Preview: impriPreview{Format: "markdown", Body: mergePreview(snapshot)},
+		Payload: mergeActionPayload(snapshot), TargetURL: snapshot.PRURL,
+		ExpiresIn: defaultImpriExpirySeconds, IdempotencyKey: key,
+	})
+	if err != nil {
+		return action, err
+	}
+	if action.TargetURL != snapshot.PRURL {
+		return impriAction{}, fmt.Errorf("impri action target_url does not match the proposed PR snapshot")
+	}
+	if action.Payload != nil {
+		returned, payloadErr := snapshotFromAction(action)
+		if payloadErr != nil {
+			return impriAction{}, payloadErr
+		}
+		if !mergeIdentityEqual(snapshot, returned) {
+			return impriAction{}, fmt.Errorf("impri action identity does not match the proposed PR snapshot")
+		}
+	}
+	return action, nil
+}
+
+func requiresNewApproval(status string) bool {
+	return status == PRMergeStatusRejected || status == PRMergeStatusExpired
+}
+
+func unavailableAfterCreateError(
+	action impriAction, err error, client *impriClient, snapshot PRMergeSnapshot, detail string,
+) (Response, error, bool) {
+	if action.ID == "" || !retryableImpriReadError(err) {
+		return Response{}, nil, false
+	}
+	inboxURL := action.InboxURL
+	if inboxURL == "" {
+		inboxURL = client.inboxURL()
+	}
+	response, retryErr := retryableImpriUnavailable(action.ID, inboxURL, snapshot, detail)
+	return response, retryErr, true
 }
 
 func loadMergeSnapshot(

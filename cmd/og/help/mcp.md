@@ -55,8 +55,10 @@ executed is complete only when `receipt_error` and `cleanup_error` are absent,
 an executed `cleanup_error` means the forge merge and receipt are complete but
 checkout cleanup remains, and the same request is safe to repeat without a
 second forge merge. An `unavailable` result means Impri state is unknown and
-the same request retries without a forge call, terminal rejection/expiry/failure
-needs new approval, and `receipt_error` retries only to repair the receipt. If
+the same request retries without a forge call. Repeating after terminal
+rejection or expiry creates a replacement approval even if the PR is unchanged;
+terminal execution failure ends only that approval and needs new approval for a
+later attempt. `receipt_error` retries only to repair the receipt. If
 an execute_failed receipt write fails, the result remains approved and repetition
 revalidates/reports it. Real mode is
 squash-only and permits CI state `success` or `not_configured`; pending remains

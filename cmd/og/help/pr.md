@@ -37,7 +37,10 @@ Behavior:
   an `executed` result with `cleanup_error` means the forge merge and receipt
   are complete but checkout cleanup remains; repeat the same request and do not
   merge again. A fully executed result with no cleanup or receipt error is
-  complete, while rejected/expired/execute_failed require new approval. If Impri state is temporarily unavailable, no forge call was made:
+  complete. Repeating the same request after rejection or expiry creates a
+  replacement approval card, even when the PR snapshot is unchanged.
+  `execute_failed` ends only that approved action, not the PR's ability to be
+  merged; a later attempt needs new approval. If Impri state is temporarily unavailable, no forge call was made:
   repeat the same request. A failed execute_failed receipt write also remains
   approved and is revalidated on repetition. An executed receipt error is repaired
   by repeating the same request and never invokes a second merge. The returned
