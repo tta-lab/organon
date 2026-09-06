@@ -125,11 +125,12 @@ web inbox; agents may use `--wait --timeout 30s` or resume with `--action-id`.
 Dry-run approval records a mock merge without changing the forge. Real mode
 uses the same gate, then refetches the PR and CI and requires an open, green,
 mergeable PR at the approved head SHA before a squash merge. Pending, rejected,
-expired, timed-out, malformed, stale, and failed actions do not merge. A
-successful attempt is reported as `executed`; an approved failure is terminal
-`execute_failed`. If the forge succeeds but receipt reporting fails, the
-response identifies the merged outcome and a retry repairs the receipt without
-merging twice.
+expired, timed-out, malformed, stale, and failed actions do not merge.
+Provider/network/API availability failures leave an approved action resumable;
+retry the same action ID without new approval. Deterministic guard or executor
+failures are terminal `execute_failed`. A successful attempt is reported as
+`executed`; if receipt reporting fails, the response identifies the merged
+outcome and a retry repairs the receipt without merging twice.
 
 The operation never deletes branches or worktrees; run the existing `og pull`
 closed-PR cleanup separately. Telegram, webhooks, a daemon, and Impri API-key
@@ -315,10 +316,21 @@ Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
 `og mcp` exposes thirteen typed tools: auth status, clone, push, pull, PR
 create/find, PR get/modify/comment/checks/log/failures, and approval-gated
-`pr_merge`. The CLI's PR
-creation/modification surface remains typed-only; use the MCP mutation tools (or Pi's
-`og_pr` create/modify actions) for PR creation and modification. Use MCP
-`pr_merge` for the destructive merge and always surface its Impri inbox URL.
+`pr_merge`. Create and modify are typed MCP/Pi-only because their
+user-controlled title/body fields may contain multiline free text; exposing
+those bodies through shell CLI arguments would reintroduce quoting and
+escaping ambiguity. `pr_merge` remains available through both typed MCP and
+`og pr merge` because its inputs are structured short scalar flags; agents
+should default to MCP, and both adapters call the identical Impri approval-gated
+domain operation.
+
+Merge callers consume the structured result fields `status`, `resumable`,
+`retryable`, `next_action`, `completion`, `action_id`, `inbox_url`, and
+`snapshot`. Surface the inbox and wait for pending actions; retry the same
+`action_id` for an approved temporary failure; treat executed as complete; and
+obtain a new approval after rejection, expiry, or terminal execution failure.
+An executed result with `receipt_error` is retried only to repair the Impri
+receipt, never to merge again. Completion means executed with no receipt error.
 MCP current-
 branch workflows use the registered checkout's current branch. Force push uses
 force-with-lease and is rejected on the default branch. Pull retains the CLI's

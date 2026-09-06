@@ -71,7 +71,9 @@ func TestPRMergeDryRunCreatesResumesAndReportsApproval(t *testing.T) { //nolint:
 	if err != nil {
 		t.Fatalf("create dry-run action: %v", err)
 	}
-	if pending.Merge == nil || pending.Merge.Status != PRMergeStatusPending || pending.Merge.ActionID != "act-dry-run" {
+	if pending.Merge == nil || pending.Merge.Status != PRMergeStatusPending || pending.Merge.ActionID != "act-dry-run" ||
+		!pending.Merge.Resumable || pending.Merge.Retryable || pending.Merge.NextAction != PRMergeNextWait ||
+		pending.Merge.Completion == "" {
 		t.Fatalf("pending response = %+v", pending)
 	}
 	if posted["kind"] != PRMergeKind {
@@ -88,6 +90,7 @@ func TestPRMergeDryRunCreatesResumesAndReportsApproval(t *testing.T) { //nolint:
 		WorkDir: repo, Index: 7, DryRun: true, Wait: true, Timeout: 10 * time.Millisecond,
 	})
 	if err != nil || timedOut.Merge == nil || timedOut.Merge.Status != PRMergeStatusPending ||
+		!timedOut.Merge.Resumable || timedOut.Merge.NextAction != PRMergeNextWait ||
 		!strings.Contains(timedOut.Merge.Detail, "timed out") {
 		t.Fatalf("timeout response = %+v, err = %v", timedOut, err)
 	}
@@ -96,7 +99,8 @@ func TestPRMergeDryRunCreatesResumesAndReportsApproval(t *testing.T) { //nolint:
 	}
 	status.Store(PRMergeStatusRejected)
 	rejected, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true, ActionID: "act-dry-run"})
-	if err != nil || rejected.Merge == nil || rejected.Merge.Status != PRMergeStatusRejected {
+	if err != nil || rejected.Merge == nil || rejected.Merge.Status != PRMergeStatusRejected ||
+		rejected.Merge.Resumable || rejected.Merge.Retryable || rejected.Merge.NextAction != PRMergeNextNewApproval {
 		t.Fatalf("rejected response = %+v, err = %v", rejected, err)
 	}
 	if atomic.LoadInt32(&dryRuns) != 0 {
@@ -108,7 +112,8 @@ func TestPRMergeDryRunCreatesResumesAndReportsApproval(t *testing.T) { //nolint:
 	if err != nil {
 		t.Fatalf("resume dry-run action: %v", err)
 	}
-	if executed.Merge == nil || executed.Merge.Status != PRMergeStatusExecuted {
+	if executed.Merge == nil || executed.Merge.Status != PRMergeStatusExecuted ||
+		executed.Merge.Resumable || executed.Merge.Retryable || executed.Merge.NextAction != PRMergeNextNone {
 		t.Fatalf("executed response = %+v", executed)
 	}
 	if atomic.LoadInt32(&dryRuns) != 1 || atomic.LoadInt32(&resultReports) != 1 {
@@ -194,7 +199,8 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 		t.Fatalf("approved merge with receipt failure: %v", err)
 	}
 	if mergedResponse.Merge == nil || mergedResponse.Merge.Status != PRMergeStatusExecuted ||
-		mergedResponse.Merge.ReceiptError == "" {
+		mergedResponse.Merge.ReceiptError == "" || !mergedResponse.Merge.Resumable ||
+		!mergedResponse.Merge.Retryable || mergedResponse.Merge.NextAction != PRMergeNextRepairReceipt {
 		t.Fatalf("merged response = %+v", mergedResponse)
 	}
 	if mergeCalls.Load() != 1 {
@@ -231,6 +237,276 @@ func TestPRMergeRejectsActionIDMismatchBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestPRMergeRejectsWrongActionKindBeforeStatusDispatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/actions/act-kind" || r.Method != http.MethodGet {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		writeMergeActionWithFields(t, w, "act-kind", "other.kind", PRMergeStatusApproved,
+			canonicalMergePayload()["pr_url"].(string), canonicalMergePayload())
+	}))
+	t.Cleanup(server.Close)
+
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	_, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-kind"})
+	if err == nil || !strings.Contains(err.Error(), "kind") {
+		t.Fatalf("PRMerge error = %v, want wrong-kind rejection", err)
+	}
+}
+
+func TestPRMergeRejectsWrongTargetOnCreate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/actions" || r.Method != http.MethodPost {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		payload := body["payload"].(map[string]any)
+		writeMergeActionWithTarget(t, w, "act-target-create", PRMergeStatusPending,
+			payload["pr_url"].(string)+"/wrong", payload)
+	}))
+	t.Cleanup(server.Close)
+	restoreProvider := stubNewProvider(t, func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: exactMergePR}, nil
+	})
+	t.Cleanup(restoreProvider)
+
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	_, err := service.PRMerge(Request{WorkDir: repo, Index: 7})
+	if err == nil || !strings.Contains(err.Error(), "target_url") {
+		t.Fatalf("PRMerge error = %v, want create target rejection", err)
+	}
+}
+
+func TestPRMergeRejectsWrongTargetOnResumeAndAfterWait(t *testing.T) { //nolint:gocyclo
+	tests := []struct {
+		name string
+		wait bool
+	}{
+		{name: "resume", wait: false},
+		{name: "wait poll", wait: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+			payload := canonicalMergePayload()
+			var actionGets int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/v1/actions/act-target" && r.Method == http.MethodGet:
+					actionGets++
+					status := PRMergeStatusApproved
+					target := payload["pr_url"].(string) + "/wrong"
+					if tt.wait && actionGets == 1 {
+						status = PRMergeStatusPending
+						target = payload["pr_url"].(string)
+					}
+					writeMergeActionWithTarget(t, w, "act-target", status,
+						target, payload)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+				Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+			})
+			_, err := service.PRMerge(Request{WorkDir: repo, Index: 7,
+				ActionID: "act-target", Wait: tt.wait, Timeout: 2 * time.Second})
+			if err == nil || !strings.Contains(err.Error(), "target_url") {
+				t.Fatalf("PRMerge error = %v, want target rejection", err)
+			}
+		})
+	}
+}
+
+//nolint:gocyclo
+func TestPRMergeKeepsApprovalOnTemporaryRefetchFailure(t *testing.T) {
+	service, repo, resultReports, _, mergeCalls, providerGets := newRetryMergeFixture(t, "act-refetch")
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	first, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-refetch"})
+	if err == nil || first.Merge == nil || !first.Merge.Resumable || !first.Merge.Retryable ||
+		first.Merge.Status != PRMergeStatusApproved || first.Merge.NextAction != PRMergeNextRetry ||
+		!strings.Contains(err.Error(), "act-refetch") || !strings.Contains(err.Error(), "remains approved") {
+		t.Fatalf("first retry response = %+v merge=%+v, err = %v", first, first.Merge, err)
+	}
+	if resultReports() != 0 || mergeCalls() != 0 || providerGets() != 2 {
+		t.Fatalf("after temporary refetch failure: reports=%d merges=%d provider_gets=%d",
+			resultReports(), mergeCalls(), providerGets())
+	}
+	second, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-refetch"})
+	if err != nil || second.Merge == nil || second.Merge.Status != PRMergeStatusExecuted {
+		t.Fatalf("resumed response = %+v, err = %v", second, err)
+	}
+	if resultReports() != 1 || mergeCalls() != 1 {
+		t.Fatalf("after recovery: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+}
+
+//nolint:gocyclo
+func TestPRMergeKeepsApprovalOnTemporaryCIFailure(t *testing.T) {
+	service, repo, resultReports, addMergeCall, mergeCalls, _ := newRetryMergeFixture(t, "act-ci")
+	var ciCalls int
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			getPR: exactMergePR,
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				ciCalls++
+				if ciCalls == 1 {
+					return nil, errors.New("temporary CI outage")
+				}
+				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
+			},
+			mergePR: func(owner, repo string, index int64, headSHA string) error {
+				addMergeCall()
+				return nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	first, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-ci"})
+	if err == nil || first.Merge == nil || !first.Merge.Resumable || !first.Merge.Retryable ||
+		first.Merge.NextAction != PRMergeNextRetry || !strings.Contains(err.Error(), "CI status") {
+		t.Fatalf("first CI response = %+v, err = %v", first, err)
+	}
+	if resultReports() != 0 || mergeCalls() != 0 {
+		t.Fatalf("after temporary CI failure: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+	second, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-ci"})
+	if err != nil || second.Merge == nil || second.Merge.Status != PRMergeStatusExecuted {
+		t.Fatalf("resumed CI response = %+v, err = %v", second, err)
+	}
+	if resultReports() != 1 || mergeCalls() != 1 {
+		t.Fatalf("after CI recovery: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+}
+
+//nolint:gocyclo
+func TestPRMergeRetriesAmbiguousMergeFailureWithoutConsumingApproval(t *testing.T) {
+	service, repo, resultReports, addMergeCall, mergeCalls, _ := newRetryMergeFixture(t, "act-merge")
+	var calls int
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			getPR: exactMergePR,
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
+			},
+			mergePR: func(owner, repo string, index int64, headSHA string) error {
+				calls++
+				addMergeCall()
+				if calls == 1 {
+					return errors.New("ambiguous forge timeout")
+				}
+				return nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	first, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-merge"})
+	if err == nil || first.Merge == nil || !first.Merge.Resumable || !first.Merge.Retryable ||
+		first.Merge.NextAction != PRMergeNextRetry || !strings.Contains(err.Error(), "ambiguous") ||
+		!strings.Contains(err.Error(), "remains approved") {
+		t.Fatalf("first merge response = %+v, err = %v", first, err)
+	}
+	if resultReports() != 0 || mergeCalls() != 1 {
+		t.Fatalf("after ambiguous merge failure: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+	second, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-merge"})
+	if err != nil || second.Merge == nil || second.Merge.Status != PRMergeStatusExecuted {
+		t.Fatalf("resumed merge response = %+v, err = %v", second, err)
+	}
+	if resultReports() != 1 || mergeCalls() != 2 {
+		t.Fatalf("after merge recovery: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+}
+
+func TestPRMergeRepairsReceiptWhenMergeErrorWasActuallySuccessful(t *testing.T) {
+	service, repo, resultReports, addMergeCall, mergeCalls, _ := newRetryMergeFixture(t, "act-merged")
+	var merged bool
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				pr, err := exactMergePR(owner, repo, index)
+				pr.Merged = merged
+				if merged {
+					pr.State = "merged"
+				}
+				return pr, err
+			},
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
+			},
+			mergePR: func(owner, repo string, index int64, headSHA string) error {
+				addMergeCall()
+				merged = true
+				return errors.New("response lost after merge")
+			},
+		}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-merged"})
+	if err != nil || response.Merge == nil || response.Merge.Status != PRMergeStatusExecuted {
+		t.Fatalf("merge recovery response = %+v, err = %v", response, err)
+	}
+	if resultReports() != 1 || mergeCalls() != 1 {
+		t.Fatalf("merge recovery counts: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+}
+
+func TestPRMergeUnsupportedProviderSetupConsumesApproval(t *testing.T) {
+	service, repo, resultReports, _, mergeCalls, _ := newRetryMergeFixture(t, "act-unsupported")
+	var providerCalls int
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		providerCalls++
+		if providerCalls > 1 {
+			return nil, errors.New("unsupported provider method")
+		}
+		return fakeProvider{getPR: exactMergePR}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-unsupported"})
+	if err != nil || response.Merge == nil || response.Merge.Status != PRMergeStatusExecuteFailed ||
+		response.Merge.NextAction != PRMergeNextNewApproval || response.Merge.Resumable ||
+		!strings.Contains(response.Merge.Detail, "unsupported merge provider") {
+		t.Fatalf("unsupported provider response = %+v, err = %v", response, err)
+	}
+	if resultReports() != 1 || mergeCalls() != 0 {
+		t.Fatalf("unsupported provider counts: reports=%d merges=%d", resultReports(), mergeCalls())
+	}
+}
+
 func TestPRMergeApprovedRealGuardsFailClosed(t *testing.T) { //nolint:gocyclo
 	tests := []struct {
 		name       string
@@ -239,6 +515,7 @@ func TestPRMergeApprovedRealGuardsFailClosed(t *testing.T) { //nolint:gocyclo
 		mergeErr   error
 		wantMerge  int
 		wantDetail string
+		wantRetry  bool
 	}{
 		{
 			name: "stale head SHA", mutate: func(pr *gitprovider.PullRequest) { pr.HeadSHA = "new-sha" },
@@ -246,7 +523,7 @@ func TestPRMergeApprovedRealGuardsFailClosed(t *testing.T) { //nolint:gocyclo
 		},
 		{
 			name: "closed PR", mutate: func(pr *gitprovider.PullRequest) { pr.State = "closed" },
-			wantDetail: "not open",
+			wantDetail: "closed and unmerged",
 		},
 		{
 			name: "non-mergeable PR", mutate: func(pr *gitprovider.PullRequest) { pr.Mergeable = false },
@@ -258,15 +535,20 @@ func TestPRMergeApprovedRealGuardsFailClosed(t *testing.T) { //nolint:gocyclo
 		},
 		{
 			name: "forge failure", mergeErr: errors.New("head moved"), wantMerge: 1,
-			wantDetail: "forge squash merge failed",
+			wantDetail: "forge squash merge failed", wantRetry: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			response, mergeCalls := runApprovedRealMergeScenario(t, tt.mutate, tt.ciState, tt.mergeErr)
-			if response.Merge == nil || response.Merge.Status != PRMergeStatusExecuteFailed ||
+			response, mergeCalls, err := runApprovedRealMergeScenario(t, tt.mutate, tt.ciState, tt.mergeErr)
+			if tt.wantRetry {
+				if err == nil || !strings.Contains(err.Error(), "remains approved") ||
+					!strings.Contains(err.Error(), tt.wantDetail) {
+					t.Fatalf("error = %v, want retryable error containing %q", err, tt.wantDetail)
+				}
+			} else if response.Merge == nil || response.Merge.Status != PRMergeStatusExecuteFailed ||
 				!strings.Contains(response.Merge.Detail, tt.wantDetail) {
-				t.Fatalf("response = %+v, want execute_failed containing %q", response, tt.wantDetail)
+				t.Fatalf("response = %+v, err = %v, want execute_failed containing %q", response, err, tt.wantDetail)
 			}
 			if mergeCalls != tt.wantMerge {
 				t.Fatalf("merge calls = %d, want %d", mergeCalls, tt.wantMerge)
@@ -275,9 +557,82 @@ func TestPRMergeApprovedRealGuardsFailClosed(t *testing.T) { //nolint:gocyclo
 	}
 }
 
+func canonicalMergePayload() map[string]any {
+	return map[string]any{
+		"provider": "github", "forge_base_url": "https://github.com",
+		"owner": "tta-lab", "repo": "example", "pr_number": 7,
+		"head_sha": "abc123", "base_branch": "main", "merge_method": PRMergeMethodSquash,
+		"execution_mode": PRMergeModeReal, "pr_url": "https://github.com/tta-lab/example/pull/7",
+	}
+}
+
+func exactMergePR(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+	return &gitprovider.PullRequest{
+		Index: index, State: "open", Mergeable: true, Head: "feature/merge", HeadSHA: "abc123",
+		Base: "main", HTMLURL: "https://github.com/tta-lab/organon/pull/7",
+	}, nil
+}
+
+func newRetryMergeFixture(t *testing.T, actionID string) (
+	Service, string, func() int, func(), func() int, func() int,
+) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var actionPayload any
+	var resultReports int
+	var mergeCalls int
+	var providerGets int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			actionPayload = body["payload"]
+			writeMergeAction(t, w, actionID, PRMergeStatusPending, actionPayload)
+		case r.URL.Path == "/v1/actions/"+actionID && r.Method == http.MethodGet:
+			writeMergeAction(t, w, actionID, PRMergeStatusApproved, actionPayload)
+		case r.URL.Path == "/v1/actions/"+actionID+"/result" && r.Method == http.MethodPost:
+			resultReports++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	oldProvider := newProviderFunc
+	newProviderFunc = func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				providerGets++
+				if actionID == "act-refetch" && providerGets == 2 {
+					return nil, errors.New("temporary provider outage")
+				}
+				return exactMergePR(owner, repo, index)
+			},
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
+			},
+			mergePR: func(owner, repo string, index int64, headSHA string) error {
+				mergeCalls++
+				return nil
+			},
+		}, nil
+	}
+	t.Cleanup(func() { newProviderFunc = oldProvider })
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	return service, repo, func() int { return resultReports }, func() { mergeCalls++ },
+		func() int { return mergeCalls }, func() int { return providerGets }
+}
+
 func runApprovedRealMergeScenario(
 	t *testing.T, mutate func(*gitprovider.PullRequest), ciState string, mergeErr error,
-) (Response, int) {
+) (Response, int, error) {
 	t.Helper()
 	if ciState == "" {
 		ciState = gitprovider.StateSuccess
@@ -340,17 +695,30 @@ func runApprovedRealMergeScenario(
 		t.Fatalf("create action: %v", err)
 	}
 	response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, ActionID: "act-guard"})
-	if err != nil {
-		t.Fatalf("resume approved action: %v", err)
-	}
-	return response, mergeCalls
+	return response, mergeCalls, err
 }
 
 func writeMergeAction(t *testing.T, w http.ResponseWriter, id, status string, payload any) {
 	t.Helper()
+	target := "https://github.com/tta-lab/organon/pull/7"
+	if values, ok := payload.(map[string]any); ok {
+		if value, ok := values["pr_url"].(string); ok && value != "" {
+			target = value
+		}
+	}
+	writeMergeActionWithFields(t, w, id, PRMergeKind, status, target, payload)
+}
+
+func writeMergeActionWithTarget(t *testing.T, w http.ResponseWriter, id, status, target string, payload any) {
+	t.Helper()
+	writeMergeActionWithFields(t, w, id, PRMergeKind, status, target, payload)
+}
+
+func writeMergeActionWithFields(t *testing.T, w http.ResponseWriter, id, kind, status, target string, payload any) {
+	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id": id, "status": status, "inbox_url": "http://impri.example/actions",
-		"payload": payload,
+		"id": id, "kind": kind, "status": status, "inbox_url": "http://impri.example/actions",
+		"target_url": target, "payload": payload,
 	})
 }

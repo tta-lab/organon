@@ -28,17 +28,6 @@ func NewServiceWithConfigAndDryRunExecutor(
 	return newServiceWithDryRunExecutor(githubBroker, projects, cfg, executor)
 }
 
-// NewServiceWithConfigAndMergeExecutor is an explicit alias for callers that
-// describe the dry-run seam as the merge executor.
-func NewServiceWithConfigAndMergeExecutor(
-	githubBroker githubapp.CredentialBroker,
-	projects *project.Store,
-	cfg ogconfig.Config,
-	executor DryRunMergeExecutor,
-) Service {
-	return NewServiceWithConfigAndDryRunExecutor(githubBroker, projects, cfg, executor)
-}
-
 // NewServiceWithDryRunExecutor is a convenience constructor using the default
 // project registry and trust configuration.
 func NewServiceWithDryRunExecutor(
@@ -136,6 +125,9 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 		if err != nil {
 			return Response{}, err
 		}
+		if action.TargetURL != snapshot.PRURL {
+			return Response{}, fmt.Errorf("impri action target_url does not match the proposed PR snapshot")
+		}
 		if action.Payload != nil {
 			returned, payloadErr := snapshotFromAction(action)
 			if payloadErr != nil {
@@ -198,30 +190,28 @@ func fallbackPRURL(ctxInfo *repoContext, index int64) string {
 }
 
 func snapshotFromAction(action impriAction) (PRMergeSnapshot, error) { //nolint:gocyclo
-	if action.ID == "" || action.Status == "" || action.Payload == nil {
+	if action.ID == "" || action.Kind != PRMergeKind || action.Status == "" ||
+		strings.TrimSpace(action.TargetURL) == "" || action.Payload == nil {
 		return PRMergeSnapshot{}, fmt.Errorf("malformed Impri action response")
 	}
 	payload := action.Payload
-	if nested, ok := payload["snapshot"].(map[string]any); ok {
-		payload = nested
-	}
 	snapshot := PRMergeSnapshot{
 		Provider:      stringValueFromMap(payload, "provider"),
-		ForgeBaseURL:  stringValueFromMap(payload, "forge_base_url", "forge_base"),
+		ForgeBaseURL:  stringValueFromMap(payload, "forge_base_url"),
 		Owner:         stringValueFromMap(payload, "owner"),
-		Repo:          stringValueFromMap(payload, "repo", "repository"),
-		HeadSHA:       stringValueFromMap(payload, "head_sha", "sha"),
-		BaseBranch:    stringValueFromMap(payload, "base_branch", "base"),
-		MergeMethod:   stringValueFromMap(payload, "merge_method", "method"),
-		ExecutionMode: stringValueFromMap(payload, "execution_mode", "mode"),
-		PRURL:         stringValueFromMap(payload, "pr_url", "target_url"),
+		Repo:          stringValueFromMap(payload, "repo"),
+		HeadSHA:       stringValueFromMap(payload, "head_sha"),
+		BaseBranch:    stringValueFromMap(payload, "base_branch"),
+		MergeMethod:   stringValueFromMap(payload, "merge_method"),
+		ExecutionMode: stringValueFromMap(payload, "execution_mode"),
+		PRURL:         stringValueFromMap(payload, "pr_url"),
 		Title:         stringValueFromMap(payload, "title"),
 		Head:          stringValueFromMap(payload, "head"),
 		State:         stringValueFromMap(payload, "state"),
 		CIState:       stringValueFromMap(payload, "ci_state"),
 	}
 	var ok bool
-	snapshot.PRNumber, ok = int64ValueFromMap(payload, "pr_number", "pr_id", "number")
+	snapshot.PRNumber, ok = int64ValueFromMap(payload, "pr_number")
 	if !ok || snapshot.PRNumber <= 0 || snapshot.Provider == "" || snapshot.ForgeBaseURL == "" ||
 		snapshot.Owner == "" || snapshot.Repo == "" || snapshot.HeadSHA == "" ||
 		snapshot.BaseBranch == "" || snapshot.MergeMethod == "" || snapshot.ExecutionMode == "" {
@@ -231,6 +221,9 @@ func snapshotFromAction(action impriAction) (PRMergeSnapshot, error) { //nolint:
 		(snapshot.ExecutionMode != PRMergeModeDryRun && snapshot.ExecutionMode != PRMergeModeReal) {
 		return PRMergeSnapshot{}, fmt.Errorf("impri action uses an unsupported merge identity")
 	}
+	if action.TargetURL != snapshot.PRURL {
+		return PRMergeSnapshot{}, fmt.Errorf("impri action target_url does not match its PR payload")
+	}
 	if value, exists := payload["mergeable"]; exists {
 		if mergeable, valid := value.(bool); valid {
 			snapshot.Mergeable = mergeable
@@ -239,31 +232,27 @@ func snapshotFromAction(action impriAction) (PRMergeSnapshot, error) { //nolint:
 	return snapshot, nil
 }
 
-func stringValueFromMap(values map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
-			return value
-		}
+func stringValueFromMap(values map[string]any, key string) string {
+	if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+		return value
 	}
 	return ""
 }
 
-func int64ValueFromMap(values map[string]any, keys ...string) (int64, bool) {
-	for _, key := range keys {
-		switch value := values[key].(type) {
-		case int:
+func int64ValueFromMap(values map[string]any, key string) (int64, bool) {
+	switch value := values[key].(type) {
+	case int:
+		return int64(value), true
+	case int64:
+		return value, true
+	case float64:
+		if value == float64(int64(value)) {
 			return int64(value), true
-		case int64:
-			return value, true
-		case float64:
-			if value == float64(int64(value)) {
-				return int64(value), true
-			}
-		case json.Number:
-			parsed, err := value.Int64()
-			if err == nil {
-				return parsed, true
-			}
+		}
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return parsed, true
 		}
 	}
 	return 0, false
@@ -284,9 +273,11 @@ func mergeIdentityEqual(left, right PRMergeSnapshot) bool {
 	return left.Provider == right.Provider && left.ForgeBaseURL == right.ForgeBaseURL &&
 		left.Owner == right.Owner && left.Repo == right.Repo && left.PRNumber == right.PRNumber &&
 		left.HeadSHA == right.HeadSHA && left.BaseBranch == right.BaseBranch &&
-		left.MergeMethod == right.MergeMethod && left.ExecutionMode == right.ExecutionMode
+		left.MergeMethod == right.MergeMethod && left.ExecutionMode == right.ExecutionMode &&
+		left.PRURL == right.PRURL
 }
 
+//nolint:gocyclo
 func (s Service) processMergeAction(
 	ctxInfo *repoContext, client *impriClient, action impriAction,
 	snapshot PRMergeSnapshot, req Request,
@@ -298,6 +289,9 @@ func (s Service) processMergeAction(
 		action, waitTimedOut, err = waitForImpriAction(operationContext(ctxInfo), client, action.ID, req.Timeout)
 		if err != nil {
 			return Response{}, err
+		}
+		if action.TargetURL != snapshot.PRURL {
+			return Response{}, fmt.Errorf("impri action target_url does not match the approved PR snapshot")
 		}
 		status = action.Status
 		if action.Payload != nil {
@@ -315,6 +309,7 @@ func (s Service) processMergeAction(
 		}
 	}
 	result := &PRMergeResult{ActionID: action.ID, Status: status, InboxURL: action.InboxURL, Snapshot: snapshot}
+	setMergeOutcome(result)
 	switch status {
 	case PRMergeStatusPending:
 		result.Detail = "approval is pending; open the Impri inbox and approve or reject the action"
@@ -381,16 +376,23 @@ func (s Service) executeApprovedMerge(
 ) (Response, error) {
 	provider, err := newProvider(ctxInfo)
 	if err != nil {
-		return s.executionFailure(ctxInfo, client, action, approved, "provider setup failed: "+err.Error())
+		if unsupportedProviderSetup(ctxInfo, err) {
+			return s.executionFailure(ctxInfo, client, action, approved, "unsupported merge provider: "+err.Error())
+		}
+		return retryableMergeError(action, approved, "provider setup is temporarily unavailable: "+err.Error())
 	}
 	current, err := provider.GetPR(ctxInfo.Owner, ctxInfo.Repo, approved.PRNumber)
 	if err != nil {
-		return s.executionFailure(ctxInfo, client, action, approved, "refetch pull request failed: "+err.Error())
+		return retryableMergeError(action, approved, "pull request refetch is temporarily unavailable: "+err.Error())
 	}
 	if !validProviderPRIdentity(current, approved.PRNumber) {
-		return s.executionFailure(ctxInfo, client, action, approved, "provider returned an invalid current pull request")
+		return retryableMergeError(action, approved, "the current pull request could not be verified")
 	}
 	currentSnapshot := snapshotFromProvider(ctxInfo, current, approved.ExecutionMode)
+	if strings.TrimSpace(currentSnapshot.HeadSHA) == "" ||
+		strings.TrimSpace(currentSnapshot.BaseBranch) == "" || strings.TrimSpace(currentSnapshot.PRURL) == "" {
+		return retryableMergeError(action, approved, "the current pull request identity could not be verified")
+	}
 	if !mergeIdentityEqual(approved, currentSnapshot) {
 		return s.executionFailure(ctxInfo, client, action, approved, "pull request identity changed after approval")
 	}
@@ -399,7 +401,10 @@ func (s Service) executeApprovedMerge(
 			"pull request is already merged; repaired the approval receipt without merging again")
 	}
 	if !strings.EqualFold(current.State, "open") {
-		return s.executionFailure(ctxInfo, client, action, approved, "pull request is not open")
+		if strings.EqualFold(current.State, "closed") {
+			return s.executionFailure(ctxInfo, client, action, approved, "pull request is closed and unmerged")
+		}
+		return retryableMergeError(action, approved, "pull request state could not be verified")
 	}
 	if approved.ExecutionMode == PRMergeModeDryRun {
 		executor := s.dryRunMergeExecutor
@@ -417,31 +422,98 @@ func (s Service) executeApprovedMerge(
 	}
 	ci, ciErr := provider.GetCombinedStatus(ctxInfo.Owner, ctxInfo.Repo, current.HeadSHA)
 	if ciErr != nil {
-		return s.executionFailure(ctxInfo, client, action, approved, "CI status could not be verified: "+ciErr.Error())
+		return retryableMergeError(action, approved, "CI status is temporarily unavailable: "+ciErr.Error())
 	}
-	if ci == nil || ci.State != gitprovider.StateSuccess {
-		state := "unknown"
-		if ci != nil && ci.State != "" {
-			state = ci.State
-		}
-		return s.executionFailure(ctxInfo, client, action, approved, "CI is not green (state: "+state+")")
+	if ci == nil || strings.TrimSpace(ci.State) == "" {
+		return retryableMergeError(action, approved, "CI status could not be verified")
+	}
+	switch ci.State {
+	case gitprovider.StateFailure, gitprovider.StateError:
+		return s.executionFailure(ctxInfo, client, action, approved, "CI is not green (state: "+ci.State+")")
+	case gitprovider.StatePending:
+		return retryableMergeError(action, approved, "CI is still pending; retry after it settles")
+	case gitprovider.StateSuccess:
+		// Continue to the forge's expected-head merge operation.
+	default:
+		return retryableMergeError(action, approved, "CI status could not be verified (state: "+ci.State+")")
 	}
 	merger, ok := provider.(gitprovider.PullRequestMerger)
 	if !ok {
 		return s.executionFailure(ctxInfo, client, action, approved, "configured provider does not support squash merge")
 	}
 	if err := merger.MergePullRequest(ctxInfo.Owner, ctxInfo.Repo, approved.PRNumber, approved.HeadSHA); err != nil {
-		return s.executionFailure(ctxInfo, client, action, approved, "forge squash merge failed: "+err.Error())
+		return s.recoverMergeAfterProviderError(
+			ctxInfo, provider, client, action, approved, "forge squash merge failed: "+err.Error(),
+		)
 	}
 	return s.reportExecution(ctxInfo, client, action, approved, PRMergeStatusExecuted,
 		"squash merge executed successfully")
 }
 
+func (s Service) recoverMergeAfterProviderError(
+	ctxInfo *repoContext, provider gitprovider.Provider, client *impriClient,
+	action impriAction, approved PRMergeSnapshot, failure string,
+) (Response, error) {
+	current, err := provider.GetPR(ctxInfo.Owner, ctxInfo.Repo, approved.PRNumber)
+	if err != nil {
+		return retryableMergeError(action, approved,
+			failure+"; could not verify the post-error PR state: "+err.Error())
+	}
+	if !validProviderPRIdentity(current, approved.PRNumber) {
+		return retryableMergeError(action, approved, failure+"; the post-error pull request state could not be verified")
+	}
+	currentSnapshot := snapshotFromProvider(ctxInfo, current, approved.ExecutionMode)
+	if strings.TrimSpace(currentSnapshot.HeadSHA) == "" ||
+		strings.TrimSpace(currentSnapshot.BaseBranch) == "" || strings.TrimSpace(currentSnapshot.PRURL) == "" {
+		return retryableMergeError(action, approved, failure+"; the post-error pull request identity could not be verified")
+	}
+	if !mergeIdentityEqual(approved, currentSnapshot) {
+		return s.executionFailure(ctxInfo, client, action, approved,
+			failure+"; pull request identity changed after the merge error")
+	}
+	if current.Merged || strings.EqualFold(current.State, "merged") {
+		return s.reportExecution(ctxInfo, client, action, currentSnapshot, PRMergeStatusExecuted,
+			"forge reported an error, but the approved PR is merged; repaired the approval receipt")
+	}
+	if strings.EqualFold(current.State, "open") {
+		return retryableMergeError(action, approved,
+			failure+"; forge outcome is ambiguous and the approved PR remains open")
+	}
+	if strings.EqualFold(current.State, "closed") {
+		return s.executionFailure(ctxInfo, client, action, approved,
+			failure+"; pull request is closed and unmerged")
+	}
+	return retryableMergeError(action, approved, failure+"; the post-error pull request state could not be verified")
+}
+
+func retryableMergeError(action impriAction, snapshot PRMergeSnapshot, detail string) (Response, error) {
+	result := PRMergeResult{
+		ActionID: action.ID, Status: PRMergeStatusApproved, InboxURL: action.InboxURL,
+		Snapshot: snapshot, Resumable: true, Retryable: true,
+		NextAction: PRMergeNextRetry,
+		Completion: "resume this action_id after the temporary failure; execution completes only when status is executed",
+		Detail:     fmt.Sprintf("impri action %s remains approved; retry with the same action ID: %s", action.ID, detail),
+	}
+	return Response{Error: result.Detail, Message: result.Detail, Merge: &result}, &PRMergeRetryableError{Result: result}
+}
+
+func unsupportedProviderSetup(ctxInfo *repoContext, err error) bool {
+	if ctxInfo != nil && ctxInfo.Provider == gitprovider.ProviderGeneric {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unsupported provider") || strings.Contains(message, "no provider api")
+}
+
 func snapshotFromProvider(ctxInfo *repoContext, pr *gitprovider.PullRequest, mode string) PRMergeSnapshot {
+	prURL := pr.HTMLURL
+	if prURL == "" {
+		prURL = fallbackPRURL(ctxInfo, pr.Index)
+	}
 	return PRMergeSnapshot{
 		Provider: string(ctxInfo.Provider), ForgeBaseURL: ctxInfo.BaseURL, Owner: ctxInfo.Owner,
 		Repo: ctxInfo.Repo, PRNumber: pr.Index, HeadSHA: pr.HeadSHA, BaseBranch: pr.Base,
-		MergeMethod: PRMergeMethodSquash, ExecutionMode: mode, PRURL: pr.HTMLURL,
+		MergeMethod: PRMergeMethodSquash, ExecutionMode: mode, PRURL: prURL,
 		Title: pr.Title, Head: pr.Head, State: pr.State, Mergeable: pr.Mergeable,
 	}
 }
@@ -454,9 +526,15 @@ func (s Service) reportExecution(
 		ActionID: action.ID, Status: status, InboxURL: action.InboxURL,
 		Snapshot: snapshot, Detail: detail,
 	}
+	setMergeOutcome(result)
 	reportErr := client.reportResult(operationContext(ctxInfo), action.ID, status, detail, mergeActionPayload(snapshot))
 	if reportErr != nil {
 		result.ReceiptError = reportErr.Error()
+		result.Resumable = true
+		result.Retryable = true
+		result.NextAction = PRMergeNextRepairReceipt
+		result.Completion = "resume this action_id to record the executed receipt; the forge merge is complete " +
+			"and must not run again"
 		result.Detail += "; Impri receipt could not be recorded; retry the same action to repair it"
 		return success(Response{Message: result.Detail, Merge: result}), nil
 	}
@@ -468,4 +546,19 @@ func (s Service) executionFailure(
 	snapshot PRMergeSnapshot, detail string,
 ) (Response, error) {
 	return s.reportExecution(ctxInfo, client, action, snapshot, PRMergeStatusExecuteFailed, detail)
+}
+
+func setMergeOutcome(result *PRMergeResult) {
+	switch result.Status {
+	case PRMergeStatusPending:
+		result.Resumable = true
+		result.NextAction = PRMergeNextWait
+		result.Completion = "surface the inbox URL and resume this action_id after Impri records approved or rejected"
+	case PRMergeStatusRejected, PRMergeStatusExpired, PRMergeStatusExecuteFailed:
+		result.NextAction = PRMergeNextNewApproval
+		result.Completion = "this action is terminal; create a new approval action for another merge attempt"
+	case PRMergeStatusExecuted:
+		result.NextAction = PRMergeNextNone
+		result.Completion = "the approved merge is complete; do not execute this action again"
+	}
 }

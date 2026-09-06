@@ -2,6 +2,7 @@ package og
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,51 @@ import (
 
 	"github.com/tta-lab/organon/internal/ogconfig"
 )
+
+func TestDecodeImpriActionRequiresCanonicalKindAndTarget(t *testing.T) {
+	payload := map[string]any{
+		"provider": "github", "forge_base_url": "https://github.com",
+		"owner": "tta-lab", "repo": "organon", "pr_number": 7,
+		"head_sha": "abc123", "base_branch": "main", "merge_method": "squash",
+		"execution_mode": "real", "pr_url": "https://github.com/tta-lab/organon/pull/7",
+	}
+	base := map[string]any{
+		"id": "act-1", "kind": PRMergeKind, "status": PRMergeStatusApproved,
+		"target_url": payload["pr_url"], "payload": payload,
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "wrong kind", mutate: func(action map[string]any) { action["kind"] = "other.kind" }},
+		{name: "missing target", mutate: func(action map[string]any) { delete(action, "target_url") }},
+		{name: "envelope", mutate: func(action map[string]any) {
+			copy := map[string]any{}
+			for key, value := range action {
+				copy[key] = value
+			}
+			for key := range action {
+				delete(action, key)
+			}
+			action["action"] = copy
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			wire := map[string]any{}
+			for key, value := range base {
+				wire[key] = value
+			}
+			test.mutate(wire)
+			data, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := decodeImpriAction(data); err == nil {
+				t.Fatalf("decodeImpriAction accepted %s", test.name)
+			}
+		})
+	}
+}
 
 func TestImpriClientRequiresConfiguredSectionWithoutEnvironmentFallback(t *testing.T) {
 	t.Setenv("IMPRI_BASE_URL", "http://impri.example")

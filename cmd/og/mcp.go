@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -282,7 +283,10 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		"pr_merge", "Approval-gated squash merge",
 		"Submit an immutable pull-request snapshot to Impri. Surface the inbox link "+
 			"and execute only after web approval; dry-run records a mock merge and "+
-			"real mode performs a squash merge.",
+			"real mode performs a squash merge. Structured outcomes route pending or "+
+			"wait-timeout to the inbox, approved temporary failures to retrying the same "+
+			"action_id, executed to completion, terminal rejection/expiry/failure to a "+
+			"new approval, and receipt errors to receipt repair without another merge.",
 		false, true, true,
 	), false), prMergeHandler(projects, executor))
 
@@ -378,7 +382,7 @@ func callProject(
 	req.Context = ctx
 	resp, err := operation(req)
 	if err != nil {
-		return og.Response{}, "", fmt.Errorf("execute OG operation: %w", err)
+		return resp, entry.Alias, fmt.Errorf("execute OG operation: %w", err)
 	}
 	return resp, entry.Alias, nil
 }
@@ -485,6 +489,15 @@ func prMergeHandler(
 		}
 		resp, canonical, err := callProject(ctx, projects, input.Project, req, executor.PRMerge)
 		if err != nil {
+			var retryErr *og.PRMergeRetryableError
+			if errors.As(err, &retryErr) && resp.Merge != nil {
+				if validateErr := og.ValidatePRMergeResponse(resp, prID); validateErr != nil {
+					return nil, ogPRMergeOutput{}, validateErr
+				}
+				return &mcp.CallToolResult{IsError: true}, ogPRMergeOutput{
+					Project: canonical, Merge: *resp.Merge,
+				}, nil
+			}
 			return nil, ogPRMergeOutput{}, err
 		}
 		if err := og.ValidatePRMergeResponse(resp, prID); err != nil {

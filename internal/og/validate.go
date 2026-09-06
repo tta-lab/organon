@@ -177,7 +177,8 @@ func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 		return fmt.Errorf("og returned no pull request merge result")
 	}
 	merge := resp.Merge
-	if strings.TrimSpace(merge.ActionID) == "" || merge.Snapshot.PRNumber <= 0 {
+	if strings.TrimSpace(merge.ActionID) == "" || merge.Snapshot.PRNumber <= 0 ||
+		strings.TrimSpace(merge.Snapshot.PRURL) == "" {
 		return fmt.Errorf("og returned an invalid pull request merge result")
 	}
 	if expectedID > 0 && merge.Snapshot.PRNumber != expectedID {
@@ -191,6 +192,42 @@ func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 	}
 	if merge.InboxURL == "" {
 		return fmt.Errorf("og returned pull request merge result without inbox URL")
+	}
+	if strings.TrimSpace(merge.NextAction) == "" || strings.TrimSpace(merge.Completion) == "" {
+		return fmt.Errorf("og returned pull request merge result without recovery instructions")
+	}
+	return validatePRMergeOutcome(*merge)
+}
+
+func validatePRMergeOutcome(merge PRMergeResult) error {
+	switch merge.Status {
+	case PRMergeStatusPending:
+		if !merge.Resumable || merge.Retryable || merge.NextAction != PRMergeNextWait {
+			return fmt.Errorf("og returned an invalid pending merge recovery state")
+		}
+	case PRMergeStatusApproved:
+		if !merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRetry {
+			return fmt.Errorf("og returned an invalid retryable merge recovery state")
+		}
+	case PRMergeStatusRejected, PRMergeStatusExpired, PRMergeStatusExecuteFailed:
+		if merge.Resumable || merge.Retryable || merge.NextAction != PRMergeNextNewApproval {
+			return fmt.Errorf("og returned an invalid terminal merge recovery state")
+		}
+	case PRMergeStatusExecuted:
+		return validateExecutedPRMergeOutcome(merge)
+	}
+	return nil
+}
+
+func validateExecutedPRMergeOutcome(merge PRMergeResult) error {
+	if merge.ReceiptError != "" {
+		if !merge.Resumable || !merge.Retryable || merge.NextAction != PRMergeNextRepairReceipt {
+			return fmt.Errorf("og returned an invalid receipt-repair merge state")
+		}
+		return nil
+	}
+	if merge.Resumable || merge.Retryable || merge.NextAction != PRMergeNextNone {
+		return fmt.Errorf("og returned an invalid completed merge state")
 	}
 	return nil
 }

@@ -210,8 +210,12 @@ func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
 		return og.Response{Merge: &og.PRMergeResult{
 			ActionID: "act-1", Status: og.PRMergeStatusPending,
 			InboxURL: "http://impri.example/actions",
-			Snapshot: og.PRMergeSnapshot{PRNumber: 7, ExecutionMode: og.PRMergeModeDryRun},
-			Detail:   "approval is pending",
+			Snapshot: og.PRMergeSnapshot{
+				PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeDryRun,
+			},
+			Resumable: true, NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and resume this action_id after Impri records approved or rejected",
+			Detail:     "approval is pending",
 		}}, nil
 	}}
 	args := []string{
@@ -232,6 +236,28 @@ func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
 	}
 	if result.Project != "ko" || result.Merge.ActionID != "act-1" || result.Merge.InboxURL == "" {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestCLIPRMergeRetryableErrorPrintsRecoveryOutcome(t *testing.T) {
+	projects := testProjectStore(t)
+	merge := og.PRMergeResult{
+		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Resumable: true, Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "resume this action_id after the temporary failure; execution completes only when status is executed",
+		Snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeReal,
+		},
+		Detail: "impri action act-retry remains approved; retry with the same action ID: provider unavailable",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko", "--pr-id", "7")
+	if err == nil || !strings.Contains(stdout, "retry_same_action") ||
+		!strings.Contains(stdout, "Completion:") || !strings.Contains(stdout, "act-retry") {
+		t.Fatalf("stdout = %q, err = %v, want rendered retry outcome", stdout, err)
 	}
 }
 

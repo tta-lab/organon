@@ -120,12 +120,20 @@ const (
 	PRMergeStatusExpired       = "expired"
 	PRMergeStatusExecuted      = "executed"
 	PRMergeStatusExecuteFailed = "execute_failed"
+
+	// PRMergeNextAction values are machine-readable routing instructions for
+	// agents consuming PRMergeResult.
+	PRMergeNextWait          = "wait_for_approval"
+	PRMergeNextRetry         = "retry_same_action"
+	PRMergeNextRepairReceipt = "repair_receipt"
+	PRMergeNextNone          = "none"
+	PRMergeNextNewApproval   = "new_approval_required"
 )
 
 // PRMergeSnapshot is the immutable forge identity submitted for approval.
 // Fields such as state and CIState are descriptive; the provider, forge,
-// repository, PR number, head SHA, base branch, method, and mode form the
-// authorization identity.
+// repository, PR number, PR URL, head SHA, base branch, method, and mode form
+// the authorization identity.
 type PRMergeSnapshot struct {
 	Provider      string `json:"provider"`
 	ForgeBaseURL  string `json:"forge_base_url"`
@@ -150,9 +158,22 @@ type PRMergeResult struct {
 	Status       string          `json:"status"`
 	InboxURL     string          `json:"inbox_url"`
 	Snapshot     PRMergeSnapshot `json:"snapshot"`
+	Resumable    bool            `json:"resumable"`
+	Retryable    bool            `json:"retryable"`
+	NextAction   string          `json:"next_action"`
+	Completion   string          `json:"completion"`
 	Detail       string          `json:"detail,omitempty"`
 	ReceiptError string          `json:"receipt_error,omitempty"`
 }
+
+// PRMergeRetryableError carries the structured merge outcome alongside its
+// non-success signal. MCP adapters can return the result with IsError=true,
+// while CLI callers can print the same result before returning the error.
+type PRMergeRetryableError struct {
+	Result PRMergeResult
+}
+
+func (e *PRMergeRetryableError) Error() string { return e.Result.Detail }
 
 // CIStatusResponse is the stable CI summary shape returned with PR JSON.
 type CIStatusResponse struct {

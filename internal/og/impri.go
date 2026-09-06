@@ -55,6 +55,7 @@ type impriResult struct {
 
 type impriAction struct {
 	ID        string
+	Kind      string
 	Status    string
 	InboxURL  string
 	TargetURL string
@@ -207,57 +208,27 @@ func redactImpriText(message, secret string) string {
 	return message
 }
 
-func decodeImpriAction(data []byte) (impriAction, error) { //nolint:gocyclo
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+func decodeImpriAction(data []byte) (impriAction, error) {
+	var wire struct {
+		ID        string         `json:"id"`
+		Kind      string         `json:"kind"`
+		Status    string         `json:"status"`
+		InboxURL  string         `json:"inbox_url"`
+		TargetURL string         `json:"target_url"`
+		Payload   map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
 		return impriAction{}, fmt.Errorf("decode Impri action: %w", err)
 	}
-	if nested, ok := raw["action"]; ok && len(bytes.TrimSpace(nested)) > 0 && nested[0] == '{' {
-		var nestedRaw map[string]json.RawMessage
-		if err := json.Unmarshal(nested, &nestedRaw); err == nil {
-			for key, value := range nestedRaw {
-				if _, exists := raw[key]; !exists {
-					raw[key] = value
-				}
-			}
-		}
+	if strings.TrimSpace(wire.ID) == "" || wire.Kind != PRMergeKind ||
+		strings.TrimSpace(wire.Status) == "" || strings.TrimSpace(wire.TargetURL) == "" ||
+		wire.Payload == nil {
+		return impriAction{}, fmt.Errorf("impri action response is missing a valid id, kind, status, target_url, or payload")
 	}
-	if nested, ok := raw["data"]; ok && len(bytes.TrimSpace(nested)) > 0 && nested[0] == '{' {
-		var nestedRaw map[string]json.RawMessage
-		if err := json.Unmarshal(nested, &nestedRaw); err == nil {
-			for key, value := range nestedRaw {
-				if _, exists := raw[key]; !exists {
-					raw[key] = value
-				}
-			}
-		}
-	}
-	action := impriAction{}
-	action.ID = rawString(raw, "id", "action_id")
-	action.Status = rawString(raw, "status", "state")
-	action.InboxURL = rawString(raw, "inbox_url", "web_url", "action_url", "url")
-	action.TargetURL = rawString(raw, "target_url")
-	if payload, ok := raw["payload"]; ok {
-		if err := json.Unmarshal(payload, &action.Payload); err != nil {
-			return impriAction{}, fmt.Errorf("decode Impri action payload: %w", err)
-		}
-	}
-	if action.ID == "" || action.Status == "" || action.Payload == nil {
-		return impriAction{}, fmt.Errorf("impri action response is missing id, status, or payload")
-	}
-	return action, nil
-}
-
-func rawString(raw map[string]json.RawMessage, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := raw[key]; ok {
-			var result string
-			if json.Unmarshal(value, &result) == nil && strings.TrimSpace(result) != "" {
-				return result
-			}
-		}
-	}
-	return ""
+	return impriAction{
+		ID: wire.ID, Kind: wire.Kind, Status: wire.Status, InboxURL: wire.InboxURL,
+		TargetURL: wire.TargetURL, Payload: wire.Payload,
+	}, nil
 }
 
 func (a *impriAction) UnmarshalJSON(data []byte) error {
@@ -280,11 +251,12 @@ func mergeIdempotencyKey(snapshot PRMergeSnapshot) (string, error) {
 		BaseBranch    string `json:"base_branch"`
 		MergeMethod   string `json:"merge_method"`
 		ExecutionMode string `json:"execution_mode"`
+		PRURL         string `json:"pr_url"`
 	}{
 		Provider: snapshot.Provider, ForgeBaseURL: snapshot.ForgeBaseURL,
 		Owner: snapshot.Owner, Repo: snapshot.Repo, PRNumber: snapshot.PRNumber,
 		HeadSHA: snapshot.HeadSHA, BaseBranch: snapshot.BaseBranch,
-		MergeMethod: snapshot.MergeMethod, ExecutionMode: snapshot.ExecutionMode,
+		MergeMethod: snapshot.MergeMethod, ExecutionMode: snapshot.ExecutionMode, PRURL: snapshot.PRURL,
 	}
 	data, err := json.Marshal(identity)
 	if err != nil {
@@ -300,13 +272,12 @@ func mergeActionPayload(snapshot PRMergeSnapshot) map[string]any {
 		"forge_base_url": snapshot.ForgeBaseURL,
 		"owner":          snapshot.Owner,
 		"repo":           snapshot.Repo,
-		"repository":     snapshot.Repo,
 		"pr_number":      snapshot.PRNumber,
 		"head_sha":       snapshot.HeadSHA,
 		"base_branch":    snapshot.BaseBranch,
 		"merge_method":   snapshot.MergeMethod,
 		"execution_mode": snapshot.ExecutionMode,
-		"dry_run":        snapshot.ExecutionMode == PRMergeModeDryRun,
+		"pr_url":         snapshot.PRURL,
 	}
 }
 

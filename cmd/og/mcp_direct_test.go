@@ -99,7 +99,11 @@ func TestOGMCPPRMergeIsDestructiveAndNeverAcceptsImpriKey(t *testing.T) { //noli
 		return og.Response{Merge: &og.PRMergeResult{
 			ActionID: "act-1", Status: og.PRMergeStatusPending,
 			InboxURL: "http://impri.example/actions",
-			Snapshot: og.PRMergeSnapshot{PRNumber: 7, ExecutionMode: og.PRMergeModeDryRun},
+			Snapshot: og.PRMergeSnapshot{
+				PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeDryRun,
+			},
+			Resumable: true, NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and resume this action_id after Impri records approved or rejected",
 		}}, nil
 	}}
 	session := connectDirectMCP(t, executor, testProjectStore(t))
@@ -135,8 +139,39 @@ func TestOGMCPPRMergeIsDestructiveAndNeverAcceptsImpriKey(t *testing.T) { //noli
 		t.Fatalf("pr_merge result = %#v, err = %v", result, err)
 	}
 	data, _ := json.Marshal(result.StructuredContent)
-	if !strings.Contains(string(data), "act-1") || !strings.Contains(string(data), "inbox_url") {
+	if !strings.Contains(string(data), "act-1") || !strings.Contains(string(data), "inbox_url") ||
+		!strings.Contains(string(data), "wait_for_approval") || !strings.Contains(string(data), "completion") {
 		t.Fatalf("structured result = %s", data)
+	}
+}
+
+func TestOGMCPPRMergeRetryableErrorKeepsStructuredRecoveryOutcome(t *testing.T) {
+	merge := og.PRMergeResult{
+		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Resumable: true, Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "resume this action_id after the temporary failure; execution completes only when status is executed",
+		Snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeReal,
+		},
+		Detail: "impri action remains approved; retry with the same action ID: provider unavailable",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{"project": "ko", "pr_id": 7, "action_id": "act-retry"},
+	})
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("retryable MCP result = %#v, err = %v", result, err)
+	}
+	data, marshalErr := json.Marshal(result.StructuredContent)
+	if marshalErr != nil || !strings.Contains(string(data), `"status":"approved"`) ||
+		!strings.Contains(string(data), `"retryable":true`) ||
+		!strings.Contains(string(data), `"next_action":"retry_same_action"`) ||
+		!strings.Contains(string(data), "act-retry") {
+		t.Fatalf("retryable structured result = %s, err = %v", data, marshalErr)
 	}
 }
 

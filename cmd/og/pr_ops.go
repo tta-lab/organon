@@ -141,24 +141,41 @@ func runPRMerge(cmd *cobra.Command, args []string) error {
 	req.WorkDir = workDir
 	resp, err := runtime.executor.PRMerge(requestFor(cmd, req))
 	if err != nil {
+		if resp.Merge != nil {
+			if validateErr := og.ValidatePRMergeResponse(resp, index); validateErr == nil {
+				if renderErr := renderPRMergeResult(cmd, alias, *resp.Merge); renderErr != nil {
+					return renderErr
+				}
+			}
+		}
 		return err
 	}
 	if err := og.ValidatePRMergeResponse(resp, index); err != nil {
 		return err
 	}
+	return renderPRMergeResult(cmd, alias, *resp.Merge)
+}
+
+func renderPRMergeResult(cmd *cobra.Command, alias string, merge og.PRMergeResult) error {
 	if jsonFlag(cmd) {
-		return printJSON(cmd, ogPRMergeJSON{Project: alias, Merge: *resp.Merge})
+		return printJSON(cmd, ogPRMergeJSON{Project: alias, Merge: merge})
 	}
 	if alias != "" {
 		cmd.Printf("Project %s:\n", alias)
 	}
-	cmd.Printf("PR #%d merge approval: %s\n", resp.Merge.Snapshot.PRNumber, resp.Merge.Status)
-	cmd.Printf("  Action: %s\n", resp.Merge.ActionID)
-	if resp.Merge.InboxURL != "" {
-		cmd.Printf("  Impri inbox: %s\n", resp.Merge.InboxURL)
+	cmd.Printf("PR #%d merge approval: %s\n", merge.Snapshot.PRNumber, merge.Status)
+	cmd.Printf("  Action: %s\n", merge.ActionID)
+	if merge.InboxURL != "" {
+		cmd.Printf("  Impri inbox: %s\n", merge.InboxURL)
 	}
-	if resp.Merge.Detail != "" {
-		cmd.Printf("  %s\n", resp.Merge.Detail)
+	if merge.Detail != "" {
+		cmd.Printf("  %s\n", merge.Detail)
+	}
+	if merge.NextAction != "" {
+		cmd.Printf("  Next action: %s\n", merge.NextAction)
+	}
+	if merge.Completion != "" {
+		cmd.Printf("  Completion: %s\n", merge.Completion)
 	}
 	return nil
 }

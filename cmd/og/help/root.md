@@ -6,7 +6,9 @@ Organon forge operations.
 contains registry- and URL-based clone, pull request inspection/commenting,
 approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
 creation and modification are available only through the typed MCP
-`pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+`pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions; merge also
+has a CLI adapter because it accepts only structured scalar flags. Agents should
+default to typed MCP, and both merge adapters use the same Impri gate.
 
 Merge is squash-only and always goes through Impri. Configure the optional
 `[impri]` section in `~/.config/ttal/og.toml` with `base_url` and `api_key`.
@@ -15,8 +17,9 @@ inbox URL, and records a mock execution only after a web approval. Use
 `--wait --timeout 30s` or pass `--action-id` to resume a pending card. Real
 merges use the same gate and recheck the PR, CI, and head SHA immediately
 before the forge call. Rejection, expiry, timeout, and execution failure leave
-the PR untouched. `og pull` remains the separate step for closed-PR branch and
-worktree cleanup. Impri configuration is read only from this `og.toml`; no
+the PR untouched. Temporary provider/API failures keep the approved action
+resumable; retry its same action ID. `og pull` remains the separate step for
+closed-PR branch and worktree cleanup. Impri configuration is read only from this `og.toml`; no
 `IMPRI_*` environment-variable fallback or second config file exists.
 
 `og clone <project-reference>` clones the registered remote to the registered

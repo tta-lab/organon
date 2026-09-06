@@ -61,13 +61,27 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
-`pr_merge` is the only supported merge path. Agents must use the typed MCP
-operation, surface its Impri inbox URL, and wait for the operator's web
-approval; they must not bypass the gate with GitHub, Forgejo, `gh`, or raw API
-tooling. The operation accepts no Impri API key. It supports dry-run and
-squash-only real mode and does not perform branch/worktree cleanup; `og pull`
-remains the separate cleanup step. Telegram, webhooks, a daemon, and Impri
-key provisioning or rotation are outside this version.
+The approval-gated merge domain operation is the only supported merge path.
+Agents should use typed MCP `pr_merge` by default; `og pr merge` is also a
+supported CLI adapter because its inputs are short scalar flags. Both adapters
+call the same Impri gate, and neither accepts an Impri API key or bypasses web
+approval with GitHub, Forgejo, `gh`, or raw API tooling.
+
+Agents must treat `PRMergeResult` as the merge feedback contract: surface
+`inbox_url` while `status=pending` and wait; for `status=approved` with
+`retryable=true`, resume the same `action_id` without new approval; for
+`status=executed`, stop because the merge is complete; and for rejected,
+expired, or `execute_failed`, obtain a new approval for another attempt. An
+executed result with `receipt_error` is resumable only with the same
+`action_id` to repair the receipt; it must not merge again. Follow
+`next_action` and `completion` rather than parsing prose, and consider the
+operation complete only when `status=executed` has no receipt error. Impri
+provider/API availability failures remain approved and retryable.
+
+The CLI/MCP transport boundary and its rationale are authoritative in the
+README guidance. `og pull` remains the separate branch/worktree cleanup step.
+Telegram, webhooks, a daemon, and Impri key provisioning or rotation are
+outside this version.
 
 ## Testing
 

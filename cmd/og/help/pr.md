@@ -5,6 +5,9 @@ Pull request operations.
 The CLI supports view/list, find, get, comment, checks/status, failure logs,
 and approval-gated squash merge. Pull-request creation and modification are typed-only:
 use the MCP `pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+Their multiline free-text bodies stay out of shell arguments; merge remains a
+CLI adapter because it accepts only short scalar flags, while agents should
+default to typed MCP. Both merge adapters use the same Impri gate.
 
 Behavior:
 
@@ -24,7 +27,11 @@ Behavior:
   `--action-id <id>` to resume. Always surface the printed Impri inbox URL for
   web approval. Only an approved action executes; rejected, expired, pending,
   and timed-out actions do not touch the forge. Real mode revalidates that the
-  PR is open, green, mergeable, and still at the approved SHA.
+  PR is open, green, mergeable, and still at the approved SHA. If the result is
+  approved and retryable, retry the same action ID after the provider recovers;
+  executed means complete, while rejected/expired/execute_failed require new
+  approval. A receipt error is repaired with the same action ID and never
+  invokes a second merge.
 
 Configure Impri in the existing user-owned `~/.config/ttal/og.toml`:
 
