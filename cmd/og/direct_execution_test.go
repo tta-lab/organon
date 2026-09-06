@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tta-lab/organon/internal/og"
 	"github.com/tta-lab/organon/internal/project"
@@ -31,6 +32,7 @@ type directExecutor struct {
 	prChecks   func(og.Request) (og.Response, error)
 	prLog      func(og.Request) (og.Response, error)
 	prFailures func(og.Request) (og.Response, error)
+	prMerge    func(og.Request) (og.Response, error)
 	authStatus func(og.Request) (og.Response, error)
 }
 
@@ -82,6 +84,9 @@ func (e *directExecutor) PRLog(req og.Request) (og.Response, error) {
 }
 func (e *directExecutor) PRFailures(req og.Request) (og.Response, error) {
 	return e.call("pr failures", e.prFailures, req)
+}
+func (e *directExecutor) PRMerge(req og.Request) (og.Response, error) {
+	return e.call("pr merge", e.prMerge, req)
 }
 func (e *directExecutor) AuthStatus(req og.Request) (og.Response, error) {
 	return e.call("auth status", e.authStatus, req)
@@ -193,6 +198,39 @@ func TestCLIInvokesConfiguredExecutorDirectly(t *testing.T) {
 		t.Fatalf("decode JSON: %v\n%s", err, stdout)
 	}
 	if result.Project != "ko" || result.Message != "direct push" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
+	projects := testProjectStore(t)
+	var got og.Request
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		got = req
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-1", Status: og.PRMergeStatusPending,
+			InboxURL: "http://impri.example/actions",
+			Snapshot: og.PRMergeSnapshot{PRNumber: 7, ExecutionMode: og.PRMergeModeDryRun},
+			Detail:   "approval is pending",
+		}}, nil
+	}}
+	args := []string{
+		"pr", "merge", "--project", "ko", "--pr-id", "7", "--dry-run",
+		"--wait", "--timeout", "2s", "--json",
+	}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", args...)
+	if err != nil {
+		t.Fatalf("pr merge: %v", err)
+	}
+	if got.WorkDir != "/work/ko" || got.Index != 7 || !got.DryRun || !got.Wait ||
+		got.Timeout != 2*time.Second || got.Context == nil {
+		t.Fatalf("request = %+v", got)
+	}
+	var result ogPRMergeJSON
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode result: %v\n%s", err, stdout)
+	}
+	if result.Project != "ko" || result.Merge.ActionID != "act-1" || result.Merge.InboxURL == "" {
 		t.Fatalf("result = %+v", result)
 	}
 }

@@ -112,6 +112,24 @@ func (p *ForgejoProvider) GetPR(owner, repo string, index int64) (*PullRequest, 
 	return toPullRequest(pr), nil
 }
 
+// MergePullRequest performs a squash merge guarded by the expected head SHA.
+// Branch deletion remains disabled; cleanup is a separate og pull operation.
+func (p *ForgejoProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
+	merged, _, err := p.client.MergePullRequest(owner, repo, index, forgejo_sdk.MergePullRequestOption{
+		Style:                  forgejo_sdk.MergeStyleSquash,
+		HeadCommitId:           headSHA,
+		DeleteBranchAfterMerge: false,
+		ForceMerge:             false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to squash merge PR #%d: %w", index, err)
+	}
+	if !merged {
+		return fmt.Errorf("failed to squash merge PR #%d: provider did not merge pull request", index)
+	}
+	return nil
+}
+
 func (p *ForgejoProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
 	comment, _, err := p.client.CreateIssueComment(owner, repo, index, forgejo_sdk.CreateIssueCommentOption{
 		Body: body,

@@ -16,6 +16,47 @@ import (
 type Config struct {
 	GitHubApp *githubapp.Config `toml:"github_app"`
 	Forgejo   ForgejoConfig     `toml:"forgejo"`
+	Impri     *ImpriConfig      `toml:"impri"`
+}
+
+// ImpriConfig configures the approval service used by destructive forge
+// operations. The key is kept in memory only and is never part of an OG
+// request or response shape.
+type ImpriConfig struct {
+	BaseURL string `toml:"base_url"`
+	APIKey  string `toml:"api_key" json:"-"`
+}
+
+// String reports configuration presence without rendering the secret.
+func (c ImpriConfig) String() string {
+	keyState := "unset"
+	if c.APIKey != "" {
+		keyState = "configured"
+	}
+	return fmt.Sprintf("base_url=%q api_key=<%s>", c.BaseURL, keyState)
+}
+
+// Validate checks the operator-owned Impri configuration without echoing the
+// API key in an error.
+func (c *ImpriConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if strings.TrimSpace(c.BaseURL) == "" {
+		return fmt.Errorf("impri.base_url is required")
+	}
+	normalized, err := NormalizeBaseURL(c.BaseURL)
+	if err != nil {
+		return fmt.Errorf("impri.base_url: %w", err)
+	}
+	if strings.TrimSpace(c.APIKey) == "" {
+		return fmt.Errorf("impri.api_key is required")
+	}
+	if strings.TrimSpace(c.APIKey) != c.APIKey || strings.ContainsAny(c.APIKey, "\r\n") {
+		return fmt.Errorf("impri.api_key must not contain surrounding whitespace or newlines")
+	}
+	c.BaseURL = normalized
+	return nil
 }
 
 // ForgejoConfig limits which server roots may receive Forgejo credentials.
@@ -31,6 +72,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.GitHubApp != nil {
 		if err := cfg.GitHubApp.Validate(); err != nil {
+			return Config{}, err
+		}
+	}
+	if cfg.Impri != nil {
+		if err := cfg.Impri.Validate(); err != nil {
 			return Config{}, err
 		}
 	}

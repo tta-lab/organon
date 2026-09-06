@@ -82,6 +82,12 @@ type Provider interface {
 	GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error)
 }
 
+// PullRequestMerger is the optional write capability implemented by supported
+// forge providers. Keeping it separate preserves the read-only provider seam.
+type PullRequestMerger interface {
+	MergePullRequest(owner, repo string, index int64, headSHA string) error
+}
+
 func contextOrBackground(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx

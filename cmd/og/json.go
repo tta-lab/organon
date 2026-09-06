@@ -41,6 +41,11 @@ type ogCloneJSON struct {
 	Clone og.CloneResult `json:"clone"`
 }
 
+type ogPRMergeJSON struct {
+	Project string           `json:"project,omitempty"`
+	Merge   og.PRMergeResult `json:"merge"`
+}
+
 // printJSON writes one JSON document to the command's stdout.
 func printJSON(cmd *cobra.Command, v any) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())

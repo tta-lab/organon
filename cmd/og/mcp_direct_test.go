@@ -82,13 +82,62 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 	sort.Strings(gotNames)
 	wantNames := []string{
 		"auth_status", "clone", "pr_checks", "pr_comment", "pr_create", "pr_failures",
-		"pr_find", "pr_get", "pr_log", "pr_modify", "pull", "push",
+		"pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify", "pull", "push",
 	}
 	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
 		t.Fatalf("tools = %v, want %v", gotNames, wantNames)
 	}
 
 	assertDirectMCPToolCalls(t, session, &requests)
+}
+
+func TestOGMCPPRMergeIsDestructiveAndNeverAcceptsImpriKey(t *testing.T) { //nolint:gocyclo
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		if req.Index != 7 || !req.DryRun || req.ActionID != "act-1" {
+			t.Fatalf("merge request = %+v", req)
+		}
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-1", Status: og.PRMergeStatusPending,
+			InboxURL: "http://impri.example/actions",
+			Snapshot: og.PRMergeSnapshot{PRNumber: 7, ExecutionMode: og.PRMergeModeDryRun},
+		}}, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	list, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mergeTool *mcp.Tool
+	for _, tool := range list.Tools {
+		if tool.Name == "pr_merge" {
+			mergeTool = tool
+			break
+		}
+	}
+	if mergeTool == nil || mergeTool.Annotations == nil || mergeTool.Annotations.DestructiveHint == nil ||
+		!*mergeTool.Annotations.DestructiveHint || mergeTool.Annotations.ReadOnlyHint {
+		t.Fatalf("pr_merge tool annotations = %+v", mergeTool)
+	}
+	schema, ok := mergeTool.InputSchema.(map[string]any)
+	if !ok {
+		t.Fatalf("input schema type = %T", mergeTool.InputSchema)
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if _, exists := properties["api_key"]; exists {
+		t.Fatal("pr_merge schema accepts an API key")
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{
+			"project": "ko", "pr_id": 7, "action_id": "act-1", "dry_run": true,
+		},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("pr_merge result = %#v, err = %v", result, err)
+	}
+	data, _ := json.Marshal(result.StructuredContent)
+	if !strings.Contains(string(data), "act-1") || !strings.Contains(string(data), "inbox_url") {
+		t.Fatalf("structured result = %s", data)
+	}
 }
 
 func assertDirectMCPToolCalls(t *testing.T, session *mcp.ClientSession, requests *[]og.Request) {

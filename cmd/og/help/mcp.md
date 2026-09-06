@@ -29,6 +29,7 @@ Tools:
   pr_checks               # inspect pull request checks
   pr_log                  # inspect CI state and failure log tail
   pr_failures             # inspect failing checks and log tails
+  pr_merge                # submit an Impri approval-gated squash merge
 
 Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
 CLI behavior and operate on the current named branch at the path registered for
@@ -42,7 +43,16 @@ the known default branch; push, tag, PR mutation/comment, and branch cleanup are
 blocked. Registry additions are visible on the next tool call without
 restarting this MCP process.
 
-Tag, merge, and raw provider access are not exposed.
+`pr_merge` is destructive and always requires an Impri web decision. Its input
+contains only the project, optional PR ID, optional action ID, dry-run flag,
+and wait/timeout controls; it never accepts an API key. The structured result
+contains the immutable approved snapshot, action ID, status, and inbox URL.
+Agents must show that URL and wait for approval rather than invoking forge
+tooling directly. Real mode is squash-only and revalidates the PR and CI.
+
+Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,
+API-key provisioning/rotation, and branch/worktree cleanup are outside this
+version; `og pull` remains the separate cleanup step.
 
 Example MCP client configuration:
 

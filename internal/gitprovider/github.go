@@ -172,6 +172,26 @@ func (p *GitHubProvider) GetPR(owner, repo string, index int64) (*PullRequest, e
 	return toGitHubPullRequest(pr), nil
 }
 
+// MergePullRequest performs a squash merge guarded by the expected head SHA.
+func (p *GitHubProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
+	result, _, err := p.client.PullRequests.Merge(
+		p.operationContext(), owner, repo, int(index), "", &github.PullRequestOptions{
+			MergeMethod: "squash",
+			SHA:         headSHA,
+		})
+	if err != nil {
+		return fmt.Errorf("failed to squash merge PR #%d: %w", index, err)
+	}
+	if result == nil || !result.GetMerged() {
+		message := "provider did not merge pull request"
+		if result != nil && result.GetMessage() != "" {
+			message += ": " + result.GetMessage()
+		}
+		return fmt.Errorf("failed to squash merge PR #%d: %s", index, message)
+	}
+	return nil
+}
+
 func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
 	comment, _, err := p.client.Issues.CreateComment(p.operationContext(), owner, repo, int(index), &github.IssueComment{
 		Body: &body,
@@ -324,7 +344,9 @@ func toGitHubPullRequest(pr *github.PullRequest) *PullRequest {
 	if pr.Base != nil && pr.Base.Ref != nil {
 		base = *pr.Base.Ref
 	}
-	mergeable := true
+	// GitHub may omit mergeable while it is still computing. Treat an unknown
+	// value as not mergeable so an approved action cannot bypass this guard.
+	mergeable := false
 	if pr.Mergeable != nil {
 		mergeable = *pr.Mergeable
 	}

@@ -21,18 +21,23 @@ type Request struct {
 	Index     int64           `json:"index,omitempty"`
 	State     string          `json:"state,omitempty"`
 	Tail      int             `json:"tail,omitempty"`
+	ActionID  string          `json:"action_id,omitempty"`
+	DryRun    bool            `json:"dry_run,omitempty"`
+	Wait      bool            `json:"wait,omitempty"`
+	Timeout   time.Duration   `json:"timeout,omitempty"`
 }
 
 // Response is the typed result of one direct OG operation.
 type Response struct {
-	OK      bool         `json:"ok"`
-	Error   string       `json:"error,omitempty"`
-	Message string       `json:"message,omitempty"`
-	PR      *PullRequest `json:"pr,omitempty"`
-	Comment *Comment     `json:"comment,omitempty"`
-	Auth    *AuthStatus  `json:"auth,omitempty"`
-	Lines   []string     `json:"lines,omitempty"`
-	Clone   *CloneResult `json:"clone,omitempty"`
+	OK      bool           `json:"ok"`
+	Error   string         `json:"error,omitempty"`
+	Message string         `json:"message,omitempty"`
+	PR      *PullRequest   `json:"pr,omitempty"`
+	Comment *Comment       `json:"comment,omitempty"`
+	Auth    *AuthStatus    `json:"auth,omitempty"`
+	Lines   []string       `json:"lines,omitempty"`
+	Clone   *CloneResult   `json:"clone,omitempty"`
+	Merge   *PRMergeResult `json:"merge,omitempty"`
 }
 
 // CloneResult is the stable, secret-free identity of a cloned checkout.
@@ -96,6 +101,57 @@ type PullRequest struct {
 	SHA          string            `json:"head_sha,omitempty"`
 	CI           *CIStatusResponse `json:"ci,omitempty"`
 	CIFetchError string            `json:"ci_fetch_error,omitempty"`
+	Mergeable    bool              `json:"mergeable"`
+}
+
+const (
+	// PRMergeKind is the Impri action kind used for approval-gated merges.
+	PRMergeKind = "git.merge_pr"
+	// PRMergeMethodSquash is the only merge method exposed by OG.
+	PRMergeMethodSquash = "squash"
+	// PRMergeModeDryRun records a non-destructive mock execution.
+	PRMergeModeDryRun = "dry-run"
+	// PRMergeModeReal records a forge squash merge.
+	PRMergeModeReal = "real"
+
+	PRMergeStatusPending       = "pending"
+	PRMergeStatusApproved      = "approved"
+	PRMergeStatusRejected      = "rejected"
+	PRMergeStatusExpired       = "expired"
+	PRMergeStatusExecuted      = "executed"
+	PRMergeStatusExecuteFailed = "execute_failed"
+)
+
+// PRMergeSnapshot is the immutable forge identity submitted for approval.
+// Fields such as state and CIState are descriptive; the provider, forge,
+// repository, PR number, head SHA, base branch, method, and mode form the
+// authorization identity.
+type PRMergeSnapshot struct {
+	Provider      string `json:"provider"`
+	ForgeBaseURL  string `json:"forge_base_url"`
+	Owner         string `json:"owner"`
+	Repo          string `json:"repo"`
+	PRNumber      int64  `json:"pr_number"`
+	HeadSHA       string `json:"head_sha"`
+	BaseBranch    string `json:"base_branch"`
+	MergeMethod   string `json:"merge_method"`
+	ExecutionMode string `json:"execution_mode"`
+	PRURL         string `json:"pr_url,omitempty"`
+	Title         string `json:"title,omitempty"`
+	Head          string `json:"head,omitempty"`
+	State         string `json:"state,omitempty"`
+	CIState       string `json:"ci_state,omitempty"`
+	Mergeable     bool   `json:"mergeable"`
+}
+
+// PRMergeResult is the approval and execution state returned by CLI and MCP.
+type PRMergeResult struct {
+	ActionID     string          `json:"action_id"`
+	Status       string          `json:"status"`
+	InboxURL     string          `json:"inbox_url"`
+	Snapshot     PRMergeSnapshot `json:"snapshot"`
+	Detail       string          `json:"detail,omitempty"`
+	ReceiptError string          `json:"receipt_error,omitempty"`
 }
 
 // CIStatusResponse is the stable CI summary shape returned with PR JSON.

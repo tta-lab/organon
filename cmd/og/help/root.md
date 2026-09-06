@@ -4,9 +4,20 @@ Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
 contains registry- and URL-based clone, pull request inspection/commenting,
-guarded push/pull/tag, and auth operations. Merge is intentionally out of
-scope. Pull-request creation and modification are available only through the
-typed MCP `pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
+creation and modification are available only through the typed MCP
+`pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+
+Merge is squash-only and always goes through Impri. Configure the optional
+`[impri]` section in `~/.config/ttal/og.toml` with `base_url` and `api_key`.
+`og pr merge --dry-run` creates a non-destructive approval card, prints its
+inbox URL, and records a mock execution only after a web approval. Use
+`--wait --timeout 30s` or pass `--action-id` to resume a pending card. Real
+merges use the same gate and recheck the PR, CI, and head SHA immediately
+before the forge call. Rejection, expiry, timeout, and execution failure leave
+the PR untouched. `og pull` remains the separate step for closed-PR branch and
+worktree cleanup. Impri configuration is read only from this `og.toml`; no
+`IMPRI_*` environment-variable fallback or second config file exists.
 
 `og clone <project-reference>` clones the registered remote to the registered
 path. A project reference is a case-insensitive canonical alias, checkout

@@ -848,6 +848,7 @@ type fakeProvider struct {
 	findPRByState       func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
 	editPR              func(owner, repo string, index int64, title, body string) (*gitprovider.PullRequest, error)
 	getPR               func(owner, repo string, index int64) (*gitprovider.PullRequest, error)
+	mergePR             func(owner, repo string, index int64, headSHA string) error
 	createComment       func(owner, repo string, index int64, body string) (*gitprovider.Comment, error)
 	getCombinedStatus   func(owner, repo, ref string) (*gitprovider.CombinedStatus, error)
 	getCIFailureDetails func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error)
@@ -877,6 +878,13 @@ func (p fakeProvider) EditPR(owner, repo string, index int64, title, body string
 func (p fakeProvider) GetPR(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
 	if p.getPR != nil {
 		return p.getPR(owner, repo, index)
+	}
+	panic("not implemented")
+}
+
+func (p fakeProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
+	if p.mergePR != nil {
+		return p.mergePR(owner, repo, index, headSHA)
 	}
 	panic("not implemented")
 }

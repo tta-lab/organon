@@ -61,6 +61,14 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
+`pr_merge` is the only supported merge path. Agents must use the typed MCP
+operation, surface its Impri inbox URL, and wait for the operator's web
+approval; they must not bypass the gate with GitHub, Forgejo, `gh`, or raw API
+tooling. The operation accepts no Impri API key. It supports dry-run and
+squash-only real mode and does not perform branch/worktree cleanup; `og pull`
+remains the separate cleanup step. Telegram, webhooks, a daemon, and Impri
+key provisioning or rotation are outside this version.
+
 ## Testing
 
 Fixture files live in `testdata/`. Tests include both unit tests and CLI integration tests.

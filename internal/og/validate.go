@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tta-lab/organon/internal/project"
 )
@@ -82,6 +83,23 @@ func ValidatePRLogTail(tail int) error {
 	return nil
 }
 
+// ValidatePRMergeRequest checks transport-independent merge arguments.
+func ValidatePRMergeRequest(req Request) error {
+	if req.Index < 0 {
+		return fmt.Errorf("PR ID must not be negative")
+	}
+	if strings.TrimSpace(req.ActionID) != req.ActionID {
+		return fmt.Errorf("action ID must not contain surrounding whitespace")
+	}
+	if req.Timeout < 0 {
+		return fmt.Errorf("merge timeout must not be negative")
+	}
+	if req.Wait && req.Timeout > 24*time.Hour {
+		return fmt.Errorf("merge timeout must not exceed 24h")
+	}
+	return nil
+}
+
 // Response validators shared by the CLI, MCP, and Pi extension adapters so
 // result contracts are enforced in one place. Message texts are part of the
 // adapter contract and are asserted by both the CLI and MCP tests.
@@ -149,6 +167,30 @@ func ValidateCommentResponse(resp Response, expectedPRID int64, expectedBody str
 func ValidateMessageResponse(resp Response) error {
 	if strings.TrimSpace(resp.Message) == "" {
 		return fmt.Errorf("og returned no operation result")
+	}
+	return nil
+}
+
+// ValidatePRMergeResponse requires the stable approval-gated merge shape.
+func ValidatePRMergeResponse(resp Response, expectedID int64) error {
+	if resp.Merge == nil {
+		return fmt.Errorf("og returned no pull request merge result")
+	}
+	merge := resp.Merge
+	if strings.TrimSpace(merge.ActionID) == "" || merge.Snapshot.PRNumber <= 0 {
+		return fmt.Errorf("og returned an invalid pull request merge result")
+	}
+	if expectedID > 0 && merge.Snapshot.PRNumber != expectedID {
+		return fmt.Errorf("og returned PR ID %d, want %d", merge.Snapshot.PRNumber, expectedID)
+	}
+	switch merge.Status {
+	case PRMergeStatusPending, PRMergeStatusApproved, PRMergeStatusRejected,
+		PRMergeStatusExpired, PRMergeStatusExecuted, PRMergeStatusExecuteFailed:
+	default:
+		return fmt.Errorf("og returned invalid pull request merge status %q", merge.Status)
+	}
+	if merge.InboxURL == "" {
+		return fmt.Errorf("og returned pull request merge result without inbox URL")
 	}
 	return nil
 }

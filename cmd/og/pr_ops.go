@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -111,6 +112,55 @@ func runPRFailures(cmd *cobra.Command, args []string) error {
 		cmd, og.Request{Index: index, State: og.PRStateAll, Tail: tail},
 		og.Executor.PRFailures,
 	)
+}
+
+func runPRMerge(cmd *cobra.Command, args []string) error {
+	index, err := optionalPRID(cmd)
+	if err != nil {
+		return err
+	}
+	actionID, _ := cmd.Flags().GetString("action-id")
+	if actionID != "" && actionID != strings.TrimSpace(actionID) {
+		return fmt.Errorf("action ID must not contain surrounding whitespace")
+	}
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	wait, _ := cmd.Flags().GetBool("wait")
+	timeout, _ := cmd.Flags().GetDuration("timeout")
+	req := og.Request{Index: index, ActionID: actionID, DryRun: dryRun, Wait: wait, Timeout: timeout}
+	if err := og.ValidatePRMergeRequest(req); err != nil {
+		return err
+	}
+	runtime, err := runtimeFor(cmd)
+	if err != nil {
+		return err
+	}
+	workDir, alias, err := resolveWorkDir(cmd, runtime)
+	if err != nil {
+		return err
+	}
+	req.WorkDir = workDir
+	resp, err := runtime.executor.PRMerge(requestFor(cmd, req))
+	if err != nil {
+		return err
+	}
+	if err := og.ValidatePRMergeResponse(resp, index); err != nil {
+		return err
+	}
+	if jsonFlag(cmd) {
+		return printJSON(cmd, ogPRMergeJSON{Project: alias, Merge: *resp.Merge})
+	}
+	if alias != "" {
+		cmd.Printf("Project %s:\n", alias)
+	}
+	cmd.Printf("PR #%d merge approval: %s\n", resp.Merge.Snapshot.PRNumber, resp.Merge.Status)
+	cmd.Printf("  Action: %s\n", resp.Merge.ActionID)
+	if resp.Merge.InboxURL != "" {
+		cmd.Printf("  Impri inbox: %s\n", resp.Merge.InboxURL)
+	}
+	if resp.Merge.Detail != "" {
+		cmd.Printf("  %s\n", resp.Merge.Detail)
+	}
+	return nil
 }
 
 func optionalPRID(cmd *cobra.Command) (int64, error) {

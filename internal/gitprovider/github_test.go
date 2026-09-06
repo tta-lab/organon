@@ -70,6 +70,32 @@ func TestGitHubProviderEditPRSendsEmptyBody(t *testing.T) {
 	}
 }
 
+func TestGitHubProviderMergePRUsesSquashAndExpectedSHA(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/repos/o/r/pulls/7/merge" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"merged":true,"sha":"merge-sha"}`))
+	}))
+	t.Cleanup(server.Close)
+	baseURL := server.URL + "/"
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &GitHubProvider{client: client}
+	if err := provider.MergePullRequest("o", "r", 7, "head-sha"); err != nil {
+		t.Fatalf("MergePullRequest: %v", err)
+	}
+	if got["merge_method"] != "squash" || got["sha"] != "head-sha" {
+		t.Fatalf("merge request = %#v", got)
+	}
+}
+
 const testGitHubBaseBranch = "main"
 
 func TestNewGitHubProviderWithTokenDoesNotUseAmbientToken(t *testing.T) {

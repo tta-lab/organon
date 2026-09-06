@@ -255,17 +255,18 @@ func fromProviderPR(pr *gitprovider.PullRequest) *PullRequest {
 		return nil
 	}
 	return &PullRequest{
-		Index:   pr.Index,
-		Number:  pr.Index,
-		Title:   pr.Title,
-		State:   pr.State,
-		Merged:  pr.Merged,
-		URL:     pr.HTMLURL,
-		HTMLURL: pr.HTMLURL,
-		Head:    pr.Head,
-		Base:    pr.Base,
-		Body:    pr.Body,
-		SHA:     pr.HeadSHA,
+		Index:     pr.Index,
+		Number:    pr.Index,
+		Title:     pr.Title,
+		State:     pr.State,
+		Merged:    pr.Merged,
+		URL:       pr.HTMLURL,
+		HTMLURL:   pr.HTMLURL,
+		Head:      pr.Head,
+		Base:      pr.Base,
+		Body:      pr.Body,
+		SHA:       pr.HeadSHA,
+		Mergeable: pr.Mergeable,
 	}
 }
 
