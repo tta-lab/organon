@@ -495,7 +495,7 @@ func TestPRMergeCreateReceiptFollowupOutagePreservesRecoveryIdentity(t *testing.
 	}
 }
 
-func TestPRMergeCreateIdempotentResponseUsesCanonicalGETAndResumeDoesNotCreateAgain(t *testing.T) {
+func TestPRMergeCreateIdempotentResponseUsesCanonicalGETAndResumeDoesNotCreateAgain(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
@@ -510,10 +510,10 @@ func TestPRMergeCreateIdempotentResponseUsesCanonicalGETAndResumeDoesNotCreateAg
 				t.Fatal(err)
 			}
 			payload = body["payload"]
-			writeMergeAction(t, w, "act-idempotent", PRMergeStatusPending, payload)
+			writeMergeActionWithoutInbox(t, w, "act-idempotent", PRMergeStatusPending, payload)
 		case r.URL.Path == "/v1/actions/act-idempotent" && r.Method == http.MethodGet:
 			gets.Add(1)
-			writeMergeAction(t, w, "act-idempotent", PRMergeStatusPending, payload)
+			writeMergeActionWithoutInbox(t, w, "act-idempotent", PRMergeStatusPending, payload)
 		default:
 			http.NotFound(w, r)
 		}
@@ -535,6 +535,10 @@ func TestPRMergeCreateIdempotentResponseUsesCanonicalGETAndResumeDoesNotCreateAg
 	})
 	if err != nil || resumed.Merge == nil || resumed.Merge.Status != PRMergeStatusPending {
 		t.Fatalf("resumed response = %+v, err = %v", resumed, err)
+	}
+	if created.Merge.InboxURL != server.URL+"/actions" || resumed.Merge.InboxURL != server.URL+"/actions" {
+		t.Fatalf("inbox URLs = %q, %q; want client fallback %q", created.Merge.InboxURL,
+			resumed.Merge.InboxURL, server.URL+"/actions")
 	}
 	if posts.Load() != 1 || gets.Load() != 2 {
 		t.Fatalf("POSTs = %d, GETs = %d, want one create and two canonical reads", posts.Load(), gets.Load())
@@ -1074,5 +1078,24 @@ func writeMergeActionWithFields(t *testing.T, w http.ResponseWriter, id, kind, s
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id": id, "kind": kind, "status": status, "inbox_url": "http://impri.example/actions",
 		"target_url": target, "payload": payload,
+	})
+}
+
+func writeMergeActionWithoutInbox(t *testing.T, w http.ResponseWriter, id, status string, payload any) {
+	t.Helper()
+	target := "https://github.com/tta-lab/organon/pull/7"
+	if values, ok := payload.(map[string]any); ok {
+		if value, ok := values["pr_url"].(string); ok && value != "" {
+			target = value
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"color": "blue", "created_at": "2026-09-06T00:00:00Z", "editable": true,
+		"expires_at": "2026-09-06T00:05:00Z", "id": id, "idempotency_key": "idempotent-key",
+		"kind": PRMergeKind, "payload": payload,
+		"preview": map[string]any{"format": "markdown", "body": "preview"},
+		"status":  status, "target_url": target, "title": "merge",
+		"updated_at": "2026-09-06T00:00:00Z",
 	})
 }

@@ -123,9 +123,6 @@ func validateImpriCreateReceipt(receipt impriCreateReceipt) error {
 	if !validImpriActionStatus(receipt.Status) {
 		return fmt.Errorf("impri create response has invalid action status %q", receipt.Status)
 	}
-	if strings.TrimSpace(receipt.InboxURL) == "" {
-		return fmt.Errorf("impri create response is missing a valid inbox URL")
-	}
 	return nil
 }
 

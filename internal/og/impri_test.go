@@ -181,9 +181,12 @@ func TestImpriCreateActionReadsReceiptThenCanonicalAction(t *testing.T) { //noli
 						})
 					} else {
 						_ = json.NewEncoder(w).Encode(map[string]any{
-							"id": "act-receipt", "kind": PRMergeKind, "status": PRMergeStatusPending,
-							"inbox_url": "https://impri.example/actions", "target_url": payload["pr_url"],
-							"payload": payload,
+							"color": "blue", "created_at": "2026-09-06T00:00:00Z", "editable": true,
+							"expires_at": "2026-09-06T00:05:00Z", "id": "act-receipt",
+							"idempotency_key": "key", "kind": PRMergeKind, "payload": payload,
+							"preview": map[string]any{"format": "markdown", "body": "preview"},
+							"status":  PRMergeStatusPending, "target_url": payload["pr_url"],
+							"title": "merge", "updated_at": "2026-09-06T00:00:00Z",
 						})
 					}
 				case r.URL.Path == "/v1/actions/act-receipt" && r.Method == http.MethodGet:
@@ -227,7 +230,7 @@ func TestImpriCreateActionRejectsMalformedReceiptBeforeGET(t *testing.T) {
 	}{
 		{name: "missing id", mutate: func(receipt map[string]any) { delete(receipt, "id") }},
 		{name: "invalid status", mutate: func(receipt map[string]any) { receipt["status"] = "unknown" }},
-		{name: "missing inbox", mutate: func(receipt map[string]any) { delete(receipt, "inbox_url") }},
+		{name: "missing status", mutate: func(receipt map[string]any) { delete(receipt, "status") }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			receipt := map[string]any{
