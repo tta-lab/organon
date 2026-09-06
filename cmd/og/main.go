@@ -71,6 +71,19 @@ func newPRCmd() *cobra.Command {
 	cmd.AddCommand(newPRChecksCmd(cmdStatus, "Show pull request status"))
 	cmd.AddCommand(newPRFailuresCmd("failures"))
 	cmd.AddCommand(newPRLogCmd())
+	cmd.AddCommand(newPRMergeCmd())
+	return cmd
+}
+
+func newPRMergeCmd() *cobra.Command {
+	cmd := newRunnableCmd("merge", "Approval-gated squash merge", runPRMerge)
+	cmd.Long = "Submit a pull-request snapshot to Impri and execute only after web approval. " +
+		"Use --dry-run for the non-destructive mock merge; --wait polls until the decision or timeout."
+	cmd.Flags().String("pr-id", "", "PR number override")
+	cmd.Flags().Bool("dry-run", false, "approve and record a mock merge without changing the forge")
+	cmd.Flags().Bool("wait", false, "wait for the Impri approval decision")
+	cmd.Flags().Duration("timeout", 0, "maximum wait duration (defaults to 30s with --wait)")
+	cmd.Flags().Bool("json", false, "Output the structured approval result as JSON")
 	return cmd
 }
 

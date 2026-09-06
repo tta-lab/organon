@@ -61,6 +61,35 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
+The approval-gated merge domain operation is the only supported merge operation;
+its adapters are typed MCP (the agent default) and the structured-flag CLI.
+Both adapters call the same Impri gate, and neither accepts an Impri API key or
+bypasses web approval with GitHub, Forgejo, `gh`, or raw API tooling.
+
+Agents must treat `PRMergeResult` as the merge feedback contract. Every retry
+is the same `pr_merge` request with the exact `project`, PR ID, and mode; the
+returned `action_id` is informational for audit and the web inbox, never an
+input. Surface `inbox_url` for `status=pending` and wait. For an approved
+temporary failure or local `status=unavailable` (approval state unknown; no
+forge call), use `next_action=retry_same_request` and repeat that request
+without new approval. `status=executed` is complete; rejected, expired, and
+`execute_failed` are terminal and require new approval for another attempt.
+If a deterministic `execute_failed` receipt could not be recorded, the result
+stays approved and `retry_same_request` revalidates/reports it. An executed
+result with `receipt_error` uses `next_action=repair_receipt`: repeat the same
+request only to repair the receipt; it must not merge again. Follow
+`next_action`, `completion`, and `detail` as the machine/readable contract and
+consider the operation complete only when executed has no receipt error. Impri
+provider/API availability failures remain approved and retryable. For real
+execution, CI state `success` or `not_configured` permits the forge gate;
+`pending` is retryable, `failure`/`error` is terminal, and unknown or
+unverifiable state fails closed.
+
+The CLI/MCP transport boundary and its rationale are authoritative in the
+README guidance. `og pull` remains the separate branch/worktree cleanup step.
+Telegram, webhooks, a daemon, and Impri key provisioning or rotation are
+outside this version.
+
 ## Testing
 
 Fixture files live in `testdata/`. Tests include both unit tests and CLI integration tests.

@@ -4,9 +4,28 @@ Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
 contains registry- and URL-based clone, pull request inspection/commenting,
-guarded push/pull/tag, and auth operations. Merge is intentionally out of
-scope. Pull-request creation and modification are available only through the
-typed MCP `pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
+creation and modification are available only through the typed MCP
+`pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions; merge also
+has a CLI adapter because it accepts only structured scalar flags. Agents should
+default to typed MCP, and both merge adapters use the same Impri gate.
+
+Merge is squash-only and always goes through Impri. Configure the optional
+`[impri]` section in `~/.config/ttal/og.toml` with `base_url` and `api_key`.
+`og pr merge --dry-run` creates a non-destructive approval card, prints its
+inbox URL, and records a mock execution only after a web approval. Use
+`--wait --timeout 30s`; repeat the same project, PR, and mode request to recover
+the idempotent action. The returned action ID is audit/web identification only.
+Real
+merges use the same gate and recheck the PR, CI, and head SHA immediately
+before the forge call; CI must be `success` or explicit `not_configured`.
+Rejection, expiry, timeout, and execution failure leave
+the PR untouched. Temporary provider/API failures keep the approved action
+retryable; repeat the same request. If Impri approval state cannot be read, the
+outcome is `unavailable` and no forge call was made; repeat the same request.
+`og pull` remains the separate step for
+closed-PR branch and worktree cleanup. Impri configuration is read only from this `og.toml`; no
+`IMPRI_*` environment-variable fallback or second config file exists.
 
 `og clone <project-reference>` clones the registered remote to the registered
 path. A project reference is a case-insensitive canonical alias, checkout

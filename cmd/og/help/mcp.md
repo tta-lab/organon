@@ -29,6 +29,7 @@ Tools:
   pr_checks               # inspect pull request checks
   pr_log                  # inspect CI state and failure log tail
   pr_failures             # inspect failing checks and log tails
+  pr_merge                # submit an Impri approval-gated squash merge
 
 Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
 CLI behavior and operate on the current named branch at the path registered for
@@ -42,7 +43,27 @@ the known default branch; push, tag, PR mutation/comment, and branch cleanup are
 blocked. Registry additions are visible on the next tool call without
 restarting this MCP process.
 
-Tag, merge, and raw provider access are not exposed.
+`pr_merge` is destructive and always requires an Impri web decision. Its input
+contains only the project, optional PR ID, dry-run flag,
+and wait/timeout controls; it never accepts an API key. The structured result
+contains the immutable approved snapshot, action ID, status, and inbox URL; the
+action ID is informational for audit/web identification, not an input.
+Agents must show that URL and wait for approval rather than invoking forge
+tooling directly. Follow the structured `next_action` and `completion` fields:
+pending waits, an approved temporary failure repeats the same request,
+executed is complete, an `unavailable` result means Impri state is unknown and
+the same request retries without a forge call, terminal rejection/expiry/failure
+needs new approval, and `receipt_error` retries only to repair the receipt. If
+an execute_failed receipt write fails, the result remains approved and repetition
+revalidates/reports it. Real mode is
+squash-only and permits CI state `success` or `not_configured`; pending remains
+retryable and unknown/unverifiable CI fails closed. The CLI also supports merge because
+its flags are short scalars; create/modify remain typed MCP/Pi-only to avoid
+multiline shell quoting ambiguity, and both merge adapters share this gate.
+
+Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,
+API-key provisioning/rotation, and branch/worktree cleanup are outside this
+version; `og pull` remains the separate cleanup step.
 
 Example MCP client configuration:
 

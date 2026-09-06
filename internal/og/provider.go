@@ -143,16 +143,19 @@ func commentPR(ctx *repoContext, index int64, body string) (*Comment, error) {
 	}, nil
 }
 
-func getChecks(ctx *repoContext, pr *PullRequest) ([]string, error) {
+func getChecks(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, []string, error) {
 	status, err := getCIStatus(ctx, pr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	lines := []string{"combined: " + status.State}
+	if status.State == gitprovider.StateNotConfigured {
+		lines = append(lines, ciNotConfiguredMessage)
+	}
 	for _, s := range status.Statuses {
 		lines = append(lines, fmt.Sprintf("%s: %s - %s", s.Context, s.State, s.Description))
 	}
-	return lines, nil
+	return status, lines, nil
 }
 
 func getCIStatus(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, error) {
@@ -167,6 +170,9 @@ func getCIStatus(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, error) {
 	status, err := provider.GetCombinedStatus(ctx.Owner, ctx.Repo, sha)
 	if err != nil {
 		return nil, err
+	}
+	if status == nil {
+		return nil, fmt.Errorf("provider returned no CI status")
 	}
 	statuses := make([]CIStatus, 0, len(status.Statuses))
 	for _, s := range status.Statuses {
@@ -255,17 +261,18 @@ func fromProviderPR(pr *gitprovider.PullRequest) *PullRequest {
 		return nil
 	}
 	return &PullRequest{
-		Index:   pr.Index,
-		Number:  pr.Index,
-		Title:   pr.Title,
-		State:   pr.State,
-		Merged:  pr.Merged,
-		URL:     pr.HTMLURL,
-		HTMLURL: pr.HTMLURL,
-		Head:    pr.Head,
-		Base:    pr.Base,
-		Body:    pr.Body,
-		SHA:     pr.HeadSHA,
+		Index:     pr.Index,
+		Number:    pr.Index,
+		Title:     pr.Title,
+		State:     pr.State,
+		Merged:    pr.Merged,
+		URL:       pr.HTMLURL,
+		HTMLURL:   pr.HTMLURL,
+		Head:      pr.Head,
+		Base:      pr.Base,
+		Body:      pr.Body,
+		SHA:       pr.HeadSHA,
+		Mergeable: pr.Mergeable,
 	}
 }
 

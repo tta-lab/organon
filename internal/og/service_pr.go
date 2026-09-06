@@ -149,10 +149,11 @@ func (s Service) PRChecks(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	lines, err := getChecks(ctx, pr)
+	ci, lines, err := getChecks(ctx, pr)
 	if err != nil {
 		return Response{}, err
 	}
+	pr.CI = ci
 	if len(lines) == 0 {
 		lines = []string{"No checks found."}
 	}
@@ -254,12 +255,17 @@ func stringValue(value *string) string {
 	return *value
 }
 
+const ciNotConfiguredMessage = "CI is not configured for this commit; merge policy allows proceeding without checks"
+
 func formatCIStatusLines(sha string, ci *CIStatusResponse) []string {
 	shortSHA := sha
 	if len(shortSHA) > 8 {
 		shortSHA = shortSHA[:8]
 	}
 	lines := []string{"CI Status for " + shortSHA + ": " + formatCIState(ci.State)}
+	if ci.State == gitprovider.StateNotConfigured {
+		lines = append(lines, "  "+ciNotConfiguredMessage)
+	}
 	if len(ci.Statuses) == 0 {
 		return append(lines, "  No checks found.")
 	}

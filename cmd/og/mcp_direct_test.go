@@ -82,13 +82,246 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 	sort.Strings(gotNames)
 	wantNames := []string{
 		"auth_status", "clone", "pr_checks", "pr_comment", "pr_create", "pr_failures",
-		"pr_find", "pr_get", "pr_log", "pr_modify", "pull", "push",
+		"pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify", "pull", "push",
 	}
 	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
 		t.Fatalf("tools = %v, want %v", gotNames, wantNames)
 	}
 
 	assertDirectMCPToolCalls(t, session, &requests)
+}
+
+func TestOGMCPPRChecksExposeNotConfiguredStateAndPolicyMessage(t *testing.T) {
+	response := og.Response{
+		PR: &og.PullRequest{
+			Index: 7,
+			CI:    &og.CIStatusResponse{State: "not_configured", Statuses: []og.CIStatus{}},
+		},
+		Lines: []string{
+			"combined: not_configured",
+			"CI is not configured for this commit; merge policy allows proceeding without checks",
+		},
+	}
+	executor := &directExecutor{prChecks: func(req og.Request) (og.Response, error) {
+		return response, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_checks", Arguments: map[string]any{"project": "ko", "pr_id": 7},
+	})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("MCP checks result = %#v, err = %v", result, err)
+	}
+	data, marshalErr := json.Marshal(result.StructuredContent)
+	if marshalErr != nil || !strings.Contains(string(data), `"state":"not_configured"`) ||
+		!strings.Contains(string(data),
+			"CI is not configured for this commit; merge policy allows proceeding without checks") {
+		t.Fatalf("MCP checks structured result = %s, err = %v", data, marshalErr)
+	}
+}
+
+func TestOGMCPPRMergeIsDestructiveAndKeepsActionIDOutputOnly(t *testing.T) { //nolint:gocyclo
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		if req.Index != 7 || !req.DryRun {
+			t.Fatalf("merge request = %+v", req)
+		}
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-1", Status: og.PRMergeStatusPending,
+			InboxURL: "http://impri.example/actions",
+			Snapshot: og.PRMergeSnapshot{
+				PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeDryRun,
+			},
+			NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and repeat the same project, PR, and mode " +
+				"request after Impri records approved or rejected",
+		}}, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	list, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mergeTool *mcp.Tool
+	for _, tool := range list.Tools {
+		if tool.Name == "pr_merge" {
+			mergeTool = tool
+			break
+		}
+	}
+	if mergeTool == nil || mergeTool.Annotations == nil || mergeTool.Annotations.DestructiveHint == nil ||
+		!*mergeTool.Annotations.DestructiveHint || mergeTool.Annotations.ReadOnlyHint {
+		t.Fatalf("pr_merge tool annotations = %+v", mergeTool)
+	}
+	schema, ok := mergeTool.InputSchema.(map[string]any)
+	if !ok {
+		t.Fatalf("input schema type = %T", mergeTool.InputSchema)
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if _, exists := properties["api_key"]; exists {
+		t.Fatal("pr_merge schema accepts an API key")
+	}
+	if _, exists := properties["action_id"]; exists {
+		t.Fatal("pr_merge schema accepts an action ID input")
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{
+			"project": "ko", "pr_id": 7, "dry_run": true,
+		},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("pr_merge result = %#v, err = %v", result, err)
+	}
+	data, _ := json.Marshal(result.StructuredContent)
+	if !strings.Contains(string(data), "act-1") || !strings.Contains(string(data), "inbox_url") ||
+		!strings.Contains(string(data), "wait_for_approval") || !strings.Contains(string(data), "completion") {
+		t.Fatalf("structured result = %s", data)
+	}
+}
+
+func TestOGMCPPRMergeRetryableErrorKeepsStructuredRecoveryOutcome(t *testing.T) {
+	merge := og.PRMergeResult{
+		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "repeat the same project, PR, and mode request after the temporary " +
+			"failure; execution completes only when status is executed",
+		Snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeReal,
+		},
+		Detail: "impri action remains approved; repeat the same request: provider unavailable",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{"project": "ko", "pr_id": 7},
+	})
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("retryable MCP result = %#v, err = %v", result, err)
+	}
+	data, marshalErr := json.Marshal(result.StructuredContent)
+	if marshalErr != nil || !strings.Contains(string(data), `"status":"approved"`) ||
+		!strings.Contains(string(data), `"retryable":true`) ||
+		!strings.Contains(string(data), `"next_action":"retry_same_request"`) ||
+		!strings.Contains(string(data), "act-retry") {
+		t.Fatalf("retryable structured result = %s, err = %v", data, marshalErr)
+	}
+}
+
+func TestOGMCPPRMergeUsesSharedTimeoutNormalization(t *testing.T) {
+	var got og.Request
+	calls := 0
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		calls++
+		got = req
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-timeout", Status: og.PRMergeStatusPending,
+			InboxURL:   "http://impri.example/actions",
+			Snapshot:   og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+			NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and repeat the same project, PR, and mode " +
+				"request after Impri records approved or rejected",
+		}}, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{
+			"project": "ko", "pr_id": 7, "wait": true, "timeout_seconds": 0,
+		},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("zero timeout result = %#v, err = %v", result, err)
+	}
+	if got.Timeout != og.DefaultPRMergeTimeout {
+		t.Fatalf("MCP timeout = %s, want %s", got.Timeout, og.DefaultPRMergeTimeout)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{
+			"project": "ko", "pr_id": 7, "wait": true, "timeout_seconds": -1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || calls != 1 {
+		t.Fatalf("negative timeout result = %#v, calls = %d, want schema error without execution", result, calls)
+	}
+}
+
+func TestOGMCPPRMergeUnavailableOutcomesKeepStructuredRecoveryContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot og.PRMergeSnapshot
+	}{
+		{name: "approval read"},
+		{name: "wait poll", snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			merge := og.PRMergeResult{
+				ActionID: "act-unavailable", Status: og.PRMergeStatusUnavailable,
+				InboxURL: "http://impri.example/actions", Snapshot: tc.snapshot,
+				Retryable: true, NextAction: og.PRMergeNextRetry,
+				Completion: "repeat the same project, PR, and mode request when Impri approval " +
+					"state is available; completion requires a known Impri status",
+				Detail: "Impri approval state is temporarily unavailable; no forge call was made; repeat the same request",
+			}
+			executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+				return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+			}}
+			session := connectDirectMCP(t, executor, testProjectStore(t))
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "pr_merge", Arguments: map[string]any{
+					"project": "ko", "pr_id": 7, "wait": tc.name == "wait poll",
+				},
+			})
+			if err != nil || result == nil || !result.IsError {
+				t.Fatalf("result = %#v, err = %v, want structured MCP error", result, err)
+			}
+			data, marshalErr := json.Marshal(result.StructuredContent)
+			if marshalErr != nil || !strings.Contains(string(data), `"status":"unavailable"`) ||
+				!strings.Contains(string(data), `"retryable":true`) ||
+				!strings.Contains(string(data), `"next_action":"retry_same_request"`) ||
+				!strings.Contains(string(data), "no forge call was made") {
+				t.Fatalf("structured result = %s, err = %v", data, marshalErr)
+			}
+		})
+	}
+}
+
+func TestOGMCPPRMergeFailedReceiptKeepsApprovedStructuredOutcome(t *testing.T) {
+	merge := og.PRMergeResult{
+		ActionID: "act-failed-receipt", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "repeat the same request to revalidate and record the deterministic " +
+			"execute_failed result; completion is confirmed when Impri reports execute_failed",
+		Snapshot: og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+		Detail: "impri action act-failed-receipt remains approved; repeat the same request: " +
+			"deterministic execution failure could not be recorded in Impri; " +
+			"repeat the same request to revalidate and report it",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "pr_merge", Arguments: map[string]any{
+			"project": "ko", "pr_id": 7,
+		},
+	})
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("result = %#v, err = %v, want structured receipt-retry error", result, err)
+	}
+	data, marshalErr := json.Marshal(result.StructuredContent)
+	if marshalErr != nil || !strings.Contains(string(data), `"status":"approved"`) ||
+		!strings.Contains(string(data), `"next_action":"retry_same_request"`) ||
+		!strings.Contains(string(data), "could not be recorded") ||
+		strings.Contains(string(data), "repair_receipt") || strings.Contains(string(data), "receipt_error") {
+		t.Fatalf("structured result = %s, err = %v", data, marshalErr)
+	}
 }
 
 func assertDirectMCPToolCalls(t *testing.T, session *mcp.ClientSession, requests *[]og.Request) {

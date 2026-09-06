@@ -16,5 +16,6 @@ type Executor interface {
 	PRChecks(Request) (Response, error)
 	PRLog(Request) (Response, error)
 	PRFailures(Request) (Response, error)
+	PRMerge(Request) (Response, error)
 	AuthStatus(Request) (Response, error)
 }

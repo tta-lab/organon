@@ -13,9 +13,10 @@ import (
 
 // Service owns configured dependencies shared across direct operations.
 type Service struct {
-	githubBroker githubapp.CredentialBroker
-	projects     *project.Store
-	config       ogconfig.Config
+	githubBroker        githubapp.CredentialBroker
+	projects            *project.Store
+	config              ogconfig.Config
+	dryRunMergeExecutor DryRunMergeExecutor
 }
 
 // NewService constructs a service with the default project registry. A nil broker

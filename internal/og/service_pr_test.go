@@ -789,6 +789,44 @@ func TestExplicitPROperationsValidateIDsAndReturnPRIdentity(t *testing.T) {
 	}
 }
 
+func TestPRChecksExposesNotConfiguredStateAndPolicyMessage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{
+			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
+				return &gitprovider.PullRequest{Index: index, HeadSHA: "abc123"}, nil
+			},
+			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
+				return &gitprovider.CombinedStatus{
+					State:    gitprovider.StateNotConfigured,
+					Statuses: []*gitprovider.CommitStatus{},
+				}, nil
+			},
+		}, nil
+	})
+	t.Cleanup(restoreProvider)
+
+	resp, err := (Service{}).PRChecks(Request{WorkDir: repo, Index: 12})
+	if err != nil {
+		t.Fatalf("PRChecks: %v", err)
+	}
+	if resp.PR == nil || resp.PR.CI == nil || resp.PR.CI.State != gitprovider.StateNotConfigured ||
+		resp.PR.CI.Statuses == nil || len(resp.PR.CI.Statuses) != 0 {
+		t.Fatalf("structured CI result = %+v, want not_configured with empty statuses", resp.PR)
+	}
+	lines := strings.Join(resp.Lines, "\n")
+	for _, want := range []string{
+		"combined: not_configured",
+		"CI is not configured for this commit; merge policy allows proceeding without checks",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("PRChecks lines = %q, want %q", lines, want)
+		}
+	}
+}
+
 func TestExplicitPRChecksRejectInvalidProviderSnapshotBeforeCI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -848,6 +886,7 @@ type fakeProvider struct {
 	findPRByState       func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
 	editPR              func(owner, repo string, index int64, title, body string) (*gitprovider.PullRequest, error)
 	getPR               func(owner, repo string, index int64) (*gitprovider.PullRequest, error)
+	mergePR             func(owner, repo string, index int64, headSHA string) error
 	createComment       func(owner, repo string, index int64, body string) (*gitprovider.Comment, error)
 	getCombinedStatus   func(owner, repo, ref string) (*gitprovider.CombinedStatus, error)
 	getCIFailureDetails func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error)
@@ -877,6 +916,13 @@ func (p fakeProvider) EditPR(owner, repo string, index int64, title, body string
 func (p fakeProvider) GetPR(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
 	if p.getPR != nil {
 		return p.getPR(owner, repo, index)
+	}
+	panic("not implemented")
+}
+
+func (p fakeProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
+	if p.mergePR != nil {
+		return p.mergePR(owner, repo, index, headSHA)
 	}
 	panic("not implemented")
 }

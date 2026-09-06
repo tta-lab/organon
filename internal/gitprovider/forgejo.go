@@ -1,8 +1,11 @@
 package gitprovider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -13,6 +16,8 @@ type ForgejoProvider struct {
 	client *forgejo_sdk.Client
 	ctx    context.Context
 }
+
+const forgejoCombinedStatusShapeHeader = "X-Organon-Forgejo-Combined-Status-Shape"
 
 func NewForgejoProvider(ctx context.Context, host string) (Provider, error) {
 	token := os.Getenv("FORGEJO_TOKEN")
@@ -42,10 +47,12 @@ func NewForgejoProviderWithToken(ctx context.Context, host, token string) (Provi
 		url = "https://" + host
 	}
 
+	httpClient := newContextHTTPClient(ctx, nil)
+	httpClient.Transport = forgejoCombinedStatusTransport{base: httpClient.Transport}
 	client, err := forgejo_sdk.NewClient(
 		url,
 		forgejo_sdk.SetToken(token),
-		forgejo_sdk.SetHTTPClient(newContextHTTPClient(ctx, nil)),
+		forgejo_sdk.SetHTTPClient(httpClient),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Forgejo client: %w", err)
@@ -112,6 +119,24 @@ func (p *ForgejoProvider) GetPR(owner, repo string, index int64) (*PullRequest, 
 	return toPullRequest(pr), nil
 }
 
+// MergePullRequest performs a squash merge guarded by the expected head SHA.
+// Branch deletion remains disabled; cleanup is a separate og pull operation.
+func (p *ForgejoProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
+	merged, _, err := p.client.MergePullRequest(owner, repo, index, forgejo_sdk.MergePullRequestOption{
+		Style:                  forgejo_sdk.MergeStyleSquash,
+		HeadCommitId:           headSHA,
+		DeleteBranchAfterMerge: false,
+		ForceMerge:             false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to squash merge PR #%d: %w", index, err)
+	}
+	if !merged {
+		return fmt.Errorf("failed to squash merge PR #%d: provider did not merge pull request", index)
+	}
+	return nil
+}
+
 func (p *ForgejoProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
 	comment, _, err := p.client.CreateIssueComment(owner, repo, index, forgejo_sdk.CreateIssueCommentOption{
 		Body: body,
@@ -140,16 +165,43 @@ func (p *ForgejoProvider) ListComments(owner, repo string, index int64) ([]*Comm
 }
 
 func (p *ForgejoProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error) {
-	cs, _, err := p.client.GetCombinedStatus(owner, repo, ref)
+	cs, response, err := p.client.GetCombinedStatus(owner, repo, ref)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commit status: %w", err)
 	}
+	if response != nil && response.Response != nil {
+		shape := response.Header.Get(forgejoCombinedStatusShapeHeader)
+		if shape == "null" || shape == "empty" {
+			return nil, fmt.Errorf("failed to get commit status: malformed %s response", shape)
+		}
+	}
+	return normalizeForgejoCombinedStatus(cs)
+}
+
+func normalizeForgejoCombinedStatus(cs *forgejo_sdk.CombinedStatus) (*CombinedStatus, error) {
 	if cs == nil {
-		return &CombinedStatus{State: "unknown"}, nil
+		return nil, fmt.Errorf("failed to get commit status: empty response")
+	}
+	total := cs.TotalCount
+	count := len(cs.Statuses)
+	if total < 0 {
+		return nil, fmt.Errorf("failed to get commit status: invalid total count %d", total)
+	}
+	if total != count {
+		return nil, fmt.Errorf("failed to get commit status: total count %d does not match %d statuses", total, count)
+	}
+	if total == 0 {
+		return notConfiguredCombinedStatus(), nil
+	}
+	if strings.TrimSpace(string(cs.State)) == "" {
+		return nil, fmt.Errorf("failed to get commit status: malformed response with statuses but no state")
 	}
 
-	statuses := make([]*CommitStatus, len(cs.Statuses))
+	statuses := make([]*CommitStatus, count)
 	for i, s := range cs.Statuses {
+		if s == nil {
+			return nil, fmt.Errorf("failed to get commit status: response contains a nil status")
+		}
 		statuses[i] = &CommitStatus{
 			Context:     s.Context,
 			State:       string(s.State),
@@ -162,6 +214,38 @@ func (p *ForgejoProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedS
 		State:    string(cs.State),
 		Statuses: statuses,
 	}, nil
+}
+
+type forgejoCombinedStatusTransport struct {
+	base http.RoundTripper
+}
+
+func (t forgejoCombinedStatusTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	response, err := base.RoundTrip(req)
+	if err != nil || response == nil || response.StatusCode/100 != 2 ||
+		!strings.Contains(req.URL.Path, "/commits/") || !strings.HasSuffix(req.URL.Path, "/status") {
+		return response, err
+	}
+	body, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	response.ContentLength = int64(len(body))
+	if response.Header == nil {
+		response.Header = make(http.Header)
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 {
+		response.Header.Set(forgejoCombinedStatusShapeHeader, "empty")
+	} else if bytes.Equal(trimmed, []byte("null")) {
+		response.Header.Set(forgejoCombinedStatusShapeHeader, "null")
+	}
+	return response, nil
 }
 
 // GetCIFailureDetails fetches CI failure details via Woodpecker CI API.

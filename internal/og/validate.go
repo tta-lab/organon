@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tta-lab/organon/internal/project"
 )
@@ -82,6 +83,31 @@ func ValidatePRLogTail(tail int) error {
 	return nil
 }
 
+// NormalizePRMergeRequest validates transport-independent merge arguments and
+// applies their shared defaults. The normalized request is what every adapter
+// and the service must execute.
+func NormalizePRMergeRequest(req Request) (Request, error) {
+	if req.Index < 0 {
+		return Request{}, fmt.Errorf("PR ID must not be negative")
+	}
+	if req.Timeout < 0 {
+		return Request{}, fmt.Errorf("merge timeout must not be negative")
+	}
+	if req.Wait && req.Timeout > 24*time.Hour {
+		return Request{}, fmt.Errorf("merge timeout must not exceed 24h")
+	}
+	if req.Wait && req.Timeout == 0 {
+		req.Timeout = DefaultPRMergeTimeout
+	}
+	return req, nil
+}
+
+// ValidatePRMergeRequest checks transport-independent merge arguments.
+func ValidatePRMergeRequest(req Request) error {
+	_, err := NormalizePRMergeRequest(req)
+	return err
+}
+
 // Response validators shared by the CLI, MCP, and Pi extension adapters so
 // result contracts are enforced in one place. Message texts are part of the
 // adapter contract and are asserted by both the CLI and MCP tests.
@@ -149,6 +175,76 @@ func ValidateCommentResponse(resp Response, expectedPRID int64, expectedBody str
 func ValidateMessageResponse(resp Response) error {
 	if strings.TrimSpace(resp.Message) == "" {
 		return fmt.Errorf("og returned no operation result")
+	}
+	return nil
+}
+
+// ValidatePRMergeResponse requires the stable approval-gated merge shape.
+func ValidatePRMergeResponse(resp Response, expectedID int64) error {
+	if resp.Merge == nil {
+		return fmt.Errorf("og returned no pull request merge result")
+	}
+	merge := resp.Merge
+	if strings.TrimSpace(merge.ActionID) == "" {
+		return fmt.Errorf("og returned an invalid pull request merge result")
+	}
+	switch merge.Status {
+	case PRMergeStatusPending, PRMergeStatusApproved, PRMergeStatusRejected,
+		PRMergeStatusExpired, PRMergeStatusExecuted, PRMergeStatusExecuteFailed,
+		PRMergeStatusUnavailable:
+	default:
+		return fmt.Errorf("og returned invalid pull request merge status %q", merge.Status)
+	}
+	if merge.Status != PRMergeStatusUnavailable || merge.Snapshot.PRNumber != 0 {
+		if merge.Snapshot.PRNumber <= 0 || strings.TrimSpace(merge.Snapshot.PRURL) == "" {
+			return fmt.Errorf("og returned an invalid pull request merge result")
+		}
+		if expectedID > 0 && merge.Snapshot.PRNumber != expectedID {
+			return fmt.Errorf("og returned PR ID %d, want %d", merge.Snapshot.PRNumber, expectedID)
+		}
+	}
+	if merge.InboxURL == "" {
+		return fmt.Errorf("og returned pull request merge result without inbox URL")
+	}
+	if strings.TrimSpace(merge.NextAction) == "" || strings.TrimSpace(merge.Completion) == "" {
+		return fmt.Errorf("og returned pull request merge result without recovery instructions")
+	}
+	return validatePRMergeOutcome(*merge)
+}
+
+func validatePRMergeOutcome(merge PRMergeResult) error { //nolint:gocyclo
+	switch merge.Status {
+	case PRMergeStatusPending:
+		if merge.Retryable || merge.NextAction != PRMergeNextWait {
+			return fmt.Errorf("og returned an invalid pending merge recovery state")
+		}
+	case PRMergeStatusApproved:
+		if !merge.Retryable || merge.NextAction != PRMergeNextRetry {
+			return fmt.Errorf("og returned an invalid retryable merge recovery state")
+		}
+	case PRMergeStatusUnavailable:
+		if !merge.Retryable || merge.NextAction != PRMergeNextRetry {
+			return fmt.Errorf("og returned an invalid unavailable merge recovery state")
+		}
+	case PRMergeStatusRejected, PRMergeStatusExpired, PRMergeStatusExecuteFailed:
+		if merge.Retryable || merge.NextAction != PRMergeNextNewApproval {
+			return fmt.Errorf("og returned an invalid terminal merge recovery state")
+		}
+	case PRMergeStatusExecuted:
+		return validateExecutedPRMergeOutcome(merge)
+	}
+	return nil
+}
+
+func validateExecutedPRMergeOutcome(merge PRMergeResult) error {
+	if merge.ReceiptError != "" {
+		if !merge.Retryable || merge.NextAction != PRMergeNextRepairReceipt {
+			return fmt.Errorf("og returned an invalid receipt-repair merge state")
+		}
+		return nil
+	}
+	if merge.Retryable || merge.NextAction != PRMergeNextNone {
+		return fmt.Errorf("og returned an invalid completed merge state")
 	}
 	return nil
 }

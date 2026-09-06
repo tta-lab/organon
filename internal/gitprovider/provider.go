@@ -23,6 +23,9 @@ const (
 	StateSuccess = "success"
 	StateFailure = "failure"
 	StateError   = "error"
+	// StateNotConfigured means the provider successfully found no checks for
+	// the commit. It is distinct from an API error or an unknown nonempty state.
+	StateNotConfigured = "not_configured"
 )
 
 type PullRequest struct {
@@ -57,8 +60,12 @@ type CommitStatus struct {
 
 // CombinedStatus represents the overall status of all checks on a commit.
 type CombinedStatus struct {
-	State    string // Overall: "pending", "success", "error", "failure"
+	State    string // Overall: "pending", "success", "error", "failure", or "not_configured"
 	Statuses []*CommitStatus
+}
+
+func notConfiguredCombinedStatus() *CombinedStatus {
+	return &CombinedStatus{State: StateNotConfigured, Statuses: []*CommitStatus{}}
 }
 
 // JobFailure describes a single failed CI job with optional log tail.
@@ -80,6 +87,12 @@ type Provider interface {
 	ListComments(owner, repo string, index int64) ([]*Comment, error)
 	GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error)
 	GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error)
+}
+
+// PullRequestMerger is the optional write capability implemented by supported
+// forge providers. Keeping it separate preserves the read-only provider seam.
+type PullRequestMerger interface {
+	MergePullRequest(owner, repo string, index int64, headSHA string) error
 }
 
 func contextOrBackground(ctx context.Context) context.Context {

@@ -1,6 +1,8 @@
 package ogconfig
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +44,61 @@ func TestLoadAllowsMissingForgejoAndGitHubAppSections(t *testing.T) {
 	}
 	if cfg.GitHubApp != nil || len(cfg.Forgejo.AllowedBaseURLs) != 0 {
 		t.Fatalf("config = %+v, want empty optional sections", cfg)
+	}
+}
+
+func TestLoadNormalizesImpriConfigurationWithoutExposingTheKey(t *testing.T) {
+	path := writeConfig(t, `[impri]
+base_url = "HTTP://Impri.Localhost:17480/"
+api_key = "im_test_key"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Impri == nil || cfg.Impri.BaseURL != "http://impri.localhost:17480" || cfg.Impri.APIKey != "im_test_key" {
+		t.Fatalf("Impri config = %+v", cfg.Impri)
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if strings.Contains(string(encoded), "im_test_key") {
+		t.Fatalf("JSON config exposed API key: %s", encoded)
+	}
+	if rendered := fmt.Sprintf("%+v", cfg.Impri); strings.Contains(rendered, "im_test_key") {
+		t.Fatalf("formatted config exposed API key: %s", rendered)
+	}
+}
+
+func TestLoadRejectsMalformedImpriConfigurationWithoutEchoingTheKey(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"missing base URL", `[impri]
+api_key = "im_secret"
+`, "base_url"},
+		{"missing API key", `[impri]
+base_url = "http://impri.example"
+`, "api_key"},
+		{"path", `[impri]
+base_url = "http://impri.example/v1"
+api_key = "im_secret"
+`, "path"},
+		{"newline key", "[impri]\nbase_url = \"http://impri.example\"\napi_key = \"im_secret\\n\"\n", "newlines"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tt.body))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load error = %v, want %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "im_secret") {
+				t.Fatalf("Load error exposed API key: %v", err)
+			}
+		})
 	}
 }
 

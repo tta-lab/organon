@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -67,6 +69,14 @@ type ogPRTailInput struct {
 	Tail    *int   `json:"tail,omitempty" jsonschema:"optional number of log tail lines; defaults to 50"`
 }
 
+type ogPRMergeInput struct {
+	Project        string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
+	PRID           *int64 `json:"pr_id,omitempty" jsonschema:"optional positive PR ID; omitted uses current branch"`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"record a mock merge without changing the forge"`
+	Wait           bool   `json:"wait,omitempty" jsonschema:"wait for the Impri approval decision"`
+	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"wait timeout seconds; defaults to 30"`
+}
+
 type ogAuthOutput struct {
 	Project string        `json:"project"`
 	Auth    og.AuthStatus `json:"auth"`
@@ -95,6 +105,11 @@ type ogMessageOutput struct {
 
 type ogCloneOutput struct {
 	Clone og.CloneResult `json:"clone"`
+}
+
+type ogPRMergeOutput struct {
+	Project string           `json:"project"`
+	Merge   og.PRMergeResult `json:"merge"`
 }
 
 func ogBoolPointer(value bool) *bool { return &value }
@@ -133,6 +148,11 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	}
 	if reference := schema.Properties["reference"]; reference != nil {
 		reference.Default = json.RawMessage("false")
+	}
+	if timeout := schema.Properties["timeout_seconds"]; timeout != nil {
+		timeout.Minimum = jsonschema.Ptr(0.0)
+		timeout.Maximum = jsonschema.Ptr(86400.0)
+		timeout.Default = json.RawMessage("30")
 	}
 	if schema.Properties["project"] != nil && schema.Properties["url"] != nil {
 		schema.OneOf = []*jsonschema.Schema{
@@ -258,6 +278,20 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	addPRLinesTool(server, projects, "pr_log", "Inspect pull request CI log", executor.PRLog, true)
 	addPRLinesTool(server, projects, "pr_failures", "Inspect pull request failures", executor.PRFailures, true)
 
+	mcp.AddTool(server, setInputSchema[ogPRMergeInput](ogTool(
+		"pr_merge", "Approval-gated squash merge",
+		"Submit an immutable pull-request snapshot to Impri. Surface the inbox link "+
+			"and execute only after web approval; dry-run records a mock merge and "+
+			"real mode performs a squash merge. Structured outcomes route pending or "+
+			"wait-timeout to the inbox, approved temporary failures to repeating the same "+
+			"request, temporarily unavailable Impri approval state to the same retry "+
+			"without a forge call, executed to completion, terminal rejection/expiry/failure "+
+			"to a new approval, and receipt errors to receipt repair without another merge. "+
+			"If an execute_failed receipt cannot be recorded, the result stays approved and "+
+			"the same request must be repeated to revalidate and report it.",
+		false, true, true,
+	), false), prMergeHandler(projects, executor))
+
 	return server
 }
 
@@ -350,7 +384,7 @@ func callProject(
 	req.Context = ctx
 	resp, err := operation(req)
 	if err != nil {
-		return og.Response{}, "", fmt.Errorf("execute OG operation: %w", err)
+		return resp, entry.Alias, fmt.Errorf("execute OG operation: %w", err)
 	}
 	return resp, entry.Alias, nil
 }
@@ -423,6 +457,49 @@ func prCommentHandler(
 			return nil, ogCommentOutput{}, err
 		}
 		return nil, ogCommentOutput{Project: canonical, Comment: *resp.Comment}, nil
+	}
+}
+
+func prMergeHandler(
+	projects *project.Store, executor og.Executor,
+) mcp.ToolHandlerFor[ogPRMergeInput, ogPRMergeOutput] {
+	return func(
+		ctx context.Context,
+		_ *mcp.CallToolRequest,
+		input ogPRMergeInput,
+	) (*mcp.CallToolResult, ogPRMergeOutput, error) {
+		prID, err := optionalMCPPRID(input.PRID)
+		if err != nil {
+			return nil, ogPRMergeOutput{}, err
+		}
+		timeout := time.Duration(0)
+		if input.TimeoutSeconds != nil {
+			timeout = time.Duration(*input.TimeoutSeconds) * time.Second
+		}
+		req := og.Request{
+			Index: prID, DryRun: input.DryRun,
+			Wait: input.Wait, Timeout: timeout,
+		}
+		if req, err = og.NormalizePRMergeRequest(req); err != nil {
+			return nil, ogPRMergeOutput{}, err
+		}
+		resp, canonical, err := callProject(ctx, projects, input.Project, req, executor.PRMerge)
+		if err != nil {
+			var retryErr *og.PRMergeRetryableError
+			if errors.As(err, &retryErr) && resp.Merge != nil {
+				if validateErr := og.ValidatePRMergeResponse(resp, prID); validateErr != nil {
+					return nil, ogPRMergeOutput{}, validateErr
+				}
+				return &mcp.CallToolResult{IsError: true}, ogPRMergeOutput{
+					Project: canonical, Merge: *resp.Merge,
+				}, nil
+			}
+			return nil, ogPRMergeOutput{}, err
+		}
+		if err := og.ValidatePRMergeResponse(resp, prID); err != nil {
+			return nil, ogPRMergeOutput{}, err
+		}
+		return nil, ogPRMergeOutput{Project: canonical, Merge: *resp.Merge}, nil
 	}
 }
 

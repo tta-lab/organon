@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tta-lab/organon/internal/og"
 	"github.com/tta-lab/organon/internal/project"
@@ -31,6 +32,7 @@ type directExecutor struct {
 	prChecks   func(og.Request) (og.Response, error)
 	prLog      func(og.Request) (og.Response, error)
 	prFailures func(og.Request) (og.Response, error)
+	prMerge    func(og.Request) (og.Response, error)
 	authStatus func(og.Request) (og.Response, error)
 }
 
@@ -82,6 +84,9 @@ func (e *directExecutor) PRLog(req og.Request) (og.Response, error) {
 }
 func (e *directExecutor) PRFailures(req og.Request) (og.Response, error) {
 	return e.call("pr failures", e.prFailures, req)
+}
+func (e *directExecutor) PRMerge(req og.Request) (og.Response, error) {
+	return e.call("pr merge", e.prMerge, req)
 }
 func (e *directExecutor) AuthStatus(req og.Request) (og.Response, error) {
 	return e.call("auth status", e.authStatus, req)
@@ -194,6 +199,197 @@ func TestCLIInvokesConfiguredExecutorDirectly(t *testing.T) {
 	}
 	if result.Project != "ko" || result.Message != "direct push" {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestCLIPRChecksExposeNotConfiguredStateAndPolicyMessage(t *testing.T) {
+	projects := testProjectStore(t)
+	response := og.Response{
+		PR: &og.PullRequest{
+			Index: 7,
+			CI:    &og.CIStatusResponse{State: "not_configured", Statuses: []og.CIStatus{}},
+		},
+		Lines: []string{
+			"combined: not_configured",
+			"CI is not configured for this commit; merge policy allows proceeding without checks",
+		},
+	}
+	executor := &directExecutor{prChecks: func(req og.Request) (og.Response, error) {
+		return response, nil
+	}}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "pr", "checks", "--project", "ko", "--pr-id", "7")
+	if err != nil || !strings.Contains(stdout, "combined: not_configured") ||
+		!strings.Contains(stdout, "CI is not configured for this commit; merge policy allows proceeding without checks") {
+		t.Fatalf("human output = %q, err = %v", stdout, err)
+	}
+	stdout, _, err = runDirectCLI(t, executor, projects, "", "pr", "checks", "--project", "ko", "--pr-id", "7", "--json")
+	if err != nil {
+		t.Fatalf("JSON checks: %v", err)
+	}
+	var result ogPRLinesJSON
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode JSON checks: %v\n%s", err, stdout)
+	}
+	if result.PR.CI == nil || result.PR.CI.State != "not_configured" ||
+		!strings.Contains(strings.Join(result.Lines, "\n"), "merge policy allows proceeding without checks") {
+		t.Fatalf("JSON checks result = %+v, want shared not_configured state and message", result)
+	}
+}
+
+func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
+	projects := testProjectStore(t)
+	var got og.Request
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		got = req
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-1", Status: og.PRMergeStatusPending,
+			InboxURL: "http://impri.example/actions",
+			Snapshot: og.PRMergeSnapshot{
+				PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeDryRun,
+			},
+			NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and repeat the same project, PR, and mode " +
+				"request after Impri records approved or rejected",
+			Detail: "approval is pending",
+		}}, nil
+	}}
+	args := []string{
+		"pr", "merge", "--project", "ko", "--pr-id", "7", "--dry-run",
+		"--wait", "--timeout", "2s", "--json",
+	}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", args...)
+	if err != nil {
+		t.Fatalf("pr merge: %v", err)
+	}
+	if got.WorkDir != "/work/ko" || got.Index != 7 || !got.DryRun || !got.Wait ||
+		got.Timeout != 2*time.Second || got.Context == nil {
+		t.Fatalf("request = %+v", got)
+	}
+	var result ogPRMergeJSON
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode result: %v\n%s", err, stdout)
+	}
+	if result.Project != "ko" || result.Merge.ActionID != "act-1" || result.Merge.InboxURL == "" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestCLIPRMergeRetryableErrorPrintsRecoveryOutcome(t *testing.T) {
+	projects := testProjectStore(t)
+	merge := og.PRMergeResult{
+		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "repeat the same project, PR, and mode request after the temporary " +
+			"failure; execution completes only when status is executed",
+		Snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7", ExecutionMode: og.PRMergeModeReal,
+		},
+		Detail: "impri action act-retry remains approved; repeat the same request: provider unavailable",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko", "--pr-id", "7")
+	if err == nil || !strings.Contains(stdout, "retry_same_request") ||
+		!strings.Contains(stdout, "Completion:") || !strings.Contains(stdout, "act-retry") {
+		t.Fatalf("stdout = %q, err = %v, want rendered retry outcome", stdout, err)
+	}
+}
+
+func TestCLIPRMergeUsesSharedTimeoutNormalization(t *testing.T) {
+	projects := testProjectStore(t)
+	var got og.Request
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		got = req
+		return og.Response{Merge: &og.PRMergeResult{
+			ActionID: "act-timeout", Status: og.PRMergeStatusPending,
+			InboxURL:   "http://impri.example/actions",
+			Snapshot:   og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+			NextAction: og.PRMergeNextWait,
+			Completion: "surface the inbox URL and repeat the same project, PR, and mode " +
+				"request after Impri records approved or rejected",
+		}}, nil
+	}}
+	if _, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7", "--wait", "--timeout", "0s"); err != nil {
+		t.Fatalf("zero timeout merge: %v", err)
+	}
+	if got.Timeout != og.DefaultPRMergeTimeout {
+		t.Fatalf("CLI timeout = %s, want %s", got.Timeout, og.DefaultPRMergeTimeout)
+	}
+	called := false
+	executor.prMerge = func(req og.Request) (og.Response, error) {
+		called = true
+		return og.Response{}, nil
+	}
+	_, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7", "--wait", "--timeout=-1s")
+	if err == nil || !strings.Contains(err.Error(), "merge timeout must not be negative") {
+		t.Fatalf("negative timeout error = %v", err)
+	}
+	if called {
+		t.Fatal("CLI executor called for negative timeout")
+	}
+}
+
+func TestCLIPRMergeUnavailableOutcomesRenderRecoveryContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot og.PRMergeSnapshot
+		args     []string
+	}{
+		{name: "approval read", args: nil},
+		{name: "wait poll", args: []string{"--wait"}, snapshot: og.PRMergeSnapshot{
+			PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projects := testProjectStore(t)
+			merge := og.PRMergeResult{
+				ActionID: "act-unavailable", Status: og.PRMergeStatusUnavailable,
+				InboxURL: "http://impri.example/actions", Snapshot: tc.snapshot,
+				Retryable: true, NextAction: og.PRMergeNextRetry,
+				Completion: "repeat the same project, PR, and mode request when Impri approval " +
+					"state is available; completion requires a known Impri status",
+				Detail: "Impri approval state is temporarily unavailable; no forge call was made; repeat the same request",
+			}
+			executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+				return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+			}}
+			args := append([]string{"pr", "merge", "--project", "ko", "--pr-id", "7"}, tc.args...)
+			stdout, _, err := runDirectCLI(t, executor, projects, "", args...)
+			if err == nil || !strings.Contains(stdout, "unavailable") ||
+				!strings.Contains(stdout, "no forge call was made") ||
+				!strings.Contains(stdout, "retry_same_request") {
+				t.Fatalf("stdout = %q, err = %v, want unavailable recovery contract", stdout, err)
+			}
+		})
+	}
+}
+
+func TestCLIPRMergeFailedReceiptRendersApprovedRetryOutcome(t *testing.T) {
+	projects := testProjectStore(t)
+	merge := og.PRMergeResult{
+		ActionID: "act-failed-receipt", Status: og.PRMergeStatusApproved,
+		InboxURL: "http://impri.example/actions", Retryable: true,
+		NextAction: og.PRMergeNextRetry,
+		Completion: "repeat the same request to revalidate and record the deterministic " +
+			"execute_failed result; completion is confirmed when Impri reports execute_failed",
+		Snapshot: og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
+		Detail: "impri action act-failed-receipt remains approved; repeat the same request: " +
+			"deterministic execution failure could not be recorded in Impri; " +
+			"repeat the same request to revalidate and report it",
+	}
+	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+		return og.Response{Error: merge.Detail, Merge: &merge}, &og.PRMergeRetryableError{Result: merge}
+	}}
+	stdout, _, err := runDirectCLI(t, executor, projects, "", "pr", "merge", "--project", "ko",
+		"--pr-id", "7")
+	if err == nil || !strings.Contains(stdout, "approved") ||
+		!strings.Contains(stdout, "could not be recorded") ||
+		!strings.Contains(stdout, "retry_same_request") || strings.Contains(stdout, "repair_receipt") {
+		t.Fatalf("stdout = %q, err = %v, want approved receipt-retry outcome", stdout, err)
 	}
 }
 
