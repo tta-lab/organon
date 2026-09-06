@@ -62,34 +62,15 @@ func newPRCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
-	cmd.AddCommand(newPRCreateCmd())
 	cmd.AddCommand(newPRViewCmd("view"))
 	cmd.AddCommand(newPRViewCmd("list"))
 	cmd.AddCommand(newPRFindCmd())
 	cmd.AddCommand(newPRGetCmd())
-	cmd.AddCommand(newPRModifyCmd())
 	cmd.AddCommand(newPRCommentCmd())
 	cmd.AddCommand(newPRChecksCmd("checks", "Show pull request checks"))
 	cmd.AddCommand(newPRChecksCmd(cmdStatus, "Show pull request status"))
 	cmd.AddCommand(newPRFailuresCmd("failures"))
 	cmd.AddCommand(newPRLogCmd())
-	return cmd
-}
-
-func newPRCreateCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "create <title>",
-		Short: "Create a pull request",
-		Long:  "Create a pull request. The PR body is read from stdin.",
-		Example: `cat <<'EOF' | og pr create "feat(scope): add feature"
-## Summary
-
-Describe the change here.
-EOF`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: runPRCreate,
-	}
-	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
 }
 
@@ -114,21 +95,6 @@ func newPRGetCmd() *cobra.Command {
 		RunE:  runPRGet,
 	}
 	cmd.Flags().Bool("json", false, "Output as JSON")
-	return cmd
-}
-
-func newPRModifyCmd() *cobra.Command {
-	cmd := newRunnableCmd("modify", "Modify a pull request", runPRModify)
-	cmd.Long = "Modify a pull request title and/or body. The new body is read from stdin."
-	cmd.Example = `cat <<'EOF' | og pr modify --pr-id 123 --title "fix(scope): clearer title"
-## Summary
-
-Replace the PR body with this text.
-EOF`
-	cmd.Flags().String("title", "", "New PR title")
-	cmd.Flags().Bool("clear-body", false, "Explicitly clear the PR body")
-	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
-	addOptionalPRIDFlag(cmd)
 	return cmd
 }
 

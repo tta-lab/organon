@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -129,6 +128,52 @@ func TestRootHelpOmitsRemovedProcessModel(t *testing.T) {
 	}
 }
 
+func TestCLIRejectsRemovedPRMutationsBeforeDomainCall(t *testing.T) {
+	projects := testProjectStore(t)
+	called := false
+	executor := &directExecutor{
+		prCreate: func(og.Request) (og.Response, error) {
+			called = true
+			return og.Response{}, nil
+		},
+		prModify: func(og.Request) (og.Response, error) {
+			called = true
+			return og.Response{}, nil
+		},
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "create", args: []string{"pr", "create", "title", "--project", "ko"}},
+		{name: "modify", args: []string{"pr", "modify"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := runDirectCLI(t, executor, projects, "body", tc.args...)
+			if err == nil || !strings.Contains(err.Error(), `unknown command "`+tc.name+`"`) {
+				t.Fatalf("error = %v, want unknown-command rejection", err)
+			}
+		})
+	}
+	if called {
+		t.Fatal("removed PR mutation reached the configured executor")
+	}
+}
+
+func TestPRHelpOmitsRemovedMutationCommands(t *testing.T) {
+	stdout, _, err := runDirectCLI(t, nil, nil, "", "pr", "--help")
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	for _, removed := range []string{"create", "modify"} {
+		for _, line := range strings.Split(stdout, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), removed+" ") {
+				t.Fatalf("help advertises removed command %q:\n%s", removed, stdout)
+			}
+		}
+	}
+}
+
 func TestCLIInvokesConfiguredExecutorDirectly(t *testing.T) {
 	projects := testProjectStore(t)
 	var got og.Request
@@ -152,18 +197,10 @@ func TestCLIInvokesConfiguredExecutorDirectly(t *testing.T) {
 	}
 }
 
-func TestCLIForwardsStdinAndCloneSelectorsToDomain(t *testing.T) {
+func TestCLIForwardsCloneSelectorsToDomain(t *testing.T) {
 	projects := testProjectStore(t)
-	var body string
 	var cloneRequest og.Request
 	executor := &directExecutor{
-		prCreate: func(req og.Request) (og.Response, error) {
-			if req.Title == nil || *req.Title != "feat: direct" || req.Body == nil {
-				return og.Response{}, errors.New("missing title or body")
-			}
-			body = *req.Body
-			return og.Response{PR: &og.PullRequest{Index: 9, Title: *req.Title, Body: body, State: "open"}}, nil
-		},
 		gitClone: func(req og.Request) (og.Response, error) {
 			cloneRequest = req
 			return og.Response{Clone: &og.CloneResult{
@@ -174,19 +211,6 @@ func TestCLIForwardsStdinAndCloneSelectorsToDomain(t *testing.T) {
 		},
 	}
 	stdout, _, err := runDirectCLI(
-		t, executor, projects, "raw\nbody\n", "pr", "create", "feat: direct", "--project", "ko", "--json",
-	)
-	if err != nil {
-		t.Fatalf("pr create: %v", err)
-	}
-	if body != "raw\nbody\n" {
-		t.Fatalf("body = %q", body)
-	}
-	var prResult ogPRJSON
-	if err := json.Unmarshal([]byte(stdout), &prResult); err != nil || prResult.PR.Index != 9 {
-		t.Fatalf("PR output = %q, err = %v", stdout, err)
-	}
-	stdout, _, err = runDirectCLI(
 		t, executor, projects, "", "clone", "--reference", "https://github.com/owner/repo", "--json",
 	)
 	if err != nil {
@@ -319,7 +343,6 @@ func TestCLIUsesLoadedServiceForGitAndPRPolicy(t *testing.T) {
 		args  []string
 	}{
 		{name: "push", args: []string{"push", "--project", "ko"}},
-		{name: "pr create", input: "body", args: []string{"pr", "create", "title", "--project", "ko"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer

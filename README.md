@@ -215,14 +215,16 @@ create/modify/comment on PRs, or run pull's branch-cleanup path.
 
 Keep the migration PAT active during rollout. In one selected repository from
 each owner, run `og auth status` and require every permission to report ready.
-Then use a disposable feature branch to verify `og push`, `og pr create`,
-`og pr view`, `og pr checks`, and `og pr comment`. Confirm GitHub attributes the
-push and PR activity to the App bot. Also verify that an SSH-configured origin
-is unchanged on disk, an uninstalled managed write fails without fallback, and
-a third-party public repository can pull anonymously but cannot write. Inspect
-command errors and local Git configuration for credential material without
-printing any secret values. Remove the downloaded key copy after this passes;
-GitHub can issue a replacement, so no private-key backup is required.
+Then use a disposable feature branch to verify `og push`, `og pr view`,
+`og pr checks`, and `og pr comment`. Verify pull-request creation and
+modification through the typed MCP `pr_create`/`pr_modify` tools or Pi's
+`og_pr` create/modify actions. Confirm GitHub attributes the push and PR
+activity to the App bot. Also verify that an SSH-configured origin is unchanged
+on disk, an uninstalled managed write fails without fallback, and a third-party
+public repository can pull anonymously but cannot write. Inspect command errors
+and local Git configuration for credential material without printing any secret
+values. Remove the downloaded key copy after this passes; GitHub can issue a
+replacement, so no private-key backup is required.
 
 Only after all three owners pass, remove local `github_token_env` keys and
 GitHub PAT variables from `~/.config/ttal/.env` and shell startup files. Run
@@ -278,9 +280,11 @@ The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
-`og mcp` exposes twelve tools: auth status, clone, push, pull, PR create/find,
-and PR get/modify/comment/checks/log/failures. It mirrors CLI current-branch
-workflows against the registered checkout's current branch. Force push uses
+`og mcp` exposes twelve typed tools: auth status, clone, push, pull, PR
+create/find, and PR get/modify/comment/checks/log/failures. The CLI's PR
+surface is read/comment/check only; use the MCP mutation tools (or Pi's
+`og_pr` create/modify actions) for PR creation and modification. MCP current-
+branch workflows use the registered checkout's current branch. Force push uses
 force-with-lease and is rejected on the default branch. Pull retains the CLI's
 guarded closed-PR branch cleanup. A positive PR ID selects a branch-free remote
 operation; `pr_get`, modify, comment, checks, log, and failures use the current
