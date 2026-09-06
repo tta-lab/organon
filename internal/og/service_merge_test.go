@@ -127,6 +127,7 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
 	var actionPayload any
+	var actionGets int
 	var merged atomic.Bool
 	var mergeCalls atomic.Int32
 	var resultReports atomic.Int32
@@ -141,7 +142,12 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 			actionPayload = body["payload"]
 			writeMergeAction(t, w, "act-real", PRMergeStatusPending, actionPayload)
 		case r.URL.Path == "/v1/actions/act-real" && r.Method == http.MethodGet:
-			writeMergeAction(t, w, "act-real", PRMergeStatusApproved, actionPayload)
+			status := PRMergeStatusApproved
+			if actionGets == 0 {
+				status = PRMergeStatusPending
+			}
+			actionGets++
+			writeMergeAction(t, w, "act-real", status, actionPayload)
 		case r.URL.Path == "/v1/actions/act-real/result" && r.Method == http.MethodPost:
 			resultReports.Add(1)
 			if failReceipt.Load() {
@@ -264,17 +270,23 @@ func TestPRMergeRejectsWrongTargetOnCreate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var payload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/actions" || r.Method != http.MethodPost {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			payload = body["payload"].(map[string]any)
+			writeMergeActionWithTarget(t, w, "act-target-create", PRMergeStatusPending,
+				payload["pr_url"].(string)+"/wrong", payload)
+		case r.URL.Path == "/v1/actions/act-target-create" && r.Method == http.MethodGet:
+			writeMergeActionWithTarget(t, w, "act-target-create", PRMergeStatusPending,
+				payload["pr_url"].(string)+"/wrong", payload)
+		default:
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		payload := body["payload"].(map[string]any)
-		writeMergeActionWithTarget(t, w, "act-target-create", PRMergeStatusPending,
-			payload["pr_url"].(string)+"/wrong", payload)
 	}))
 	t.Cleanup(server.Close)
 	restoreProvider := stubNewProvider(t, func(*repoContext) (gitprovider.Provider, error) {
@@ -433,6 +445,102 @@ func TestPRMergeClassifiesImpriHTTPReadFailures(t *testing.T) {
 	}
 }
 
+func TestPRMergeCreateReceiptFollowupOutagePreservesRecoveryIdentity(t *testing.T) { //nolint:gocyclo
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var posts, gets atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			posts.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:05:00Z",
+				"id": "act-create-followup", "inbox_url": "https://impri.example/actions",
+				"status": PRMergeStatusPending,
+			})
+		case r.URL.Path == "/v1/actions/act-create-followup" && r.Method == http.MethodGet:
+			gets.Add(1)
+			http.Error(w, "temporary canonical action outage", http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	restoreProvider := stubNewProvider(t, func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: exactMergePR}, nil
+	})
+	t.Cleanup(restoreProvider)
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
+	var retryErr *PRMergeRetryableError
+	if err == nil || !errors.As(err, &retryErr) || response.Merge == nil {
+		t.Fatalf("response = %+v, err = %v, want structured retryable outcome", response, err)
+	}
+	merge := response.Merge
+	if merge.Status != PRMergeStatusUnavailable || merge.ActionID != "act-create-followup" ||
+		merge.InboxURL != "https://impri.example/actions" || !merge.Resumable ||
+		!merge.Retryable || merge.NextAction != PRMergeNextRetry || merge.Snapshot.PRNumber != 7 ||
+		merge.Snapshot.PRURL == "" {
+		t.Fatalf("create follow-up recovery = %+v", merge)
+	}
+	if !strings.Contains(merge.Detail, "no forge call was made") || posts.Load() != 1 || gets.Load() != 1 {
+		t.Fatalf("detail = %q, POSTs = %d, GETs = %d", merge.Detail, posts.Load(), gets.Load())
+	}
+	if err := ValidatePRMergeResponse(response, 7); err != nil {
+		t.Fatalf("validate create follow-up response: %v", err)
+	}
+}
+
+func TestPRMergeCreateIdempotentResponseUsesCanonicalGETAndResumeDoesNotCreateAgain(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	var payload any
+	var posts, gets atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+			posts.Add(1)
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			payload = body["payload"]
+			writeMergeAction(t, w, "act-idempotent", PRMergeStatusPending, payload)
+		case r.URL.Path == "/v1/actions/act-idempotent" && r.Method == http.MethodGet:
+			gets.Add(1)
+			writeMergeAction(t, w, "act-idempotent", PRMergeStatusPending, payload)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	restoreProvider := stubNewProvider(t, func(*repoContext) (gitprovider.Provider, error) {
+		return fakeProvider{getPR: exactMergePR}, nil
+	})
+	t.Cleanup(restoreProvider)
+	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+	})
+	created, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
+	if err != nil || created.Merge == nil || created.Merge.Status != PRMergeStatusPending {
+		t.Fatalf("created response = %+v, err = %v", created, err)
+	}
+	resumed, err := service.PRMerge(Request{
+		WorkDir: repo, Index: 7, DryRun: true, ActionID: "act-idempotent",
+	})
+	if err != nil || resumed.Merge == nil || resumed.Merge.Status != PRMergeStatusPending {
+		t.Fatalf("resumed response = %+v, err = %v", resumed, err)
+	}
+	if posts.Load() != 1 || gets.Load() != 2 {
+		t.Fatalf("POSTs = %d, GETs = %d, want one create and two canonical reads", posts.Load(), gets.Load())
+	}
+}
+
 func TestPRMergeReportsUnavailableWhenWaitPollFails(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -497,6 +605,7 @@ func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *te
 	t.Setenv("HOME", home)
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
 	var actionPayload any
+	var actionGets int
 	var receiptAttempts atomic.Int32
 	var receiptStatuses []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +618,12 @@ func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *te
 			actionPayload = body["payload"]
 			writeMergeAction(t, w, "act-failure-receipt", PRMergeStatusPending, actionPayload)
 		case r.URL.Path == "/v1/actions/act-failure-receipt" && r.Method == http.MethodGet:
-			writeMergeAction(t, w, "act-failure-receipt", PRMergeStatusApproved, actionPayload)
+			status := PRMergeStatusApproved
+			if actionGets == 0 {
+				status = PRMergeStatusPending
+			}
+			actionGets++
+			writeMergeAction(t, w, "act-failure-receipt", status, actionPayload)
 		case r.URL.Path == "/v1/actions/act-failure-receipt/result" && r.Method == http.MethodPost:
 			var body struct {
 				Status string `json:"status"`
@@ -812,6 +926,7 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 	var resultReports int
 	var mergeCalls int
 	var providerGets int
+	var actionGets int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
@@ -822,7 +937,12 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 			actionPayload = body["payload"]
 			writeMergeAction(t, w, actionID, PRMergeStatusPending, actionPayload)
 		case r.URL.Path == "/v1/actions/"+actionID && r.Method == http.MethodGet:
-			writeMergeAction(t, w, actionID, PRMergeStatusApproved, actionPayload)
+			status := PRMergeStatusApproved
+			if actionGets == 0 {
+				status = PRMergeStatusPending
+			}
+			actionGets++
+			writeMergeAction(t, w, actionID, status, actionPayload)
 		case r.URL.Path == "/v1/actions/"+actionID+"/result" && r.Method == http.MethodPost:
 			resultReports++
 			w.WriteHeader(http.StatusOK)
@@ -870,6 +990,7 @@ func runApprovedRealMergeScenario(
 	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
 	var actionPayload any
 	var mergeCalls int
+	var actionGets int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
@@ -880,7 +1001,12 @@ func runApprovedRealMergeScenario(
 			actionPayload = body["payload"]
 			writeMergeAction(t, w, "act-guard", PRMergeStatusPending, actionPayload)
 		case r.URL.Path == "/v1/actions/act-guard" && r.Method == http.MethodGet:
-			writeMergeAction(t, w, "act-guard", PRMergeStatusApproved, actionPayload)
+			status := PRMergeStatusApproved
+			if actionGets == 0 {
+				status = PRMergeStatusPending
+			}
+			actionGets++
+			writeMergeAction(t, w, "act-guard", status, actionPayload)
 		case r.URL.Path == "/v1/actions/act-guard/result" && r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusOK)
 		default:

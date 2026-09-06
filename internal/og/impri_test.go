@@ -149,6 +149,115 @@ func TestImpriDecodeErrorIsNotRetryable(t *testing.T) {
 	}
 }
 
+func TestImpriCreateActionReadsReceiptThenCanonicalAction(t *testing.T) { //nolint:gocyclo
+	payload := map[string]any{
+		"provider": "github", "forge_base_url": "https://github.com",
+		"owner": "tta-lab", "repo": "organon", "pr_number": 7,
+		"head_sha": "abc123", "base_branch": "main", "merge_method": "squash",
+		"execution_mode": "dry-run", "pr_url": "https://github.com/tta-lab/organon/pull/7",
+	}
+	body := impriCreateAction{Kind: PRMergeKind, Title: "merge", Preview: impriPreview{
+		Format: "markdown", Body: "preview",
+	}, Payload: payload, TargetURL: payload["pr_url"].(string), ExpiresIn: 300, IdempotencyKey: "key"}
+	for _, test := range []struct {
+		name       string
+		postStatus int
+	}{
+		{name: "created receipt", postStatus: http.StatusCreated},
+		{name: "idempotent full response", postStatus: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var postCount, getCount int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/v1/actions" && r.Method == http.MethodPost:
+					postCount++
+					w.WriteHeader(test.postStatus)
+					if test.postStatus == http.StatusCreated {
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:05:00Z",
+							"id": "act-receipt", "inbox_url": "https://impri.example/actions",
+							"status": PRMergeStatusPending,
+						})
+					} else {
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"id": "act-receipt", "kind": PRMergeKind, "status": PRMergeStatusPending,
+							"inbox_url": "https://impri.example/actions", "target_url": payload["pr_url"],
+							"payload": payload,
+						})
+					}
+				case r.URL.Path == "/v1/actions/act-receipt" && r.Method == http.MethodGet:
+					getCount++
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"id": "act-receipt", "kind": PRMergeKind, "status": PRMergeStatusPending,
+						"inbox_url": "https://impri.example/actions", "target_url": payload["pr_url"],
+						"payload": payload,
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client, err := newImpriClientWithHTTPClient(context.Background(), &ogconfig.ImpriConfig{
+				BaseURL: server.URL, APIKey: "im_test",
+			}, server.Client())
+			if err != nil {
+				t.Fatalf("newImpriClient: %v", err)
+			}
+			action, err := client.createAction(context.Background(), body)
+			if err != nil {
+				t.Fatalf("createAction: %v", err)
+			}
+			if action.ID != "act-receipt" || action.Kind != PRMergeKind ||
+				action.Status != PRMergeStatusPending || action.TargetURL != payload["pr_url"] ||
+				action.Payload == nil {
+				t.Fatalf("canonical action = %+v", action)
+			}
+			if postCount != 1 || getCount != 1 {
+				t.Fatalf("POST count = %d, GET count = %d, want 1 each", postCount, getCount)
+			}
+		})
+	}
+}
+
+func TestImpriCreateActionRejectsMalformedReceiptBeforeGET(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "missing id", mutate: func(receipt map[string]any) { delete(receipt, "id") }},
+		{name: "invalid status", mutate: func(receipt map[string]any) { receipt["status"] = "unknown" }},
+		{name: "missing inbox", mutate: func(receipt map[string]any) { delete(receipt, "inbox_url") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			receipt := map[string]any{
+				"id": "act-malformed", "status": PRMergeStatusPending,
+				"inbox_url": "https://impri.example/actions",
+			}
+			test.mutate(receipt)
+			getCount := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					getCount++
+				}
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(receipt)
+			}))
+			defer server.Close()
+			client, err := newImpriClientWithHTTPClient(context.Background(), &ogconfig.ImpriConfig{
+				BaseURL: server.URL, APIKey: "im_test",
+			}, server.Client())
+			if err != nil {
+				t.Fatalf("newImpriClient: %v", err)
+			}
+			_, err = client.createAction(context.Background(), impriCreateAction{})
+			if err == nil || getCount != 0 {
+				t.Fatalf("createAction error = %v, GET count = %d, want receipt rejection before GET", err, getCount)
+			}
+		})
+	}
+}
+
 func TestMergeIdempotencyKeyIncludesImmutableModeAndHead(t *testing.T) {
 	base := PRMergeSnapshot{
 		Provider: "github", ForgeBaseURL: "https://github.com", Owner: "o", Repo: "r",

@@ -129,6 +129,14 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 			ExpiresIn: defaultImpriExpirySeconds, IdempotencyKey: key,
 		})
 		if err != nil {
+			if action.ID != "" && retryableImpriReadError(err) {
+				inboxURL := action.InboxURL
+				if inboxURL == "" {
+					inboxURL = client.inboxURL()
+				}
+				return retryableImpriUnavailable(action.ID, inboxURL, snapshot,
+					"approval card was created but its canonical state could not be read")
+			}
 			return Response{}, err
 		}
 		if action.TargetURL != snapshot.PRURL {

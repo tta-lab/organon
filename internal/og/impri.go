@@ -43,6 +43,12 @@ type impriCreateAction struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 }
 
+type impriCreateReceipt struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	InboxURL string `json:"inbox_url"`
+}
+
 type impriPreview struct {
 	Format string `json:"format"`
 	Body   string `json:"body"`
@@ -92,11 +98,45 @@ func newImpriClientWithHTTPClient(
 }
 
 func (c *impriClient) createAction(ctx context.Context, body impriCreateAction) (impriAction, error) {
-	var action impriAction
-	if err := c.requestJSON(ctx, http.MethodPost, impriActionsPath, body, &action); err != nil {
+	var receipt impriCreateReceipt
+	if err := c.requestJSON(ctx, http.MethodPost, impriActionsPath, body, &receipt); err != nil {
 		return impriAction{}, fmt.Errorf("create Impri approval action: %w", err)
 	}
+	if err := validateImpriCreateReceipt(receipt); err != nil {
+		return impriAction{}, err
+	}
+	action, err := c.getAction(ctx, receipt.ID)
+	if err != nil {
+		return impriAction{ID: receipt.ID, Status: receipt.Status, InboxURL: receipt.InboxURL},
+			fmt.Errorf("read created Impri approval action: %w", err)
+	}
+	if action.ID != receipt.ID {
+		return impriAction{}, fmt.Errorf("impri create receipt action ID does not match the canonical action")
+	}
 	return action, nil
+}
+
+func validateImpriCreateReceipt(receipt impriCreateReceipt) error {
+	if strings.TrimSpace(receipt.ID) == "" {
+		return fmt.Errorf("impri create response is missing a valid action ID")
+	}
+	if !validImpriActionStatus(receipt.Status) {
+		return fmt.Errorf("impri create response has invalid action status %q", receipt.Status)
+	}
+	if strings.TrimSpace(receipt.InboxURL) == "" {
+		return fmt.Errorf("impri create response is missing a valid inbox URL")
+	}
+	return nil
+}
+
+func validImpriActionStatus(status string) bool {
+	switch status {
+	case PRMergeStatusPending, PRMergeStatusApproved, PRMergeStatusRejected,
+		PRMergeStatusExpired, PRMergeStatusExecuted, PRMergeStatusExecuteFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *impriClient) getAction(ctx context.Context, id string) (impriAction, error) {
