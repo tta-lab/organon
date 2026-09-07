@@ -36,10 +36,13 @@ outside this version. Impri configuration is read only from this `og.toml`; no
 `og clone <project-reference>` clones the registered remote to the registered
 path. A project reference is a case-insensitive canonical alias, checkout
 basename, or remote repository basename; successful results use the canonical
-alias. `og clone <http(s)-url>` derives `~/code/projects/<owner>/<repo>` and
-registers the project alias. `og clone --reference <url>` derives
-`~/code/references/<host>/<owner>/<repo>` and never registers an alias. The
-caller cannot choose a destination path.
+alias. `og clone <http(s)-url>` derives `~/code/projects/<owner>/<repo>` with
+lowercase owner and repository directory components and registers the project
+alias. `og clone --reference <url>` derives
+`~/code/references/<host>/<owner>/<repo>` with the same lowercase owner and
+repository directory components and never registers an alias. The local path
+is distinct from provider-specific repository identity, whose remote spelling
+is preserved. The caller cannot choose a destination path.
 
 For registered projects, the registry remote is the repository identity. Before
 each Git network operation, og requires the effective origin fetch URL—and every

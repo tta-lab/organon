@@ -274,10 +274,13 @@ og clone --reference https://github.com/modelcontextprotocol/go-sdk.git
 ```
 
 Alias clones use the registered path and canonical remote. URL project clones
-derive `~/code/projects/<owner>/<repo>` and register an alias plus remote.
-Reference clones derive `~/code/references/<host>/<owner>/<repo>` and remain
-unregistered. Only GitHub, configured Forgejo roots, and anonymous generic
-HTTPS are supported; callers cannot provide a destination or credentials.
+derive `~/code/projects/<owner>/<repo>` with lowercase owner and repository
+directory components and register an alias plus remote. Reference clones
+derive `~/code/references/<host>/<owner>/<repo>` with the same lowercase owner
+and repository directory components and remain unregistered. The local path is
+distinct from provider-specific repository identity, whose remote spelling is
+preserved. Only GitHub, configured Forgejo roots, and anonymous generic HTTPS
+are supported; callers cannot provide a destination or credentials.
 
 For registered operations, `projects.toml` is the repository identity SSOT.
 Immediately before a Git network operation, og checks the effective fetch URL

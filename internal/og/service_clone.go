@@ -246,9 +246,11 @@ func (s Service) resolveCloneSource(raw string, reference bool) (cloneSource, er
 	if reference {
 		base = filepath.Join(home, "code", "references", hostDir)
 	}
+	localOwner := strings.ToLower(info.Owner)
+	localRepo := strings.ToLower(info.Repo)
 	return cloneSource{
 		info: info, remote: remote, host: strings.TrimPrefix(strings.TrimPrefix(info.BaseURL, "https://"), "http://"),
-		provider: provider, destination: filepath.Join(base, info.Owner, info.Repo),
+		provider: provider, destination: filepath.Join(base, localOwner, localRepo),
 	}, nil
 }
 

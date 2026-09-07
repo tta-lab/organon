@@ -39,6 +39,68 @@ func TestGitCloneDerivesProjectPathAndRegistersAlias(t *testing.T) {
 	}
 }
 
+func TestGitCloneLowercasesCasePreservingProjectPath(t *testing.T) {
+	resp, got, store, wantPath := runCasePreservingURLClone(t, false)
+	assertCasePreservingClone(t, resp, got, wantPath)
+	if !resp.Clone.Registered || resp.Clone.Alias != "FlickNote" {
+		t.Fatalf("project clone result = %+v, want registered alias", resp.Clone)
+	}
+	entry, err := store.Get("FlickNote")
+	if err != nil || entry.Path != wantPath || entry.Remote != got.Remote {
+		t.Fatalf("registered entry = %+v, %v", entry, err)
+	}
+}
+
+func TestGitCloneLowercasesCasePreservingReferencePath(t *testing.T) {
+	resp, got, _, wantPath := runCasePreservingURLClone(t, true)
+	assertCasePreservingClone(t, resp, got, wantPath)
+	if resp.Clone.Registered || resp.Clone.Alias != "" {
+		t.Fatalf("reference clone result = %+v, want unregistered", resp.Clone)
+	}
+}
+
+func runCasePreservingURLClone(t *testing.T, reference bool) (Response, cloneInvocation, *project.Store, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGEJO_TOKEN", "")
+	store := writeCloneProjects(t, "")
+	var got cloneInvocation
+	withCloneRunner(t, func(ctx context.Context, invocation cloneInvocation) error {
+		got = invocation
+		return createClonedRepository(ctx, invocation)
+	})
+
+	resp, err := NewServiceWithConfig(nil, store, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"http://forgejo.localhost:17480"}},
+	}).GitClone(Request{
+		URL:       "http://forgejo.localhost:17480/GuionAI/FlickNote.git",
+		Reference: reference,
+	})
+	if err != nil {
+		t.Fatalf("GitClone: %v", err)
+	}
+	wantPath := filepath.Join(home, "code", "projects")
+	if reference {
+		wantPath = filepath.Join(home, "code", "references", "forgejo.localhost_17480")
+	}
+	wantPath = filepath.Join(wantPath, "guionai", "flicknote")
+	return resp, got, store, wantPath
+}
+
+func assertCasePreservingClone(t *testing.T, resp Response, got cloneInvocation, wantPath string) {
+	t.Helper()
+	const remote = "http://forgejo.localhost:17480/GuionAI/FlickNote.git"
+	if filepath.Dir(got.Destination) != filepath.Dir(wantPath) || got.Remote != remote ||
+		got.Provider != "forgejo" || got.Owner != "GuionAI" || got.Repo != "FlickNote" {
+		t.Fatalf("clone invocation = %+v, want lowercase destination parent and preserved identity", got)
+	}
+	if resp.Clone == nil || resp.Clone.Path != wantPath || resp.Clone.Remote != remote ||
+		resp.Clone.Provider != "forgejo" || resp.Clone.Owner != "GuionAI" || resp.Clone.Repo != "FlickNote" {
+		t.Fatalf("clone result = %+v, want lowercase destination and preserved identity", resp.Clone)
+	}
+}
+
 func TestGitCloneAcceptsCaseInsensitiveCloneParent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
