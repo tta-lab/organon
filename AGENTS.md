@@ -16,6 +16,12 @@ make ci-scope SCOPE_CMD=project SCOPE_PACKAGES='./cmd/project ./internal/project
                   # scoped format check, vet, lint, test, and binary build
 ```
 
+## Local Impri
+
+Use `/home/neil/code/projects/birdmanmandbir/impri` for Impri changes. Its
+Kubernetes deployment configuration and `just impri-*` operations are in
+`/home/neil/code/projects/tta-lab/kosmos`.
+
 ## Architecture
 
 ### Binaries
