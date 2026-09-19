@@ -230,6 +230,48 @@ func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
 	return newProviderFunc(ctx)
 }
 
+func newIssueProvider(ctx *repoContext, purpose githubapp.Purpose) (gitprovider.IssueProvider, error) {
+	if ctx.Provider == gitprovider.ProviderGeneric {
+		return nil, fmt.Errorf("issue workflows are supported only by GitHub and Forgejo")
+	}
+	var provider gitprovider.Provider
+	if ctx.Provider == gitprovider.ProviderGitHub {
+		if ctx.githubBroker == nil {
+			return nil, fmt.Errorf("GitHub App authentication is not configured")
+		}
+		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, purpose)
+		if err != nil {
+			return nil, err
+		}
+		provider, err = gitprovider.NewGitHubProviderWithTokenAndAuthFailure(
+			operationContext(ctx), token, func() { _ = ctx.githubBroker.Invalidate(ctx.Owner, ctx.Repo, purpose, token) },
+		)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if err := requireToken(ctx); err != nil {
+			return nil, err
+		}
+		base := ctx.BaseURL
+		if base == "" {
+			base = ctx.Host
+		}
+		var err error
+		provider, err = gitprovider.NewForgejoProviderWithToken(operationContext(ctx), base, ctx.Token)
+		if err != nil {
+			return nil, err
+		}
+	}
+	issues, ok := provider.(gitprovider.IssueProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not support issues", provider.Name())
+	}
+	return issues, nil
+}
+
+var issueProviderFor = newIssueProvider
+
 func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 	if ctx.Provider == gitprovider.ProviderGeneric {
 		return nil, fmt.Errorf("generic HTTPS repository has no provider API")

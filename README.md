@@ -99,6 +99,27 @@ is ignored by Git. Navidrome requires an admin account for this global change.
 
 ### `og` — guarded forge operations
 
+`og issue` reads GitHub and Forgejo repository issues without depending on the
+checkout branch:
+
+```bash
+og --project organon issue list --state open --page 1 --per-page 30
+og --project organon issue search "credential broker" --state all
+og --project organon issue get 42 --json
+og --project organon issue comments 42 --page 2
+```
+
+Writes are typed-MCP-only: `issue_create`, `issue_update_title`,
+`issue_replace_body`, `issue_edit_body`, and `issue_comment`. Creation requires
+both title and body (the body may be empty); title, whole body, exact batch body
+edits, and comments are independent. Exact edits match each old text once in
+the body just fetched, reject duplicate/missing/ambiguous/overlapping or no-op
+edits before one body update, and preserve all other Markdown bytes. They do
+not provide remote compare-and-swap: a simultaneous remote edit can race.
+List defaults to open, search to all; pagination defaults to page 1 / 30 items
+and accepts at most 100. Comments are oldest first. Provider search ranking and
+tokenization differ, and neither uncertain creates nor comments are retried.
+
 `og` runs GitHub PR and Git network operations directly inside the calling CLI or MCP
 process. GitHub authentication uses repository-scoped installation tokens minted by a GitHub
 App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
@@ -190,6 +211,7 @@ Grant only these repository permissions:
 - Checks: read-only
 - Actions: read-only
 - Workflows: read and write
+- Issues: read and write
 
 Install it on selected repositories only in `tta-lab`, `GuionAI`, and
 `LamplitIsles`. Each installation owner must approve the permissions. Do not

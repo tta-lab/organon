@@ -219,6 +219,114 @@ func (p *GitHubProvider) ListComments(owner, repo string, index int64) ([]*Comme
 	return result, nil
 }
 
+func (p *GitHubProvider) ListIssues(owner, repo, query, state string, page, perPage int) (*IssuePage, error) {
+	if query != "" {
+		q := githubIssueSearchQuery(owner, repo, state, query)
+		options := &github.SearchOptions{
+			Sort: "updated", Order: "desc",
+			ListOptions: github.ListOptions{Page: page, PerPage: perPage},
+		}
+		found, response, err := p.client.Search.Issues(p.operationContext(), q, options)
+		if err != nil {
+			return nil, fmt.Errorf("search issues: %w", err)
+		}
+		incomplete := found.GetIncompleteResults() || found.GetTotal() > 1000
+		result := &IssuePage{
+			Issues:     make([]*Issue, 0, len(found.Issues)),
+			HasNext:    response != nil && response.NextPage > 0,
+			Incomplete: incomplete,
+		}
+		for _, item := range found.Issues {
+			if item != nil && !item.IsPullRequest() {
+				result.Issues = append(result.Issues, toGitHubIssue(item))
+			}
+		}
+		return result, nil
+	}
+	opt := &github.IssueListByRepoOptions{
+		State: state, Sort: "updated", Direction: "desc",
+		ListOptions: github.ListOptions{Page: page, PerPage: perPage},
+	}
+	issues, response, err := p.client.Issues.ListByRepo(p.operationContext(), owner, repo, opt)
+	if err != nil {
+		return nil, fmt.Errorf("list issues: %w", err)
+	}
+	result := &IssuePage{Issues: make([]*Issue, 0, len(issues)), HasNext: response != nil && response.NextPage > 0}
+	for _, item := range issues {
+		if item != nil && !item.IsPullRequest() {
+			result.Issues = append(result.Issues, toGitHubIssue(item))
+		}
+	}
+	return result, nil
+}
+
+func githubIssueSearchQuery(owner, repo, state, keywords string) string {
+	terms := []string{fmt.Sprintf("repo:%s/%s", owner, repo), "is:issue"}
+	if state != "all" {
+		terms = append(terms, "state:"+state)
+	}
+	clean := strings.Join(strings.Fields(strings.ReplaceAll(keywords, `"`, " ")), " ")
+	return strings.Join(append(terms, `"`+clean+`"`), " ")
+}
+func (p *GitHubProvider) GetIssue(owner, repo string, index int64) (*Issue, error) {
+	issue, _, err := p.client.Issues.Get(p.operationContext(), owner, repo, int(index))
+	if err != nil {
+		return nil, fmt.Errorf("get issue #%d: %w", index, err)
+	}
+	return toGitHubIssue(issue), nil
+}
+func (p *GitHubProvider) CreateIssue(owner, repo, title, body string) (*Issue, error) {
+	request := &github.IssueRequest{Title: &title, Body: &body}
+	issue, _, err := p.client.Issues.Create(p.operationContext(), owner, repo, request)
+	if err != nil {
+		return nil, fmt.Errorf("create issue: %w", err)
+	}
+	return toGitHubIssue(issue), nil
+}
+func (p *GitHubProvider) UpdateIssueTitle(owner, repo string, index int64, title string) (*Issue, error) {
+	request := &github.IssueRequest{Title: &title}
+	issue, _, err := p.client.Issues.Edit(p.operationContext(), owner, repo, int(index), request)
+	if err != nil {
+		return nil, fmt.Errorf("update issue title #%d: %w", index, err)
+	}
+	return toGitHubIssue(issue), nil
+}
+func (p *GitHubProvider) ReplaceIssueBody(owner, repo string, index int64, body string) (*Issue, error) {
+	issue, _, err := p.client.Issues.Edit(p.operationContext(), owner, repo, int(index), &github.IssueRequest{Body: &body})
+	if err != nil {
+		return nil, fmt.Errorf("replace issue body #%d: %w", index, err)
+	}
+	return toGitHubIssue(issue), nil
+}
+func (p *GitHubProvider) ListIssueComments(owner, repo string, index int64, page, perPage int) (*CommentPage, error) {
+	options := &github.IssueListCommentsOptions{
+		Sort: github.Ptr("created"), Direction: github.Ptr("asc"),
+		ListOptions: github.ListOptions{Page: page, PerPage: perPage},
+	}
+	comments, response, err := p.client.Issues.ListComments(p.operationContext(), owner, repo, int(index), options)
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments #%d: %w", index, err)
+	}
+	result := &CommentPage{Comments: make([]*Comment, 0, len(comments)), HasNext: response != nil && response.NextPage > 0}
+	for _, c := range comments {
+		v := toGitHubComment(c)
+		v.PRID = index
+		result.Comments = append(result.Comments, v)
+	}
+	return result, nil
+}
+func (p *GitHubProvider) CreateIssueComment(owner, repo string, index int64, body string) (*Comment, error) {
+	return p.CreateComment(owner, repo, index, body)
+}
+
+func toGitHubIssue(issue *github.Issue) *Issue {
+	if issue == nil {
+		return nil
+	}
+	return &Issue{Index: int64(issue.GetNumber()), Title: issue.GetTitle(), Body: issue.GetBody(),
+		State: issue.GetState(), HTMLURL: issue.GetHTMLURL(), IsPullRequest: issue.IsPullRequest()}
+}
+
 // GetCombinedStatus queries GitHub's Checks API only. A successful response with
 // zero Check Runs is StateNotConfigured; legacy commit-status integrations are
 // intentionally outside this merge gate.

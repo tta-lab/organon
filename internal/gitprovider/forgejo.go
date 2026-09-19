@@ -165,6 +165,74 @@ func (p *ForgejoProvider) ListComments(owner, repo string, index int64) ([]*Comm
 	return result, nil
 }
 
+func (p *ForgejoProvider) ListIssues(owner, repo, query, state string, page, perPage int) (*IssuePage, error) {
+	options := forgejo_sdk.ListIssueOption{
+		ListOptions: forgejo_sdk.ListOptions{Page: page, PageSize: perPage},
+		State:       forgejo_sdk.StateType(state), Type: forgejo_sdk.IssueTypeIssue, KeyWord: query,
+	}
+	issues, response, err := p.client.ListRepoIssues(owner, repo, options)
+	if err != nil {
+		return nil, fmt.Errorf("list issues: %w", err)
+	}
+	result := &IssuePage{Issues: make([]*Issue, 0, len(issues)), HasNext: response != nil && response.NextPage > 0}
+	for _, i := range issues {
+		result.Issues = append(result.Issues, toForgejoIssue(i))
+	}
+	return result, nil
+}
+func (p *ForgejoProvider) GetIssue(owner, repo string, index int64) (*Issue, error) {
+	i, _, err := p.client.GetIssue(owner, repo, index)
+	if err != nil {
+		return nil, fmt.Errorf("get issue #%d: %w", index, err)
+	}
+	return toForgejoIssue(i), nil
+}
+func (p *ForgejoProvider) CreateIssue(owner, repo, title, body string) (*Issue, error) {
+	i, _, err := p.client.CreateIssue(owner, repo, forgejo_sdk.CreateIssueOption{Title: title, Body: body})
+	if err != nil {
+		return nil, fmt.Errorf("create issue: %w", err)
+	}
+	return toForgejoIssue(i), nil
+}
+func (p *ForgejoProvider) UpdateIssueTitle(owner, repo string, index int64, title string) (*Issue, error) {
+	i, _, err := p.client.EditIssue(owner, repo, index, forgejo_sdk.EditIssueOption{Title: title})
+	if err != nil {
+		return nil, fmt.Errorf("update issue title #%d: %w", index, err)
+	}
+	return toForgejoIssue(i), nil
+}
+func (p *ForgejoProvider) ReplaceIssueBody(owner, repo string, index int64, body string) (*Issue, error) {
+	i, _, err := p.client.EditIssue(owner, repo, index, forgejo_sdk.EditIssueOption{Body: &body})
+	if err != nil {
+		return nil, fmt.Errorf("replace issue body #%d: %w", index, err)
+	}
+	return toForgejoIssue(i), nil
+}
+func (p *ForgejoProvider) ListIssueComments(owner, repo string, index int64, page, perPage int) (*CommentPage, error) {
+	options := forgejo_sdk.ListIssueCommentOptions{ListOptions: forgejo_sdk.ListOptions{Page: page, PageSize: perPage}}
+	cs, r, err := p.client.ListIssueComments(owner, repo, index, options)
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments #%d: %w", index, err)
+	}
+	out := &CommentPage{Comments: make([]*Comment, 0, len(cs)), HasNext: r != nil && r.NextPage > 0}
+	for _, c := range cs {
+		v := toComment(c)
+		v.PRID = index
+		out.Comments = append(out.Comments, v)
+	}
+	return out, nil
+}
+func (p *ForgejoProvider) CreateIssueComment(owner, repo string, index int64, body string) (*Comment, error) {
+	return p.CreateComment(owner, repo, index, body)
+}
+func toForgejoIssue(i *forgejo_sdk.Issue) *Issue {
+	if i == nil {
+		return nil
+	}
+	return &Issue{Index: i.Index, Title: i.Title, Body: i.Body, State: string(i.State),
+		HTMLURL: i.HTMLURL, IsPullRequest: i.PullRequest != nil}
+}
+
 func (p *ForgejoProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error) {
 	cs, response, err := p.client.GetCombinedStatus(owner, repo, ref)
 	if err != nil {

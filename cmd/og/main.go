@@ -39,6 +39,7 @@ func newRootCmdWithExecutor(
 		"Project reference (alias, checkout name, or repository name); resolved to its checkout path")
 
 	cmd.AddCommand(newPRCmd())
+	cmd.AddCommand(newIssueCmd())
 	cmd.AddCommand(newGitPushCmd())
 	cmd.AddCommand(newGitPullCmd())
 	cmd.AddCommand(newGitTagCmd())
@@ -51,6 +52,46 @@ func newRootCmdWithExecutor(
 			executor: executor, projects: projects,
 		}))
 	}
+	return cmd
+}
+
+func newIssueCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "issue", Short: "Read repository issues", Args: cobra.NoArgs, RunE: showHelp}
+	cmd.AddCommand(newIssueListCmd(), newIssueSearchCmd(), newIssueGetCmd(), newIssueCommentsCmd())
+	return cmd
+}
+func addIssuePageFlags(cmd *cobra.Command) {
+	cmd.Flags().String("state", "", "issue state: open, closed, or all")
+	cmd.Flags().Int("page", 1, "page number")
+	cmd.Flags().Int("per-page", og.DefaultIssuePerPage, "results per page (maximum 100)")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+}
+func addIssueCommentPageFlags(cmd *cobra.Command) {
+	cmd.Flags().Int("page", 1, "page number")
+	cmd.Flags().Int("per-page", og.DefaultIssuePerPage, "results per page (maximum 100)")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+}
+func newIssueListCmd() *cobra.Command {
+	cmd := newRunnableCmd("list", "List repository issues", runIssueList)
+	addIssuePageFlags(cmd)
+	return cmd
+}
+func newIssueSearchCmd() *cobra.Command {
+	cmd := newRunnableCmd("search <query>", "Search repository issues", runIssueSearch)
+	cmd.Args = cobra.ExactArgs(1)
+	addIssuePageFlags(cmd)
+	return cmd
+}
+func newIssueGetCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "get <index>", Short: "Get an issue by index", Args: cobra.ExactArgs(1), RunE: runIssueGet}
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+func newIssueCommentsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "comments <index>", Short: "List issue comments", Args: cobra.ExactArgs(1), RunE: runIssueComments,
+	}
+	addIssueCommentPageFlags(cmd)
 	return cmd
 }
 

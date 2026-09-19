@@ -76,6 +76,54 @@ type ogPRMergeInput struct {
 	Wait           bool   `json:"wait,omitempty" jsonschema:"wait for the Impri approval decision"`
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"wait timeout seconds; defaults to 30"`
 }
+type ogIssuePageInput struct {
+	Project string `json:"project"`
+	State   string `json:"state,omitempty"`
+	Page    int    `json:"page,omitempty"`
+	PerPage int    `json:"per_page,omitempty"`
+}
+type ogIssueSearchInput struct {
+	Project string `json:"project"`
+	Query   string `json:"query"`
+	State   string `json:"state,omitempty"`
+	Page    int    `json:"page,omitempty"`
+	PerPage int    `json:"per_page,omitempty"`
+}
+type ogIssueInput struct {
+	Project string `json:"project"`
+	IssueID int64  `json:"issue_id"`
+}
+type ogIssueCommentsInput struct {
+	Project string `json:"project"`
+	IssueID int64  `json:"issue_id"`
+	Page    int    `json:"page,omitempty"`
+	PerPage int    `json:"per_page,omitempty"`
+}
+type ogIssueCreateInput struct {
+	Project string  `json:"project"`
+	Title   string  `json:"title"`
+	Body    *string `json:"body"`
+}
+type ogIssueTitleInput struct {
+	Project string `json:"project"`
+	IssueID int64  `json:"issue_id"`
+	Title   string `json:"title"`
+}
+type ogIssueBodyInput struct {
+	Project string `json:"project"`
+	IssueID int64  `json:"issue_id"`
+	Body    string `json:"body"`
+}
+type ogIssueEditsInput struct {
+	Project string        `json:"project"`
+	IssueID int64         `json:"issue_id"`
+	Edits   []og.BodyEdit `json:"edits"`
+}
+type ogIssueCommentInput struct {
+	Project string `json:"project"`
+	IssueID int64  `json:"issue_id"`
+	Body    string `json:"body"`
+}
 
 type ogAuthOutput struct {
 	Project string        `json:"project"`
@@ -97,6 +145,10 @@ type ogCommentOutput struct {
 	Project string     `json:"project"`
 	Comment og.Comment `json:"comment"`
 }
+type ogIssueCommentOutput struct {
+	Project string          `json:"project"`
+	Comment og.IssueComment `json:"comment"`
+}
 
 type ogMessageOutput struct {
 	Project string `json:"project"`
@@ -110,6 +162,21 @@ type ogCloneOutput struct {
 type ogPRMergeOutput struct {
 	Project string           `json:"project"`
 	Merge   og.PRMergeResult `json:"merge"`
+}
+type ogIssueOutput struct {
+	Project string   `json:"project"`
+	Issue   og.Issue `json:"issue"`
+}
+type ogIssuesOutput struct {
+	Project    string     `json:"project"`
+	Issues     []og.Issue `json:"issues"`
+	HasNext    bool       `json:"has_next"`
+	Incomplete bool       `json:"incomplete"`
+}
+type ogIssueCommentsOutput struct {
+	Project  string            `json:"project"`
+	Comments []og.IssueComment `json:"comments"`
+	HasNext  bool              `json:"has_next"`
 }
 
 func ogBoolPointer(value bool) *bool { return &value }
@@ -136,6 +203,18 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	}
 	if prID := schema.Properties["pr_id"]; prID != nil {
 		prID.Minimum = jsonschema.Ptr(1.0)
+	}
+	if issueID := schema.Properties["issue_id"]; issueID != nil {
+		issueID.Minimum = jsonschema.Ptr(1.0)
+	}
+	if page := schema.Properties["page"]; page != nil {
+		page.Minimum = jsonschema.Ptr(1.0)
+		page.Default = json.RawMessage("1")
+	}
+	if per := schema.Properties["per_page"]; per != nil {
+		per.Minimum = jsonschema.Ptr(1.0)
+		per.Maximum = jsonschema.Ptr(float64(og.MaxIssuePerPage))
+		per.Default = json.RawMessage(fmt.Sprint(og.DefaultIssuePerPage))
 	}
 	if tail {
 		tailSchema := schema.Properties["tail"]
@@ -242,6 +321,7 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		"pr_create", "Create pull request",
 		"Push the registered checkout's current branch and create its pull request.", false, false, false,
 	), false), prCreateHandler(projects, executor))
+	addIssueTools(server, projects, executor)
 
 	mcp.AddTool(server, setInputSchema[ogPRFindInput](ogTool(
 		"pr_find", "Find current branch pull request",

@@ -81,7 +81,10 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 	}
 	sort.Strings(gotNames)
 	wantNames := []string{
-		"auth_status", "clone", "pr_checks", "pr_comment", "pr_create", "pr_failures",
+		"auth_status", "clone", "issue_comment", "issue_comments", "issue_create",
+		"issue_edit_body", "issue_get", "issue_list", "issue_replace_body",
+		"issue_search", "issue_update_title", "pr_checks", "pr_comment", "pr_create",
+		"pr_failures",
 		"pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify", "pull", "push",
 	}
 	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
@@ -89,6 +92,50 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 	}
 
 	assertDirectMCPToolCalls(t, session, &requests)
+}
+
+//nolint:gocyclo // One MCP call sequence asserts required and explicit-empty body semantics.
+func TestIssueMCPMetadataAndRequiredCreateBody(t *testing.T) {
+	calls := 0
+	executor := &directExecutor{issueCreate: func(req og.Request) (og.Response, error) {
+		calls++
+		if req.Body == nil || *req.Body != "" {
+			t.Fatalf("body = %#v", req.Body)
+		}
+		return og.Response{Issue: &og.Issue{Index: 7, Title: "title", URL: "https://example/7"}}, nil
+	}}
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	list, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := map[string]*mcp.Tool{}
+	for _, tool := range list.Tools {
+		tools[tool.Name] = tool
+	}
+	create := tools["issue_create"]
+	if create == nil || create.InputSchema == nil {
+		t.Fatalf("issue_create schema = %#v", create)
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "issue_create", Arguments: map[string]any{"project": "ko", "title": "title"},
+	})
+	if err == nil && !result.IsError {
+		t.Fatal("issue_create accepted missing required body")
+	}
+	if calls != 0 {
+		t.Fatalf("missing body calls = %d", calls)
+	}
+	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "issue_create", Arguments: map[string]any{"project": "ko", "title": "title", "body": ""},
+	})
+	if err != nil || result.IsError || calls != 1 {
+		t.Fatalf("result=%#v err=%v calls=%d", result, err, calls)
+	}
+	edit := tools["issue_edit_body"]
+	if edit == nil || edit.Annotations == nil || edit.Annotations.IdempotentHint {
+		t.Fatalf("issue_edit_body annotations = %#v", edit)
+	}
 }
 
 func TestOGMCPPRChecksExposeNotConfiguredStateAndPolicyMessage(t *testing.T) {

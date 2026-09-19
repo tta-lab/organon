@@ -18,4 +18,13 @@ type Executor interface {
 	PRFailures(Request) (Response, error)
 	PRMerge(Request) (Response, error)
 	AuthStatus(Request) (Response, error)
+	IssueList(Request) (Response, error)
+	IssueSearch(Request) (Response, error)
+	IssueGet(Request) (Response, error)
+	IssueComments(Request) (Response, error)
+	IssueCreate(Request) (Response, error)
+	IssueUpdateTitle(Request) (Response, error)
+	IssueReplaceBody(Request) (Response, error)
+	IssueEditBody(Request) (Response, error)
+	IssueComment(Request) (Response, error)
 }

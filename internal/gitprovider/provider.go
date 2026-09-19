@@ -50,6 +50,38 @@ type Comment struct {
 	HTMLURL   string
 }
 
+// Issue is a repository issue. Pull requests are deliberately not issues here.
+type Issue struct {
+	Index         int64
+	Title         string
+	Body          string
+	State         string
+	HTMLURL       string
+	IsPullRequest bool
+}
+
+// IssuePage is one bounded provider page.
+type IssuePage struct {
+	Issues     []*Issue
+	HasNext    bool
+	Incomplete bool
+}
+type CommentPage struct {
+	Comments []*Comment
+	HasNext  bool
+}
+
+// IssueProvider is the issue-specific provider capability.
+type IssueProvider interface {
+	ListIssues(owner, repo, query, state string, page, perPage int) (*IssuePage, error)
+	GetIssue(owner, repo string, index int64) (*Issue, error)
+	CreateIssue(owner, repo, title, body string) (*Issue, error)
+	UpdateIssueTitle(owner, repo string, index int64, title string) (*Issue, error)
+	ReplaceIssueBody(owner, repo string, index int64, body string) (*Issue, error)
+	ListIssueComments(owner, repo string, index int64, page, perPage int) (*CommentPage, error)
+	CreateIssueComment(owner, repo string, index int64, body string) (*Comment, error)
+}
+
 // CommitStatus represents the status of a single CI check on a commit.
 type CommitStatus struct {
 	Context     string // Check name (e.g. "ci/woodpecker", "lint")

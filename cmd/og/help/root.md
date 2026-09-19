@@ -3,7 +3,7 @@
 Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
-contains registry- and URL-based clone, pull request inspection/commenting,
+contains registry- and URL-based clone, issue discovery/reading, pull request inspection/commenting,
 approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
 creation and modification are available only through the typed MCP
 `pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions; merge also
@@ -65,3 +65,8 @@ resolvable and visibly marked; active-only discovery does not search archives.
 Archived projects may use read-only forge/CI operations plus a fast-forward-only
 pull on their known default branch. Push, tag, PR mutation/comment, and pull
 branch cleanup are rejected.
+
+`og issue list`, `og issue search <query>`, `og issue get <index>`, and
+`og issue comments <index>` read repository issues without consulting the current
+branch. List defaults to open, search defaults to all, and `--page`/`--per-page`
+are bounded at 100. Writes are intentionally MCP-only.

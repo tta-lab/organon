@@ -18,7 +18,7 @@ func TestAuthStatusReportsGitHubAppPermissions(t *testing.T) {
 		Repository:     "tta-lab/example",
 		Permissions: map[string]string{
 			"contents": "write", "pull_requests": "write", "checks": "read",
-			"actions": "read", "workflows": "write",
+			"actions": "read", "workflows": "write", "issues": "write",
 		},
 	}}
 
@@ -33,7 +33,7 @@ func TestAuthStatusReportsGitHubAppPermissions(t *testing.T) {
 		"provider: github", "repo: tta-lab/example", "auth: github-app",
 		"app_id: 12345", "installation: ready", "repository_scope: tta-lab/example", "key_source: file",
 		"contents:write: ready", "pull_requests:write: ready", "checks:read: ready",
-		"actions:read: ready", "workflows:write: ready",
+		"actions:read: ready", "workflows:write: ready", "issues:write: ready",
 	} {
 		if !strings.Contains(resp.Message, want) {
 			t.Fatalf("message missing %q:\n%s", want, resp.Message)
@@ -51,7 +51,7 @@ func TestAuthStatusNamesMissingGitHubAppPermission(t *testing.T) {
 		Repository:     "tta-lab/example",
 		Permissions: map[string]string{
 			"contents": "write", "pull_requests": "write", "checks": "",
-			"actions": "read", "workflows": "write",
+			"actions": "read", "workflows": "write", "issues": "write",
 		},
 	}}
 

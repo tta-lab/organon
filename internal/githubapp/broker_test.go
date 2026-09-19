@@ -55,6 +55,8 @@ func TestBrokerDiscoversInstallationAndMintsPurposeScopedTokens(t *testing.T) {
 		{PurposeAPI, map[string]string{"actions": "read", "checks": "read", "contents": "write", "pull_requests": "write"}},
 		{PurposeGitRead, map[string]string{"contents": "read"}},
 		{PurposeGitWrite, map[string]string{"contents": "write", "workflows": "write"}},
+		{PurposeIssueRead, map[string]string{"issues": "read"}},
+		{PurposeIssueWrite, map[string]string{"issues": "write"}},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.purpose), func(t *testing.T) {

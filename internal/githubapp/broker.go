@@ -19,9 +19,11 @@ const tokenRefreshLead = time.Minute
 type Purpose string
 
 const (
-	PurposeAPI      Purpose = "pr-api"
-	PurposeGitRead  Purpose = "git-read"
-	PurposeGitWrite Purpose = "git-write"
+	PurposeAPI        Purpose = "pr-api"
+	PurposeIssueRead  Purpose = "issue-read"
+	PurposeIssueWrite Purpose = "issue-write"
+	PurposeGitRead    Purpose = "git-read"
+	PurposeGitWrite   Purpose = "git-write"
 )
 
 // InstallationStatus is non-secret installation metadata for one repository.
@@ -223,6 +225,10 @@ func permissionsForPurpose(purpose Purpose) (*github.InstallationPermissions, er
 			Contents:     github.Ptr("write"),
 			PullRequests: github.Ptr("write"),
 		}, nil
+	case PurposeIssueRead:
+		return &github.InstallationPermissions{Issues: github.Ptr("read")}, nil
+	case PurposeIssueWrite:
+		return &github.InstallationPermissions{Issues: github.Ptr("write")}, nil
 	case PurposeGitRead:
 		return &github.InstallationPermissions{Contents: github.Ptr("read")}, nil
 	case PurposeGitWrite:
@@ -245,6 +251,7 @@ func installationPermissions(permissions *github.InstallationPermissions) map[st
 		"contents":      permissions.GetContents(),
 		"pull_requests": permissions.GetPullRequests(),
 		"workflows":     permissions.GetWorkflows(),
+		"issues":        permissions.GetIssues(),
 	}
 }
 

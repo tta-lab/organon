@@ -23,6 +23,7 @@ var requiredGitHubPermissions = []requiredGitHubPermission{
 	{name: "checks", access: permissionRead},
 	{name: "actions", access: permissionRead},
 	{name: "workflows", access: permissionWrite},
+	{name: "issues", access: permissionWrite},
 }
 
 func (s Service) AuthStatus(req Request) (Response, error) {

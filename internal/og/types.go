@@ -24,19 +24,41 @@ type Request struct {
 	DryRun    bool            `json:"dry_run,omitempty"`
 	Wait      bool            `json:"wait,omitempty"`
 	Timeout   time.Duration   `json:"timeout,omitempty"`
+	Query     string          `json:"query,omitempty"`
+	Page      int             `json:"page,omitempty"`
+	PerPage   int             `json:"per_page,omitempty"`
+	Edits     []BodyEdit      `json:"edits,omitempty"`
 }
 
 // Response is the typed result of one direct OG operation.
 type Response struct {
-	OK      bool           `json:"ok"`
-	Error   string         `json:"error,omitempty"`
-	Message string         `json:"message,omitempty"`
-	PR      *PullRequest   `json:"pr,omitempty"`
-	Comment *Comment       `json:"comment,omitempty"`
-	Auth    *AuthStatus    `json:"auth,omitempty"`
-	Lines   []string       `json:"lines,omitempty"`
-	Clone   *CloneResult   `json:"clone,omitempty"`
-	Merge   *PRMergeResult `json:"merge,omitempty"`
+	OK            bool           `json:"ok"`
+	Error         string         `json:"error,omitempty"`
+	Message       string         `json:"message,omitempty"`
+	PR            *PullRequest   `json:"pr,omitempty"`
+	Comment       *Comment       `json:"comment,omitempty"`
+	Auth          *AuthStatus    `json:"auth,omitempty"`
+	Lines         []string       `json:"lines,omitempty"`
+	Clone         *CloneResult   `json:"clone,omitempty"`
+	Merge         *PRMergeResult `json:"merge,omitempty"`
+	Issue         *Issue         `json:"issue,omitempty"`
+	Issues        []Issue        `json:"issues,omitempty"`
+	Comments      []Comment      `json:"comments,omitempty"`
+	IssueComments []IssueComment `json:"issue_comments,omitempty"`
+	HasNext       bool           `json:"has_next,omitempty"`
+	Incomplete    bool           `json:"incomplete,omitempty"`
+}
+
+type Issue struct {
+	Index int64  `json:"index"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	State string `json:"state"`
+	URL   string `json:"url"`
+}
+type BodyEdit struct {
+	OldText string `json:"oldText"`
+	NewText string `json:"newText"`
 }
 
 // CloneResult is the stable, secret-free identity of a cloned checkout.
@@ -57,6 +79,16 @@ type CloneResult struct {
 type Comment struct {
 	ID        int64     `json:"id"`
 	PRID      int64     `json:"pr_id"`
+	Body      string    `json:"body"`
+	URL       string    `json:"url"`
+	User      string    `json:"user,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+// IssueComment is a comment attached to an issue, distinct from a PR comment.
+type IssueComment struct {
+	ID        int64     `json:"id"`
+	IssueID   int64     `json:"issue_id"`
 	Body      string    `json:"body"`
 	URL       string    `json:"url"`
 	User      string    `json:"user,omitempty"`

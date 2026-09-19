@@ -70,6 +70,93 @@ func TestGitHubProviderEditPRSendsEmptyBody(t *testing.T) {
 	}
 }
 
+func TestGitHubProviderSearchScopesAndSortsIssues(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/issues" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if got, want := q.Get("q"), `repo:o/r is:issue "state:closed injected"`; got != want {
+			t.Fatalf("query = %q, want %q", got, want)
+		}
+		if q.Get("sort") != "updated" || q.Get("order") != "desc" || q.Get("page") != "2" || q.Get("per_page") != "10" {
+			t.Fatalf("parameters = %s", r.URL.RawQuery)
+		}
+		const response = `{
+  "total_count": 1,
+  "incomplete_results": false,
+  "items": [{"number": 7, "title": "issue", "state": "open", "html_url": "https://example/7"}]
+}`
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(server.Close)
+	baseURL := server.URL + "/"
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := (&GitHubProvider{client: client}).ListIssues("o", "r", "state:closed injected", "all", 2, 10)
+	if err != nil || len(page.Issues) != 1 || page.Issues[0].Index != 7 {
+		t.Fatalf("page = %#v, err = %v", page, err)
+	}
+}
+
+func TestGitHubIssueSearchReportsIncompleteOrCapped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"total_count":1001,"incomplete_results":false,"items":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	baseURL := server.URL + "/"
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := (&GitHubProvider{client: client}).ListIssues("o", "r", "needle", "all", 1, 30)
+	if err != nil || !page.Incomplete || page.HasNext {
+		t.Fatalf("page = %#v, err = %v", page, err)
+	}
+}
+
+func TestGitHubIssueFieldUpdatesAndCommentPayloads(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if r.Method == http.MethodPatch || r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			bodies = append(bodies, body)
+		}
+		switch r.Method {
+		case http.MethodPatch:
+			_, _ = w.Write([]byte(`{"number":7,"title":"title","body":"","html_url":"https://example/7"}`))
+		case http.MethodPost:
+			_, _ = w.Write([]byte(`{"id":9,"body":"comment","html_url":"https://example/comment"}`))
+		default:
+			t.Fatalf("request = %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	base := server.URL + "/"
+	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&base, &base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &GitHubProvider{client: client}
+	if _, err = p.UpdateIssueTitle("o", "r", 7, "title"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.ReplaceIssueBody("o", "r", 7, ""); err != nil {
+		t.Fatal(err)
+	}
+	comment, err := p.CreateIssueComment("o", "r", 7, "comment")
+	if err != nil || comment.ID != 9 {
+		t.Fatalf("comment=%#v err=%v", comment, err)
+	}
+	if len(bodies) != 3 || bodies[0]["title"] != "title" || bodies[0]["body"] != nil ||
+		bodies[1]["body"] != "" || bodies[2]["body"] != "comment" {
+		t.Fatalf("bodies=%#v", bodies)
+	}
+}
+
 func TestGitHubProviderMergePRUsesSquashAndExpectedSHA(t *testing.T) {
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

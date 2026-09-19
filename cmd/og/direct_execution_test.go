@@ -18,22 +18,41 @@ import (
 	"github.com/tta-lab/organon/internal/project"
 )
 
+type directOperation func(og.Request) (og.Response, error)
 type directExecutor struct {
-	gitPush    func(og.Request) (og.Response, error)
-	gitPull    func(og.Request) (og.Response, error)
-	gitTag     func(og.Request) (og.Response, error)
-	gitClone   func(og.Request) (og.Response, error)
-	prCreate   func(og.Request) (og.Response, error)
-	prView     func(og.Request) (og.Response, error)
-	prFind     func(og.Request) (og.Response, error)
-	prGet      func(og.Request) (og.Response, error)
-	prModify   func(og.Request) (og.Response, error)
-	prComment  func(og.Request) (og.Response, error)
-	prChecks   func(og.Request) (og.Response, error)
-	prLog      func(og.Request) (og.Response, error)
-	prFailures func(og.Request) (og.Response, error)
-	prMerge    func(og.Request) (og.Response, error)
-	authStatus func(og.Request) (og.Response, error)
+	gitPush, gitPull, gitTag, gitClone                              directOperation
+	prCreate, prView, prFind, prGet, prModify, prComment            directOperation
+	prChecks, prLog, prFailures, prMerge, authStatus                directOperation
+	issueList, issueSearch, issueGet, issueComments, issueCreate    directOperation
+	issueUpdateTitle, issueReplaceBody, issueEditBody, issueComment directOperation
+}
+
+func (e *directExecutor) IssueList(r og.Request) (og.Response, error) {
+	return e.call("issue list", e.issueList, r)
+}
+func (e *directExecutor) IssueSearch(r og.Request) (og.Response, error) {
+	return e.call("issue search", e.issueSearch, r)
+}
+func (e *directExecutor) IssueGet(r og.Request) (og.Response, error) {
+	return e.call("issue get", e.issueGet, r)
+}
+func (e *directExecutor) IssueComments(r og.Request) (og.Response, error) {
+	return e.call("issue comments", e.issueComments, r)
+}
+func (e *directExecutor) IssueCreate(r og.Request) (og.Response, error) {
+	return e.call("issue create", e.issueCreate, r)
+}
+func (e *directExecutor) IssueUpdateTitle(r og.Request) (og.Response, error) {
+	return e.call("issue update title", e.issueUpdateTitle, r)
+}
+func (e *directExecutor) IssueReplaceBody(r og.Request) (og.Response, error) {
+	return e.call("issue replace body", e.issueReplaceBody, r)
+}
+func (e *directExecutor) IssueEditBody(r og.Request) (og.Response, error) {
+	return e.call("issue edit body", e.issueEditBody, r)
+}
+func (e *directExecutor) IssueComment(r og.Request) (og.Response, error) {
+	return e.call("issue comment", e.issueComment, r)
 }
 
 func (e *directExecutor) call(
@@ -123,7 +142,7 @@ func TestRootHelpOmitsRemovedProcessModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help: %v", err)
 	}
-	for _, want := range []string{"pr", "push", "pull", "tag", "auth", "mcp"} {
+	for _, want := range []string{"pr", "issue", "push", "pull", "tag", "auth", "mcp"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("help missing %q:\n%s", want, stdout)
 		}

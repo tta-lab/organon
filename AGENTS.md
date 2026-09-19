@@ -56,8 +56,9 @@ normalization, validation, defaults and limits, ordering, and error semantics in
 a shared `internal/` package. Keep `cmd/` handlers thin: parse transport-specific
 inputs, call the shared behavior, and render transport-specific outputs.
 
-Before adding MCP-only behavior, check the equivalent CLI operation and update
-the shared core so both adapters inherit the change. Project aliases versus CLI
+When changing a capability available in both transports, update the shared
+core so both adapters inherit the change. MCP-only capabilities follow the
+transport boundary under CLI Design below. Project aliases versus CLI
 filesystem paths, structured MCP results versus human CLI output, and process
 lifecycle are valid adapter differences; search or mutation semantics are not.
 
@@ -98,8 +99,8 @@ single-checkout default branch and removes matching approved local and origin
 head refs; do not run a separate `og pull` afterward. Dry-run remains
 non-destructive, and worktree coordination is outside this version.
 
-The CLI/MCP transport boundary and its rationale are authoritative in the
-README guidance. `og pull` remains available for its existing guarded closed-PR
+For new capabilities, the CLI Design rules below govern the CLI/MCP transport
+boundary; README guidance describes existing adapters. `og pull` remains available for its existing guarded closed-PR
 workflow, while successful real merge cleanup is automatic.
 Telegram, webhooks, a daemon, and Impri key provisioning or rotation are
 outside this version.
@@ -127,13 +128,14 @@ CGO_ENABLED=0 go test -v -run TestSymbols ./internal/treesitter/...
 
 ## CLI Design
 
-For commands that accept potentially multiline content, read that content from stdin. Do not add positional body/text arguments for multiline payloads. Document examples with quoted heredocs:
+Implement all future capabilities that accept potentially multiline content
+only as typed MCP tools. Do not add CLI adapters for those capabilities,
+including stdin, file, positional, or flag-based payload inputs. This rule
+concerns input; CLI read operations may return multiline output.
 
-```bash
-cat <<'EOF' | tool command --flag value
-multiline content
-EOF
-```
+All issue write operations are MCP-only, including single-line title updates.
+Issue read operations are available through both CLI and MCP. When designing
+or implementing issue operations, read `docs/adr/0001-issue-transport-boundary.md`.
 
 ## Package Documentation
 

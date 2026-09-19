@@ -21,8 +21,114 @@ const (
 	// DefaultPRLogTail is the default number of CI log lines to request.
 	DefaultPRLogTail = 50
 	// MaxPRLogTail is the largest accepted CI log tail window.
-	MaxPRLogTail = 1000
+	MaxPRLogTail        = 1000
+	DefaultIssuePerPage = 30
+	MaxIssuePerPage     = 100
 )
+
+func ValidatePositiveIssueID(id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("issue ID must be positive")
+	}
+	return nil
+}
+func ValidateIssueTitle(title *string) error {
+	if title == nil || strings.TrimSpace(*title) == "" || strings.ContainsAny(*title, "\r\n") {
+		return fmt.Errorf("issue title must be a non-blank single line")
+	}
+	return nil
+}
+func ValidateIssueCreate(title, body *string) error {
+	if body == nil {
+		return fmt.Errorf("issue body is required")
+	}
+	return ValidateIssueTitle(title)
+}
+func ValidateIssueComment(body *string) error {
+	if body == nil || strings.TrimSpace(*body) == "" {
+		return fmt.Errorf("issue comment body must not be blank")
+	}
+	return nil
+}
+func normalizeIssuePage(state string, page, per int, search bool) (string, int, int, error) {
+	if state == "" {
+		if search {
+			state = PRStateAll
+		} else {
+			state = PRStateOpen
+		}
+	}
+	if state != PRStateOpen && state != PRStateClosed && state != PRStateAll {
+		return "", 0, 0, fmt.Errorf("issue state must be open, closed, or all")
+	}
+	if page == 0 {
+		page = 1
+	}
+	if per == 0 {
+		per = DefaultIssuePerPage
+	}
+	if page < 1 {
+		return "", 0, 0, fmt.Errorf("issue page must be positive")
+	}
+	if per < 1 || per > MaxIssuePerPage {
+		return "", 0, 0, fmt.Errorf("issue per-page must be between 1 and %d", MaxIssuePerPage)
+	}
+	return state, page, per, nil
+}
+func ValidateIssueEdits(edits []BodyEdit) error {
+	if len(edits) == 0 {
+		return fmt.Errorf("issue edits must not be empty")
+	}
+	seen := map[string]bool{}
+	for _, edit := range edits {
+		if edit.OldText == "" {
+			return fmt.Errorf("issue edit oldText must not be empty")
+		}
+		if edit.OldText == edit.NewText {
+			return fmt.Errorf("issue edit oldText and newText must differ")
+		}
+		if seen[edit.OldText] {
+			return fmt.Errorf("issue edits contain duplicate oldText")
+		}
+		seen[edit.OldText] = true
+	}
+	return nil
+}
+func applyIssueEdits(body string, edits []BodyEdit) (string, error) {
+	type match struct {
+		start, end  int
+		replacement string
+	}
+	matches := make([]match, 0, len(edits))
+	for _, edit := range edits {
+		start := strings.Index(body, edit.OldText)
+		if start < 0 {
+			return "", fmt.Errorf("issue edit oldText was not found")
+		}
+		if strings.Contains(body[start+1:], edit.OldText) {
+			return "", fmt.Errorf("issue edit oldText is ambiguous")
+		}
+		matches = append(matches, match{start, start + len(edit.OldText), edit.NewText})
+	}
+	for i := range matches {
+		for j := i + 1; j < len(matches); j++ {
+			if matches[i].start < matches[j].end && matches[j].start < matches[i].end {
+				return "", fmt.Errorf("issue edits overlap or are nested")
+			}
+		}
+	}
+	for i := 0; i < len(matches); i++ {
+		for j := i + 1; j < len(matches); j++ {
+			if matches[j].start > matches[i].start {
+				matches[i], matches[j] = matches[j], matches[i]
+			}
+		}
+	}
+	for _, match := range matches {
+		body = body[:match.start] + match.replacement + body[match.end:]
+	}
+	return body, nil
+}
 
 // ValidatePositivePRID requires an explicit pull request ID to be positive.
 func ValidatePositivePRID(id int64) error {

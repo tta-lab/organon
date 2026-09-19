@@ -30,6 +30,15 @@ Tools:
   pr_log                  # inspect CI state and failure log tail
   pr_failures             # inspect failing checks and log tails
   pr_merge                # submit an Impri approval-gated squash merge
+  issue_list              # list issues (open by default)
+  issue_search            # search repository issues (all states by default)
+  issue_get               # get an explicit issue ID
+  issue_comments          # page issue comments, oldest first
+  issue_create            # create with required title and body
+  issue_update_title      # replace only a title
+  issue_replace_body      # replace only a body (empty clears it)
+  issue_edit_body         # exact oldText/newText body edits
+  issue_comment           # add an issue comment
 
 Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
 CLI behavior and operate on the current named branch at the path registered for
@@ -70,6 +79,13 @@ Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,
 API-key provisioning/rotation, and worktree coordination are outside this
 version. Real merge performs guarded single-checkout cleanup automatically;
 `og pull` remains available for its existing closed-PR workflow.
+
+Issue operations support GitHub and Forgejo only; generic remotes fail before a
+provider request. Every explicit issue ID rejects pull requests. Issue writes
+are MCP-only and do not retry uncertain create/comment requests. `issue_edit_body`
+reads the current body then requires every `oldText` to match exactly once in
+that same body; duplicate, missing, ambiguous, nested, overlapping, and no-op
+edits fail before its one body write. Concurrent remote body edits can still race.
 
 Example MCP client configuration:
 

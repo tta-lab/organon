@@ -39,6 +39,75 @@ func TestForgejoProviderEditPRSendsEmptyBody(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo // One HTTP fixture exercises the provider's related issue endpoints.
+func TestForgejoIssueFieldUpdatesAndCommentPagination(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/version" {
+			_, _ = w.Write([]byte(`{"version":"9.0.0"}`))
+			return
+		}
+		if r.Method == http.MethodPatch {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			requests = append(requests, body)
+			_, _ = w.Write([]byte(`{"number":7,"title":"title","body":"","state":"open","html_url":"https://example/7"}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/o/r/issues/7/comments" {
+			w.Header().Set("Link", `<http://example/?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`[{"id":9,"body":"comment","html_url":"https://example/comment"}]`))
+			return
+		}
+		t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	provider, err := NewForgejoProviderWithToken(context.Background(), server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := provider.(*ForgejoProvider)
+	if _, err = p.UpdateIssueTitle("o", "r", 7, "title"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.ReplaceIssueBody("o", "r", 7, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0]["title"] != "title" || requests[0]["body"] != nil || requests[1]["body"] != "" {
+		t.Fatalf("requests = %#v", requests)
+	}
+	comments, err := p.ListIssueComments("o", "r", 7, 1, 30)
+	if err != nil || !comments.HasNext || len(comments.Comments) != 1 || comments.Comments[0].ID != 9 {
+		t.Fatalf("comments=%#v err=%v", comments, err)
+	}
+}
+
+func TestForgejoListIssuesUsesIssueSearchParameters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/version" {
+			_, _ = w.Write([]byte(`{"version":"9.0.0"}`))
+			return
+		}
+		if r.URL.Path != "/api/v1/repos/o/r/issues" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("type") != "issues" || q.Get("q") != "needle" || q.Get("state") != "closed" ||
+			q.Get("page") != "2" || q.Get("limit") != "10" {
+			t.Fatalf("query=%s", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	provider, err := NewForgejoProviderWithToken(context.Background(), server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = provider.(*ForgejoProvider).ListIssues("o", "r", "needle", "closed", 2, 10); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestForgejoProviderMergePRUsesSquashAndExpectedSHA(t *testing.T) {
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
