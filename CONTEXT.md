@@ -5,6 +5,12 @@ source editing, skills, project registries, token counts, and forge workflows.
 
 ## Language
 
+**Registered project**:
+A repository identified by a canonical remote, with a configured alias and local
+checkout path. A standalone local directory without a canonical remote is not a
+registered project.
+_Avoid_: arbitrary workspace, directory bookmark
+
 **Derived clone path**:
 The controlled local destination computed from a URL clone's host, owner, and
 repository. Its owner and repository directory components are lowercase.

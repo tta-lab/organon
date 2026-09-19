@@ -714,7 +714,8 @@ func TestCLIRejectsUnknownOGProjectBeforeExecutorWithRecovery(t *testing.T) {
 		return og.Response{Message: "unexpected"}, nil
 	}}
 	_, _, err := runDirectCLI(t, executor, testProjectStore(t), "", "push", "--project", "missing", "--json")
-	if err == nil || !strings.Contains(err.Error(), "project find") || !strings.Contains(err.Error(), "project list") {
+	if err == nil || !strings.Contains(err.Error(), "og project find") ||
+		!strings.Contains(err.Error(), "og project list") {
 		t.Fatalf("error = %v, want shared recovery guidance", err)
 	}
 	if called {

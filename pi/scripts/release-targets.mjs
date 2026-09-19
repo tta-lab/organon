@@ -1,6 +1,6 @@
 // Supported public native package targets. Keep platform/build metadata here so
 // staging, artifact invariants, and package inventory tests cannot drift.
-export const NATIVE_TOOLS = ["src", "project", "og"];
+export const NATIVE_TOOLS = ["src"];
 
 const ALL_TOOLS = NATIVE_TOOLS;
 

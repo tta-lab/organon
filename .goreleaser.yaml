@@ -30,18 +30,6 @@ builds:
       - amd64
       - arm64
 
-  - id: project
-    binary: project
-    main: ./cmd/project
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-
   - id: goal
     binary: goal
     main: ./cmd/goal
@@ -88,7 +76,6 @@ archives:
     builds:
       - src
       - skill
-      - project
       - goal
       - token
       - og

@@ -84,14 +84,227 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 		"auth_status", "clone", "issue_comment", "issue_comments", "issue_create",
 		"issue_edit_body", "issue_get", "issue_list", "issue_replace_body",
 		"issue_search", "issue_update_title", "pr_checks", "pr_comment", "pr_create",
-		"pr_failures",
-		"pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify", "pull", "push",
+		"pr_failures", "pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify",
+		"project_find", "project_get", "project_list", "pull", "push",
 	}
 	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
 		t.Fatalf("tools = %v, want %v", gotNames, wantNames)
 	}
 
 	assertDirectMCPToolCalls(t, session, &requests)
+}
+
+//nolint:gocyclo // One focused session covers the retained project MCP contracts.
+func TestOGMCPProjectToolsPreserveDiscoveryContracts(t *testing.T) {
+	home := t.TempDir()
+	projectsPath := filepath.Join(home, "projects.toml")
+	if err := os.WriteFile(projectsPath, []byte(`[fb]
+name = "FlickNote Backend"
+path = "/work/flick-backend"
+remote = "https://github.com/tta-lab/flick-backend.git"
+
+[demo]
+path = "/work/demo"
+remote = "https://github.com/tta-lab/demo.git"
+
+[archived.old]
+path = "/work/old"
+remote = "https://github.com/tta-lab/old.git"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	references := filepath.Join(home, "references")
+	if err := os.MkdirAll(filepath.Join(references, "github.com", "other", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	referenceOnly := filepath.Join(references, "github.com", "other", "reference-only")
+	if err := os.MkdirAll(referenceOnly, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := connectDirectMCP(t, &directExecutor{}, project.NewDiscoveryStore(projectsPath, references))
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if !strings.HasPrefix(tool.Name, "project_") {
+			continue
+		}
+		if tool.InputSchema == nil || tool.OutputSchema == nil || tool.Annotations == nil ||
+			!tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint ||
+			tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
+			t.Fatalf("project tool contract = %#v", tool)
+		}
+	}
+	byName := make(map[string]*mcp.Tool, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		byName[tool.Name] = tool
+	}
+	assertProjectSchema := func(name string, required []string, types map[string]string) {
+		t.Helper()
+		schema, ok := byName[name].InputSchema.(map[string]any)
+		if !ok {
+			t.Fatalf("%s schema = %#v", name, byName[name].InputSchema)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok || properties["alias"] != nil {
+			t.Fatalf("%s properties = %#v", name, properties)
+		}
+		for field, wantType := range types {
+			property, ok := properties[field].(map[string]any)
+			if !ok || !schemaTypeIncludes(property["type"], wantType) {
+				t.Fatalf("%s.%s = %#v, want type %q", name, field, property, wantType)
+			}
+		}
+		for _, field := range required {
+			found := false
+			for _, value := range schema["required"].([]any) {
+				found = found || value == field
+			}
+			if !found {
+				t.Fatalf("%s required = %#v, missing %q", name, schema["required"], field)
+			}
+		}
+	}
+	assertProjectSchema("project_get", []string{"project"}, map[string]string{"project": "string"})
+	assertProjectSchema("project_find", []string{"query"}, map[string]string{"query": "string", "limit": "integer"})
+	assertProjectSchema("project_list", nil, map[string]string{"include_archived": "boolean"})
+	call := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		result, callErr := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+		if callErr != nil || result.IsError {
+			t.Fatalf("%s result = %#v, err = %v", name, result, callErr)
+		}
+		encoded, marshalErr := json.Marshal(result.StructuredContent)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		var output map[string]any
+		if unmarshalErr := json.Unmarshal(encoded, &output); unmarshalErr != nil {
+			t.Fatal(unmarshalErr)
+		}
+		return output
+	}
+	list := call("project_list", map[string]any{"include_archived": true})
+	if projects := list["projects"].([]any); len(projects) != 3 || projects[2].(map[string]any)["archived"] != true {
+		t.Fatalf("archive list = %#v", list)
+	}
+	find := call("project_find", map[string]any{"query": "demo"})
+	if projects := find["projects"].([]any); len(projects) != 1 || projects[0].(map[string]any)["path"] != "/work/demo" {
+		t.Fatalf("registered precedence = %#v", find)
+	}
+	find = call("project_find", map[string]any{"query": "reference-only"})
+	if projects := find["projects"].([]any); len(projects) != 1 || projects[0].(map[string]any)["path"] != referenceOnly ||
+		projects[0].(map[string]any)["reference"] != true {
+		t.Fatalf("reference find = %#v", find)
+	}
+	get := call("project_get", map[string]any{"project": "FLICK-BACKEND"})
+	if get["project"].(map[string]any)["alias"] != "fb" {
+		t.Fatalf("canonical get = %#v", get)
+	}
+}
+
+func schemaTypeIncludes(value any, want string) bool {
+	if actual, ok := value.(string); ok {
+		return actual == want
+	}
+	values, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, candidate := range values {
+		if candidate == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestOGMCPDefersUnavailableForgeConfiguration(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "ttal")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectsPath := filepath.Join(configDir, "projects.toml")
+	if err := os.WriteFile(projectsPath, []byte(`[ko]
+path = "/work/ko"
+remote = "https://github.com/tta-lab/ko.git"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "og.toml")
+	if err := os.Mkdir(filepath.Join(configDir, "og"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[github_app]
+app_id = 1
+key_source = "file"
+key_ref = "og/unavailable.pem"
+allowed_owners = ["tta-lab"]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor := newDeferredExecutor(func() (og.Executor, error) {
+		return og.LoadService(configPath, configDir)
+	})
+	session := connectDirectMCP(t, executor, project.NewDiscoveryStore(projectsPath, filepath.Join(home, "references")))
+	projectResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "project_get", Arguments: map[string]any{"project": "ko"},
+	})
+	if err != nil || projectResult.IsError {
+		t.Fatalf("project result = %#v, err = %v", projectResult, err)
+	}
+	forgeResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "auth_status", Arguments: map[string]any{"project": "ko"},
+	})
+	text, ok := forgeResult.Content[0].(*mcp.TextContent)
+	content := ""
+	if ok {
+		content = text.Text
+	}
+	if err != nil || !forgeResult.IsError || !strings.Contains(content, "unavailable.pem") {
+		t.Fatalf("forge result = %#v, content = %q, err = %v", forgeResult, content, err)
+	}
+}
+
+func TestDeferredExecutorLoadsOnceAfterProjectCalls(t *testing.T) {
+	loads := 0
+	var operations []string
+	var requests []og.Request
+	executor := newDeferredExecutor(func() (og.Executor, error) {
+		loads++
+		return &directExecutor{
+			authStatus: func(request og.Request) (og.Response, error) {
+				operations = append(operations, "auth_status")
+				requests = append(requests, request)
+				return og.Response{Auth: &og.AuthStatus{Project: "ko", Ready: true}}, nil
+			},
+			gitPush: func(request og.Request) (og.Response, error) {
+				operations = append(operations, "push")
+				requests = append(requests, request)
+				return og.Response{Message: "pushed"}, nil
+			},
+		}, nil
+	})
+	session := connectDirectMCP(t, executor, testProjectStore(t))
+	for _, call := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "project_get", args: map[string]any{"project": "ko"}},
+		{name: "auth_status", args: map[string]any{"project": "ko"}},
+		{name: "push", args: map[string]any{"project": "ko"}},
+	} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: call.name, Arguments: call.args})
+		if err != nil || result.IsError {
+			t.Fatalf("%s result = %#v, err = %v", call.name, result, err)
+		}
+	}
+	if loads != 1 || fmt.Sprint(operations) != "[auth_status push]" || len(requests) != 2 ||
+		requests[0].WorkDir != "/work/ko" || requests[1].WorkDir != "/work/ko" {
+		t.Fatalf("loads = %d, operations = %v, requests = %#v", loads, operations, requests)
+	}
 }
 
 //nolint:gocyclo // One MCP call sequence asserts required and explicit-empty body semantics.
@@ -676,8 +889,8 @@ func TestOGMCPRejectsUnknownProjectBeforeExecutorWithRecovery(t *testing.T) {
 	}
 	content, _ := json.Marshal(result.Content)
 	if !result.IsError ||
-		!strings.Contains(string(content), "project find") ||
-		!strings.Contains(string(content), "project list") {
+		!strings.Contains(string(content), "og project find") ||
+		!strings.Contains(string(content), "og project list") {
 		t.Fatalf("result = %#v, want shared recovery tool error", result)
 	}
 	if called {

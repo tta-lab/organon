@@ -1,8 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import ogExtension from "../../pi-og/src/index.js";
-import projectExtension from "../../pi-project/src/index.js";
 import srcExtension from "../../pi-src/src/index.js";
 
 function withPlatform<T>(platform: NodeJS.Platform, arch: NodeJS.Architecture, run: () => T): T {
@@ -22,12 +20,8 @@ function withPlatform<T>(platform: NodeJS.Platform, arch: NodeJS.Architecture, r
 }
 
 describe("extension startup", () => {
-  it.each([
-    ["project", projectExtension],
-    ["src", srcExtension],
-    ["og", ogExtension],
-  ] as const)("rejects Windows x64 while registering %s", (_name, extension) => {
+  it("rejects Windows x64 while registering src", () => {
     const pi = { registerTool() {}, on() {} } as unknown as ExtensionAPI;
-    expect(() => withPlatform("win32", "x64", () => extension(pi))).toThrow(/not supported/);
+    expect(() => withPlatform("win32", "x64", () => srcExtension(pi))).toThrow(/not supported/);
   });
 });

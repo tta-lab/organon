@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TSchema } from "typebox";
 
-import {
-  ogChecksSchema,
-  ogCloneSchema,
-  ogPrSchema,
-  ogPullSchema,
-  ogPushSchema,
-} from "../../pi-og/src/tool.js";
-import {
-  projectFindSchema,
-  projectGetSchema,
-  projectListSchema,
-} from "../../pi-project/src/tool.js";
 import { editSchema, readSchema } from "../../pi-src/src/tool.js";
 
 interface JsonSchemaLike {
@@ -40,14 +28,6 @@ describe("registered Pi tool schemas are provider-compatible", () => {
   const tools: Array<[string, TSchema]> = [
     ["read", readSchema],
     ["edit", editSchema],
-    ["project_list", projectListSchema],
-    ["project_find", projectFindSchema],
-    ["project_get", projectGetSchema],
-    ["og_clone", ogCloneSchema],
-    ["og_pull", ogPullSchema],
-    ["og_push", ogPushSchema],
-    ["og_pr", ogPrSchema],
-    ["og_checks", ogChecksSchema],
   ];
 
   it.each(tools)("%s is a closed direct object schema", (name, schema) => {

@@ -268,6 +268,7 @@ func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) e
 
 func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
+	addProjectTools(server, projects)
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",
@@ -691,15 +692,14 @@ func newOGMCPCmd() *cobra.Command {
 			if err := config.InjectDotEnvFallback(); err != nil {
 				cmd.PrintErrf("warning: could not load .env: %v\n", err)
 			}
-			service, err := og.LoadService(config.OGConfigPath(), config.DefaultConfigDir())
-			if err != nil {
-				return err
-			}
-			projects := service.ProjectStore()
+			projects := discoveryStore()
 			if _, err := projects.Snapshot(); err != nil {
 				return err
 			}
-			return newOGMCPServer(projects, service).Run(cmd.Context(), &mcp.StdioTransport{})
+			executor := newDeferredExecutor(func() (og.Executor, error) {
+				return og.LoadService(config.OGConfigPath(), config.DefaultConfigDir())
+			})
+			return newOGMCPServer(projects, executor).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
 }

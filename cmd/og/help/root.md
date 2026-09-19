@@ -6,7 +6,7 @@ Organon forge operations.
 contains registry- and URL-based clone, issue discovery/reading, pull request inspection/commenting,
 approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
 creation and modification are available only through the typed MCP
-`pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions; merge also
+`pr_create`/`pr_modify` tools; merge also
 has a CLI adapter because it accepts only structured scalar flags. Agents should
 default to typed MCP, and both merge adapters use the same Impri gate.
 
@@ -32,6 +32,11 @@ finish cleanup, and do not run the forge merge again. `og pull` remains
 available for its existing guarded closed-PR workflow. Worktree coordination is
 outside this version. Impri configuration is read only from this `og.toml`; no
 `IMPRI_*` environment-variable fallback or second config file exists.
+
+`og project` owns local registered-project discovery and navigation. Use
+`og project list`, `find`, `get`, `resolve`, and `jump`; resolve emits JSON
+identity/path data and jump emits a path only. These operations use local
+catalog/reference state and do not need forge credentials or network access.
 
 `og clone <project-reference>` clones the registered remote to the registered
 path. A project reference is a case-insensitive canonical alias, checkout
@@ -60,7 +65,7 @@ operations with an omitted ID use the registered checkout's current branch.
 Explicit-ID PR operations remain independent of the checked-out branch.
 
 Unknown or ambiguous references fail before Git, credentials, or forge work and
-point callers to `project find` or `project list`. Archived projects remain
+point callers to `og project find` or `og project list`. Archived projects remain
 resolvable and visibly marked; active-only discovery does not search archives.
 Archived projects may use read-only forge/CI operations plus a fast-forward-only
 pull on their known default branch. Push, tag, PR mutation/comment, and pull

@@ -53,30 +53,30 @@ describe("platform detection", () => {
 
   it("names the host native package for a tool", () => {
     const { os, arch } = detectPlatform();
-    expect(nativePackageName("project")).toBe(`@tta-lab/pi-project-${os}-${arch}`);
+    expect(nativePackageName("src")).toBe(`@tta-lab/pi-src-${os}-${arch}`);
   });
 });
 
 describe("binary resolution", () => {
   it("resolves the host native package's bin/<tool> via the resolver", () => {
     const { os, arch } = detectPlatform();
-    const resolved = resolveBinaryPath("project", {
+    const resolved = resolveBinaryPath("src", {
       resolve: (specifier) => {
-        expect(specifier).toBe(`@tta-lab/pi-project-${os}-${arch}/package.json`);
+        expect(specifier).toBe(`@tta-lab/pi-src-${os}-${arch}/package.json`);
         return join(here, "fake-node-modules", specifier);
       },
     });
-    expect(resolved.replaceAll("\\", "/").endsWith(`/bin/project`)).toBe(true);
+    expect(resolved.replaceAll("\\", "/").endsWith(`/bin/src`)).toBe(true);
   });
 
   it("throws an actionable error when the native package is missing", () => {
     expect(() =>
-      resolveBinaryPath("project", {
+      resolveBinaryPath("src", {
         resolve: () => {
           throw new Error("Cannot find module");
         },
       }),
-    ).toThrow(/native package @tta-lab\/pi-project-/);
+    ).toThrow(/native package @tta-lab\/pi-src-/);
   });
 });
 
@@ -99,7 +99,7 @@ describe("unsupported Windows hosts", () => {
   it("rejects every tool on win32/x64", () => {
     expect(() => withPlatform("win32", "x64", () => detectPlatform())).toThrow(/not supported/);
     expect(() =>
-      withPlatform("win32", "x64", () => resolveBinaryPath("project", { resolve: () => "" })),
+      withPlatform("win32", "x64", () => resolveBinaryPath("src", { resolve: () => "" })),
     ).toThrow(/not supported/);
   });
 });

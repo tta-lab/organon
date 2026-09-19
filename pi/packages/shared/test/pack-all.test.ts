@@ -165,7 +165,7 @@ describe("all native package manifests", () => {
       expectPublicMetadata(manifest, packageRepositoryDirectory(entry));
       expect(packageFiles(tgz)).toContain("package/README.md");
 
-      const piTool = entry.name.match(/^@tta-lab\/pi-(src|project|og)$/)?.[1];
+      const piTool = entry.name.match(/^@tta-lab\/pi-(src)$/)?.[1];
       const expectedTargets = piTool === undefined ? [] : nativeTargetsForTool(piTool);
       const expectedDependencies = expectedTargets.map(
         ({ packageSuffix: suffix }) => `@tta-lab/pi-${piTool}-${suffix}`,
@@ -208,18 +208,6 @@ describe("all native package manifests", () => {
           expect(result.details.diff).toContain("return 1");
           expect(result.details.patch).toContain("--- a/");
         },
-      },
-      {
-        tool: "project",
-        publicTool: "project_list",
-        action: {},
-        assert: (result: any) => expect(result.details.projects.length).toBeGreaterThan(0),
-      },
-      {
-        tool: "og",
-        publicTool: "og_push",
-        action: { project: "ko" },
-        assert: (result: any) => expect(result.details.message).toContain("push completed"),
       },
     ];
 

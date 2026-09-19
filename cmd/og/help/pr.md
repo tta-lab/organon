@@ -4,7 +4,7 @@ Pull request operations.
 
 The CLI supports view/list, find, get, comment, checks/status, failure logs,
 and approval-gated squash merge. Pull-request creation and modification are typed-only:
-use the MCP `pr_create`/`pr_modify` tools or Pi's `og_pr` create/modify actions.
+use the MCP `pr_create`/`pr_modify` tools.
 Their multiline free-text bodies stay out of shell arguments; merge remains a
 CLI adapter because it accepts only short scalar flags, while agents should
 default to typed MCP. Both merge adapters use the same Impri gate.

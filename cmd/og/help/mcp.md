@@ -1,14 +1,17 @@
-Serve typed forge tools over stdio MCP. Repository operations accept a
+Serve typed project discovery and forge tools over stdio MCP. Project discovery
+uses local registry/reference state and does not require forge credentials or
+network availability. Repository operations accept a
 case-insensitive project reference: canonical alias, checkout basename, or
 remote repository basename. Exact alias matches take priority; ambiguous and
-unknown references fail safely and point to `project find` or `project list`.
+unknown references fail safely and point to `og project find` or `og project list`.
 `clone` accepts exactly one of a registered project reference or an HTTP(S) URL.
 URL mode may use an optional new `alias` or the `reference` flag. No tool accepts
 a destination path, working directory, MCP root, token, or file URI as a project
 reference.
 
-The MCP server loads configuration and the project registry once at startup,
-then reuses the configured OG service for its lifetime. All pull request tools
+The MCP server loads the local project registry at startup. It initializes forge
+configuration and service state on the first forge tool call, then retains that
+result (including an initialization error) for its lifetime. All pull request tools
 require a project reference. Get, modify, comment, checks, log, and failures
 accept an optional positive PR ID and use the registered checkout's current
 branch when it is omitted. Structured results return the canonical alias.
@@ -16,6 +19,10 @@ Unlike the shell `og pr` command, this typed interface also exposes
 `pr_create` and `pr_modify` for pull-request mutations.
 
 Tools:
+
+  project_list            # list registered projects, optionally archived
+  project_find            # find active projects and local references
+  project_get             # get one registered project by exact reference
 
   auth_status             # inspect secret-free forge authentication state
   clone                   # clone registered project reference or URL
@@ -72,7 +79,7 @@ an execute_failed receipt write fails, the result remains approved and repetitio
 revalidates/reports it. Real mode is
 squash-only and permits CI state `success` or `not_configured`; pending remains
 retryable and unknown/unverifiable CI fails closed. The CLI also supports merge because
-its flags are short scalars; create/modify remain typed MCP/Pi-only to avoid
+its flags are short scalars; create/modify remain typed MCP-only to avoid
 multiline shell quoting ambiguity, and both merge adapters share this gate.
 
 Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,

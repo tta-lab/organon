@@ -317,8 +317,7 @@ Keep the migration PAT active during rollout. In one selected repository from
 each owner, run `og auth status` and require every permission to report ready.
 Then use a disposable feature branch to verify `og push`, `og pr view`,
 `og pr checks`, and `og pr comment`. Verify pull-request creation and
-modification through the typed MCP `pr_create`/`pr_modify` tools or Pi's
-`og_pr` create/modify actions. Confirm GitHub attributes the push and PR
+modification through the typed MCP `pr_create`/`pr_modify` tools. Confirm GitHub attributes the push and PR
 activity to the App bot. Also verify that an SSH-configured origin is unchanged
 on disk, an uninstalled managed write fails without fallback, and a third-party
 public repository can pull anonymously but cannot write. Inspect command errors
@@ -348,13 +347,13 @@ reactivate or reuse the exposed migration PAT.
 
 ## MCP servers
 
-`project`, `og`, and `skill` each provide a typed stdio MCP server. Configure
-them as separate processes so clients can grant only the tools a session needs:
+`og` and `skill` provide typed stdio MCP servers. `og mcp` combines local
+project discovery with guarded forge workflows; project discovery works without
+forge credentials or network availability:
 
 ```json
 {
   "mcpServers": {
-    "organon-project": { "command": "project", "args": ["mcp"] },
     "organon-og": { "command": "og", "args": ["mcp"] },
     "organon-skill": { "command": "skill", "args": ["mcp"] }
   }
@@ -367,8 +366,9 @@ are single-layer names and cannot contain dots. Project registry updates are
 visible on the next MCP call. The
 repository-oriented `og` tools accept only that alias; they do not accept a
 filesystem path, working directory, MCP root, file URI, or credential. `clone`
-accepts a URL instead. The `og` MCP process loads configuration once and owns Git,
-registration, policy, and forge credentials for its lifetime.
+accepts a URL instead. The `og` MCP process initializes configuration on its
+first forge call, then retains Git, registration, policy, credentials, or that
+initialization error for its lifetime.
 
 `skill mcp` exposes `skill_list`, `skill_find`, and `skill_get`. With no project
 argument it searches only global skill directories. With an exact registered
@@ -380,9 +380,9 @@ The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
-`og mcp` exposes thirteen typed tools: auth status, clone, push, pull, PR
+`og mcp` exposes typed project discovery, auth, clone, push, pull, PR
 create/find, PR get/modify/comment/checks/log/failures, and approval-gated
-`pr_merge`. Create and modify are typed MCP/Pi-only because their
+`pr_merge`. Create and modify are typed MCP-only because their
 user-controlled title/body fields may contain multiline free text; exposing
 those bodies through shell CLI arguments would reintroduce quoting and
 escaping ambiguity. `pr_merge` remains available through both typed MCP and
@@ -417,18 +417,12 @@ changing `og.toml`. Run
 
 ## Pi extensions
 
-Pi reaches Organon through three independently installable extension packages
-(`@tta-lab/pi-src`, `@tta-lab/pi-project`, `@tta-lab/pi-og`)
-instead of MCP configuration. Each carries a platform-matched native binary
-and its own npm release. `pi-src` replaces Pi's built-in `read` and `edit` with
-symbol-aware operations and exact multi-edit batches; `pi-project` registers
-the project tools, while `pi-og` registers
-`og_auth_status`, `og_clone`, `og_pull`, `og_push`, `og_pr`, and `og_checks`.
-All six OG tools preserve the MCP domain behavior over a local subprocess. See
-[`pi/README.md`](pi/README.md) for installation, supported platforms, the `read`
-and `edit` override behavior, and the opaque symbol-ID rules. The `project`, `og`,
-and `skill` MCP servers remain for non-Pi clients; the project-scoped `src` MCP
-server is removed.
+Pi's only native Organon package is `@tta-lab/pi-src`, which replaces Pi's
+built-in `read` and `edit` with symbol-aware operations and exact multi-edit
+batches. Pi accesses project discovery and forge workflows through its existing
+`og mcp` integration; Organon does not ship a Pi bridge for those tools. See
+[`pi/README.md`](pi/README.md) for pi-src installation, platforms, development,
+and release guidance.
 
 ## Why
 
@@ -449,7 +443,6 @@ brew install tta-lab/ttal/organon
 ```bash
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/src@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/skill@latest
-CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/project@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/og@latest
 CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/nd-playlist@latest
 ```
@@ -465,8 +458,7 @@ temenos (sandbox)
 ├── organon tools (pre-installed)
 │   ├── src    ← structure-aware file read/edit
 │   ├── skill  ← skill discovery
-│   ├── project ← registered project discovery
-│   └── og     ← guarded Git and forge operations
+│   └── og     ← project discovery plus guarded Git and forge operations
 ├── standard tools (cat, ls, grep)
 └── user code
 

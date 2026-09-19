@@ -32,7 +32,7 @@ func (e *ResolutionError) Error() string {
 	if len(e.Suggestions) > 0 {
 		message += fmt.Sprintf("; plausible active projects: %s", formatEntries(e.Suggestions))
 	}
-	return message + "; use project find or project list"
+	return message + "; use og project find or og project list"
 }
 
 func (e *ResolutionError) Unwrap() error {

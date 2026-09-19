@@ -102,9 +102,9 @@ describe("release publish plan", () => {
   });
 
   it("normalizes executable artifact names", () => {
-    expect(artifactMatchesTool("project", "project")).toBe(true);
-    expect(artifactMatchesTool("project.exe", "project")).toBe(true);
-    expect(artifactMatchesTool("project.exe", "src")).toBe(false);
+    expect(artifactMatchesTool("src", "src")).toBe(true);
+    expect(artifactMatchesTool("src.exe", "src")).toBe(true);
+    expect(artifactMatchesTool("src.exe", "other")).toBe(false);
   });
 
   it("selects beta for prereleases and latest for stable versions", () => {

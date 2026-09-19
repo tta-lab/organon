@@ -45,6 +45,7 @@ func newRootCmdWithExecutor(
 	cmd.AddCommand(newGitTagCmd())
 	cmd.AddCommand(newGitCloneCmd())
 	cmd.AddCommand(newAuthCmd())
+	cmd.AddCommand(newProjectCmd())
 	cmd.AddCommand(newOGMCPCmd())
 
 	if executor != nil {

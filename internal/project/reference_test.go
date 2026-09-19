@@ -291,8 +291,8 @@ remote = "https://example.com/owner/flick-backend-old.git"
 		t.Fatalf("suggestions = %v, want [fb]", got)
 	}
 	if strings.Contains(err.Error(), "old") ||
-		!strings.Contains(err.Error(), "project find") ||
-		!strings.Contains(err.Error(), "project list") {
+		!strings.Contains(err.Error(), "og project find") ||
+		!strings.Contains(err.Error(), "og project list") {
 		t.Fatalf("error = %v, want active suggestion and recovery hint", err)
 	}
 }
