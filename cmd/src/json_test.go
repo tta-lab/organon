@@ -623,7 +623,7 @@ func TestIsBinaryBytesRecognizesCommonSignatures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.True(t, isBinaryBytes(tc.data))
+			assert.True(t, srcview.IsBinaryBytes(tc.data))
 		})
 	}
 }
@@ -652,4 +652,39 @@ func TestReadJSONCRLFAndBOM(t *testing.T) {
 	}))
 	assert.Equal(t, "\xef\xbb\xbfpackage p\r\n\r\nfunc F() {}\r\n", out.Content)
 	assert.Equal(t, 4, out.TotalLines)
+}
+
+func TestSymbolsJSONAllowsTextBeginningGIF(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(file, []byte("GIF study\n# Topic\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := decodeOutline(t, captureStdout(t, func() {
+		require.NoError(t, runSymbolsJSON(newSymbolsCmd(), []string{file}))
+	}))
+	assert.Equal(t, "markdown", out.Language)
+	assert.Equal(t, "Topic", out.Title)
+}
+
+func TestReadJSONFieldShapeAndExplicitZeroLimit(t *testing.T) {
+	file := writeGoFile(t, "package p\nfunc F() {}\n")
+	full := captureStdout(t, func() { require.NoError(t, runReadJSON(newReadCmd(), []string{file})) })
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(full), &fields))
+	for _, name := range []string{"path", "content", "start_line", "total_lines", "truncation_total_lines",
+		"total_bytes", "truncated", "output_lines", "output_bytes", "output_end_line"} {
+		assert.Contains(t, fields, name)
+	}
+	for _, name := range []string{"symbol_id", "truncated_by", "remaining_lines", "next_offset",
+		"first_line_exceeds_limit", "media"} {
+		assert.NotContains(t, fields, name)
+	}
+	cmd := newReadCmd()
+	require.NoError(t, cmd.Flags().Set("limit", "0"))
+	zero := captureStdout(t, func() { require.NoError(t, runReadJSON(cmd, []string{file})) })
+	fields = map[string]any{}
+	require.NoError(t, json.Unmarshal([]byte(zero), &fields))
+	assert.Equal(t, "", fields["content"])
+	assert.Equal(t, float64(1), fields["next_offset"])
+	assert.NotContains(t, fields, "output_lines")
 }

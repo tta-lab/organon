@@ -5,9 +5,22 @@ case-insensitive project reference: canonical alias, checkout basename, or
 remote repository basename. Exact alias matches take priority; ambiguous and
 unknown references fail safely and point to `og project find` or `og project list`.
 `clone` accepts exactly one of a registered project reference or an HTTP(S) URL.
-URL mode may use an optional new `alias` or the `reference` flag. No tool accepts
-a destination path, working directory, MCP root, token, or file URI as a project
-reference.
+URL mode may use an optional new `alias` or the `reference` flag. Repository
+and forge tools do not accept a destination path, working directory, MCP root,
+token, or file URI as a project reference. Source tools additionally
+accept an absolute path only when it exactly matches a registered checkout.
+
+Source tools are strictly read-only and closed-world. Their `project` selector
+accepts a registered reference or the exact absolute path of a registered
+checkout. `path` is repository-relative and cannot escape through `..` or a
+symlink. Search takes a `pattern` in ripgrep regex syntax and returns path,
+line, column, and text for at most 50 matches by default (maximum 200). It reports
+`truncated` when more matches exist. Results use ripgrep traversal order without
+a global path sort. An empty match list is success.
+`source_read` is text-only; image and binary files produce errors (the `src`
+JSON CLI retains its Pi media result). It uses one-indexed line `offset` and
+optional `limit`, with `next_offset` for continuation; returned content is capped by the shared
+2,000-line/50-KB read window.
 
 The MCP server loads the local project registry at startup. It initializes forge
 configuration and service state on the first forge tool call, then retains that
@@ -23,6 +36,10 @@ Tools:
   project_list            # list registered projects, optionally archived
   project_find            # find active projects and local references
   project_get             # get one registered project by exact reference
+
+  source_search           # bounded ripgrep regex search in a registered checkout
+  source_symbols          # depth-two code symbols or Markdown headings with opaque IDs
+  source_read             # bounded text read by path or symbol/section ID
 
   auth_status             # inspect secret-free forge authentication state
   clone                   # clone registered project reference or URL

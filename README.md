@@ -348,8 +348,9 @@ reactivate or reuse the exposed migration PAT.
 ## MCP servers
 
 `og` and `skill` provide typed stdio MCP servers. `og mcp` combines local
-project discovery with guarded forge workflows; project discovery works without
-forge credentials or network availability:
+project discovery, read-only source search/inspection, and guarded forge
+workflows. Project discovery and source inspection work without forge credentials
+or network availability:
 
 ```json
 {
@@ -364,9 +365,10 @@ Use `project_get` or `project_list` to discover the exact five-field project
 record: alias, name, path, canonical remote, and archive state. Active aliases
 are single-layer names and cannot contain dots. Project registry updates are
 visible on the next MCP call. The
-repository-oriented `og` tools accept only that alias; they do not accept a
-filesystem path, working directory, MCP root, file URI, or credential. `clone`
-accepts a URL instead. The `og` MCP process initializes configuration on its
+repository-oriented `og` tools accept project references, but not a filesystem
+path, working directory, MCP root, file URI, or credential. Source tools also
+accept an absolute path exactly equal to a registered checkout; their file paths
+must remain within that checkout. `clone` accepts a URL instead. The `og` MCP process initializes configuration on its
 first forge call, then retains Git, registration, policy, credentials, or that
 initialization error for its lifetime.
 
@@ -380,9 +382,12 @@ The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
-`og mcp` exposes typed project discovery, auth, clone, push, pull, PR
+`og mcp` exposes typed project discovery, read-only `source_search`,
+`source_symbols`, and `source_read`, plus auth, clone, push, pull, PR
 create/find, PR get/modify/comment/checks/log/failures, and approval-gated
-`pr_merge`. Create and modify are typed MCP-only because their
+`pr_merge`. `source_search(project, pattern, limit?)` accepts a ripgrep
+regular-expression pattern as one argument; Organon controls all rg flags and
+the registered checkout root. Create and modify are typed MCP-only because their
 user-controlled title/body fields may contain multiline free text; exposing
 those bodies through shell CLI arguments would reintroduce quoting and
 escaping ambiguity. `pr_merge` remains available through both typed MCP and

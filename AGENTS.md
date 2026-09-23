@@ -28,7 +28,7 @@ Kubernetes deployment configuration and `just impri-*` operations are in
 - `cmd/src/` — tree-sitter symbol-aware file reading/editing with local path resolution and `--json` output for Pi extension adapters
 - `cmd/skill/` — filesystem-based skill discovery plus read-only MCP
 - `cmd/token/` — LLM token counting using tiktoken-go with cl100k_base tokenizer (Claude / GPT-4)
-- `cmd/og/` — registered-project discovery/navigation plus guarded Git, forge, issue, and MCP workflows
+- `cmd/og/` — registered-project discovery, read-only source MCP adapters, and guarded Git, forge, and issue workflows
 - `cmd/goal/` — Lenos session goal file CLI: add/update/append/get/status via `$LENOS_GOAL`
 
 ### Shared Packages
@@ -37,7 +37,7 @@ Kubernetes deployment configuration and `just impri-*` operations are in
 - `internal/indent/` — file indent-style detection (layered: hardcoded table for opinionated languages, per-file majority scan for open languages) and reindent transform
 - `internal/skill/` — filesystem-based skill discovery, frontmatter parsing, and shared CLI/MCP search behavior
 - `internal/token/` — LLM token counting with tiktoken-go; sync.OnceValues lazy init, regex fallback
-- `internal/srcview/` — trusted source outlines and line-oriented reads shared by the CLI and the Pi src extension
+- `internal/srcview/` — source outlines and bounded read windows shared by CLI/Pi and og MCP, plus project-contained file access and lexical search for og MCP
 - `internal/truncate/` — Pi-equivalent head truncation (2,000 lines / 50 KB) for CLI JSON output
 
 ### Tool-Specific Packages

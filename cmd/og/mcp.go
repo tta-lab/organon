@@ -269,6 +269,7 @@ func validateCloneSelector(projectAlias, rawURL, alias string, reference bool) e
 func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
 	addProjectTools(server, projects)
+	addSourceTools(server, projects)
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",

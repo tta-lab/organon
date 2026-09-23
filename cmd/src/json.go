@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -15,37 +12,12 @@ import (
 )
 
 // symbolOutlineJSON is the typed outline returned by `src symbols --json`.
-type symbolOutlineJSON struct {
-	Path       string           `json:"path"`
-	Language   string           `json:"language"`
-	Title      string           `json:"title,omitempty"`
-	TotalBytes int              `json:"total_bytes"`
-	Symbols    []srcview.Symbol `json:"symbols"`
-}
+type symbolOutlineJSON = srcview.SymbolResult
 
-// readJSON is the machine-readable result of `src read --json`. Line
-// positions (StartLine, TotalLines, NextOffset) are relative to the selected
-// content: the whole file, or the exact symbol/section when symbol_id is
-// present. TotalLines uses pagination's addressable-line model;
-// TruncationTotalLines and OutputLines use Pi truncateHead's counted
-// line model. Offset and limit are 1-indexed line positions in the same frame.
+// readJSON adds CLI media handling to the shared machine-readable text result.
 type readJSON struct {
-	Path                  string     `json:"path"`
-	SymbolID              string     `json:"symbol_id,omitempty"`
-	Content               string     `json:"content"`
-	StartLine             int        `json:"start_line"`
-	TotalLines            int        `json:"total_lines"`
-	TruncationTotalLines  int        `json:"truncation_total_lines"`
-	TotalBytes            int        `json:"total_bytes"`
-	Truncated             bool       `json:"truncated"`
-	TruncatedBy           string     `json:"truncated_by,omitempty"`
-	OutputLines           int        `json:"output_lines,omitempty"`
-	OutputBytes           int        `json:"output_bytes,omitempty"`
-	OutputEndLine         int        `json:"output_end_line,omitempty"`
-	RemainingLines        int        `json:"remaining_lines,omitempty"`
-	NextOffset            int        `json:"next_offset,omitempty"`
-	FirstLineExceedsLimit bool       `json:"first_line_exceeds_limit,omitempty"`
-	Media                 *mediaJSON `json:"media,omitempty"`
+	srcview.ReadResult
+	Media *mediaJSON `json:"media,omitempty"`
 }
 
 // mediaJSON carries a recognized image so the Pi adapter can attach media
@@ -91,49 +63,10 @@ type editBatchJSON struct {
 	EditsApplied     int    `json:"edits_applied"`
 }
 
-// commonBinarySignatures identify non-text formats whose headers may otherwise
-// be valid UTF-8 and contain no NUL byte. Recognized images are handled before
-// this classifier so supported image files still become media attachments.
-var commonBinarySignatures = [][]byte{
-	[]byte("%PDF-"),
-	[]byte("PK\x03\x04"), // ZIP local file header
-	[]byte("PK\x05\x06"), // ZIP empty archive header
-	[]byte("PK\x07\x08"), // ZIP spanned archive header
-	{0x7F, 'E', 'L', 'F'},
-	{0xFE, 0xED, 0xFA, 0xCE}, // Mach-O 32-bit big-endian
-	{0xCE, 0xFA, 0xED, 0xFE}, // Mach-O 32-bit little-endian
-	{0xFE, 0xED, 0xFA, 0xCF}, // Mach-O 64-bit big-endian
-	{0xCF, 0xFA, 0xED, 0xFE}, // Mach-O 64-bit little-endian
-	{0xCA, 0xFE, 0xBA, 0xBE}, // Mach-O universal binary
-	{0xBE, 0xBA, 0xFE, 0xCA}, // Mach-O universal binary, byte-swapped
-	{0xCA, 0xFE, 0xBA, 0xBF}, // Mach-O 64-bit universal binary
-	{0xBF, 0xBA, 0xFE, 0xCA}, // Mach-O 64-bit universal binary, byte-swapped
-	{0x00, 'a', 's', 'm'},
-}
-
-// isBinaryBytes reports binary content via a NUL byte in the first 8 KiB or a
-// common binary signature at the start of the file.
-func isBinaryBytes(data []byte) bool {
-	check := data
-	if len(check) > 8192 {
-		check = check[:8192]
-	}
-	return bytes.IndexByte(check, 0) >= 0 || hasBinarySignature(data)
-}
-
-func hasBinarySignature(data []byte) bool {
-	for _, signature := range commonBinarySignatures {
-		if bytes.HasPrefix(data, signature) {
-			return true
-		}
-	}
-	return false
-}
-
 // validateTextSource rejects unsupported image variants and binary input before
 // a symbol parser can expose a text-looking prefix from an otherwise binary file.
 func validateTextSource(filename string, source []byte) error {
-	if looksLikeImageButUnsupported(source) || isBinaryBytes(source) || !utf8.Valid(source) {
+	if looksLikeImageButUnsupported(source) || srcview.ValidateText(source) != nil {
 		return mediaErrorFor(source, filename)
 	}
 	return nil
@@ -200,7 +133,7 @@ func writeMutationJSONWithOutline(
 		FirstChangedLine: description.FirstChangedLine,
 	}
 	if includeOutline {
-		outline, err := buildSymbolOutlineJSON(filename, result, true)
+		outline, err := srcview.BuildSymbolResult(filename, result, true)
 		if err != nil {
 			return fmt.Errorf("edit applied to %s, but post-edit outline reporting failed: %w", filename, err)
 		}
@@ -235,33 +168,6 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// buildSymbolOutlineJSON constructs the typed outline payload shared by the
-// symbols command and post-mutation results. Post-edit reporting allows an
-// empty supported-source outline; the standalone symbols command preserves its
-// existing no-structure error.
-func buildSymbolOutlineJSON(filename string, source []byte, allowEmpty bool) (symbolOutlineJSON, error) {
-	inspector := srcview.NewInspector(filename, source, 2)
-	var (
-		outline srcview.Outline
-		err     error
-	)
-	if allowEmpty {
-		outline, err = inspector.OutlineAllowEmpty()
-	} else {
-		outline, err = inspector.Outline()
-	}
-	if err != nil {
-		return symbolOutlineJSON{}, err
-	}
-	if outline.Symbols == nil {
-		outline.Symbols = make([]srcview.Symbol, 0)
-	}
-	return symbolOutlineJSON{
-		Path: filename, Language: outline.Language, Title: outline.Title,
-		TotalBytes: len(source), Symbols: outline.Symbols,
-	}, nil
-}
-
 // runSymbolsJSON implements `src symbols <file> --json` with the extension's
 // fixed depth of 2 so every later symbol operation resolves IDs from the same
 // outline shape.
@@ -274,7 +180,7 @@ func runSymbolsJSON(cmd *cobra.Command, args []string) error {
 	if err := validateTextSource(filename, source); err != nil {
 		return err
 	}
-	outline, err := buildSymbolOutlineJSON(filename, source, false)
+	outline, err := srcview.BuildSymbolResult(filename, source, false)
 	if err != nil {
 		return err
 	}
@@ -346,26 +252,16 @@ func runReadJSON(cmd *cobra.Command, args []string) error {
 }
 
 func buildReadJSON(
-	filename string,
-	source []byte,
-	symbolID string,
-	offset, limit int,
-	limitSet bool,
+	filename string, source []byte, symbolID string,
+	offset, limit int, limitSet bool,
 ) (readJSON, error) {
-	var content string
 	if symbolID != "" {
 		if err := validateTextSource(filename, source); err != nil {
 			return readJSON{}, err
 		}
-		symbolContent, err := srcview.NewInspector(filename, source, 2).ReadContent(symbolID)
-		if err != nil {
-			return readJSON{}, err
-		}
-		content = symbolContent
 	} else {
-		content = string(source)
 		mediaResult, err := wholeFileMediaResult(filename, source, readJSON{
-			Path: filename, TotalBytes: len(content),
+			ReadResult: srcview.ReadResult{Path: filename, TotalBytes: len(source)},
 		})
 		if err != nil {
 			return readJSON{}, err
@@ -374,24 +270,9 @@ func buildReadJSON(
 			return *mediaResult, nil
 		}
 	}
-
-	window, err := srcview.NewReadWindow(content, offset, limit, limitSet)
+	result, err := srcview.BuildReadResult(filename, source, symbolID, offset, limit, limitSet)
 	if err != nil {
-		var offsetErr *srcview.OffsetOutOfRangeError
-		if errors.As(err, &offsetErr) {
-			return readJSON{}, fmt.Errorf(
-				"offset %d is beyond end of %s (%d lines)", offsetErr.Offset, filename, offsetErr.TotalLines,
-			)
-		}
 		return readJSON{}, err
 	}
-	return readJSON{
-		Path: filename, SymbolID: symbolID, Content: window.Content,
-		StartLine: window.StartLine, TotalLines: window.TotalLines,
-		TruncationTotalLines: window.TruncationTotalLines, TotalBytes: window.TotalBytes,
-		Truncated: window.Truncated, TruncatedBy: window.TruncatedBy,
-		OutputLines: window.OutputLines, OutputBytes: window.OutputBytes,
-		OutputEndLine: window.OutputEndLine, RemainingLines: window.RemainingLines,
-		NextOffset: window.NextOffset, FirstLineExceedsLimit: window.FirstLineExceedsLimit,
-	}, nil
+	return readJSON{ReadResult: result}, nil
 }
