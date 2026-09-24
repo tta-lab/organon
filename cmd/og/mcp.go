@@ -270,6 +270,7 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "organon-og", Version: "1.0.0"}, nil)
 	addProjectTools(server, projects)
 	addSourceTools(server, projects)
+	addRepoTools(server, projects)
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",

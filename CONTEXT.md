@@ -21,6 +21,12 @@ The canonical remote URL and its provider-specific owner and repository names.
 It identifies the remote repository and is distinct from a derived clone path.
 _Avoid_: clone path, local repository name
 
+**Working diff**:
+The tracked-file change set from the current branch's merge base with the
+default upstream branch through the current working tree. It includes committed,
+staged, and unstaged changes; untracked paths are reported separately.
+_Avoid_: current diff, branch diff, PR diff
+
 **Issue**:
 A repository-scoped work item for describing and tracking a problem or proposed
 change. An issue is distinct from a pull request and is identified within its repository.

@@ -86,7 +86,7 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 		"issue_search", "issue_update_title", "pr_checks", "pr_comment", "pr_create",
 		"pr_failures", "pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify",
 		"project_find", "project_get", "project_list", "pull", "push",
-		"source_read", "source_search", "source_symbols",
+		"repo_diff", "source_read", "source_search", "source_symbols",
 	}
 	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
 		t.Fatalf("tools = %v, want %v", gotNames, wantNames)
