@@ -382,15 +382,20 @@ The CLI `skill find` command uses the same query validation, defaults, limits,
 and ranking behavior.
 Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 
-`og mcp` exposes typed project discovery, read-only `source_search`,
-`source_symbols`, `source_read`, and `repo_diff`, plus auth, clone, push, pull, PR
+`og mcp` exposes typed project discovery, read-only `source_list`,
+`source_search`, `source_symbols`, `source_read`, `repo_status`,
+`repo_commits`, `repo_compare`, and `repo_diff`, plus auth, clone, push, pull, PR
 create/find, PR get/modify/comment/checks/log/failures, and approval-gated
 `pr_merge`. `source_search(project, pattern, limit?)` accepts a ripgrep
 regular-expression pattern as one argument; Organon controls all rg flags and
 the registered checkout root. `repo_diff(project, path?)` returns the tracked
 unified diff from the local default-branch merge base through the working tree,
 along with file summaries and untracked paths. It does not fetch, and it bounds
-the patch to the standard tool-output limit. Create and modify are typed MCP-only because their
+the patch to the standard tool-output limit. `source_list` browses direct
+children of a directory; `repo_status` separates staged, unstaged, untracked,
+and conflicted paths. `repo_commits` lists HEAD or local origin default-branch
+history, and `repo_compare` compares two full commit IDs without including
+working-tree changes. Create and modify are typed MCP-only because their
 user-controlled title/body fields may contain multiline free text; exposing
 those bodies through shell CLI arguments would reintroduce quoting and
 escaping ambiguity. `pr_merge` remains available through both typed MCP and

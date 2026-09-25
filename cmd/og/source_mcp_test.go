@@ -66,10 +66,15 @@ func TestSourceMCPToolsAndProjectBoundary(t *testing.T) {
 			t.Fatalf("%s annotations: %+v", tool.Name, a)
 		}
 	}
-	if found != 3 {
+	if found != 4 {
 		t.Fatalf("found %d source tools", found)
 	}
 	for _, selector := range []string{"ko", filepath.Base(root), "source-repo", root} {
+		listing, bad := sourceCall(t, s, "source_list", map[string]any{"project": selector})
+		if bad || listing["project"] != "ko" || listing["path"] != "." ||
+			len(listing["entries"].([]any)) != 1 {
+			t.Fatalf("list selector %q: %v, %v", selector, listing, bad)
+		}
 		out, bad := sourceCall(t, s, "source_symbols", map[string]any{"project": selector, "path": "readme.md"})
 		if bad || out["project"] != "ko" || out["title"] != "Guide" {
 			t.Fatalf("selector %q: %v, %v", selector, out, bad)
@@ -96,7 +101,11 @@ func TestSourceMCPToolsAndProjectBoundary(t *testing.T) {
 		t.Fatalf("search followed escaping symlink: %v %v", matches, bad)
 	}
 	for _, path := range []string{"../secret.md", outside, "escape.md"} {
-		_, bad := sourceCall(t, s, "source_read", map[string]any{"project": "ko", "path": path})
+		_, bad := sourceCall(t, s, "source_list", map[string]any{"project": "ko", "path": path})
+		if !bad {
+			t.Fatalf("accepted list path %q", path)
+		}
+		_, bad = sourceCall(t, s, "source_read", map[string]any{"project": "ko", "path": path})
 		if !bad {
 			t.Fatalf("accepted path %q", path)
 		}
@@ -232,6 +241,7 @@ func TestSourceMCPGeneratedSchemas(t *testing.T) {
 		required []string
 		optional []string
 	}{
+		{"source_list", []string{"project"}, []string{"path"}},
 		{"source_symbols", []string{"project", "path"}, nil},
 		{"source_read", []string{"project", "path"}, []string{"symbol_id", "offset", "limit"}},
 		{"source_search", []string{"project", "pattern"}, []string{"limit"}},
@@ -278,7 +288,7 @@ func TestSourceMCPGeneratedSchemas(t *testing.T) {
 				t.Fatalf("%s optional %s: %#v", tc.name, name, props)
 			}
 			wantType := "integer"
-			if name == "symbol_id" {
+			if name == "symbol_id" || name == "path" {
 				wantType = "string"
 			}
 			if !schemaTypeIncludes(props[name].(map[string]any)["type"], wantType) {

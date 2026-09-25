@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,13 +105,17 @@ func TestSearchReportsCancellationAndScannerErrors(t *testing.T) {
 		if err := os.WriteFile(payload, bytes.Repeat([]byte("x"), 1024*1024+1), 0600); err != nil {
 			t.Fatal(err)
 		}
-		script := []byte("#!/bin/sh\nexec /bin/cat \"$FAKE_RG_OUTPUT\"\n")
+		catPath, err := exec.LookPath("cat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := []byte("#!/bin/sh\nexec " + catPath + " \"$FAKE_RG_OUTPUT\"\n")
 		if err := os.WriteFile(filepath.Join(bin, "rg"), script, 0700); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", bin)
 		t.Setenv("FAKE_RG_OUTPUT", payload)
-		_, err := Search(context.Background(), t.TempDir(), "needle", 2)
+		_, err = Search(context.Background(), t.TempDir(), "needle", 2)
 		if err == nil || !strings.Contains(err.Error(), "rg output") {
 			t.Fatalf("scanner error = %v", err)
 		}

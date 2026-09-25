@@ -15,6 +15,10 @@ type sourcePathInput struct {
 	Project string `json:"project" jsonschema:"project reference or exact registered checkout path"`
 	Path    string `json:"path" jsonschema:"repository-relative file path"`
 }
+type sourceListInput struct {
+	Project string `json:"project" jsonschema:"project reference or exact registered checkout path"`
+	Path    string `json:"path,omitempty" jsonschema:"optional repository-relative directory path; defaults to root"`
+}
 type sourceReadInput struct {
 	Project  string `json:"project" jsonschema:"project reference or exact registered checkout path"`
 	Path     string `json:"path" jsonschema:"repository-relative file path"`
@@ -38,6 +42,9 @@ type sourceReadOutput struct {
 type sourceSearchOutput struct {
 	Project string `json:"project"`
 	srcview.SearchResult
+}
+type sourceListOutput struct {
+	srcview.ListResult
 }
 
 const sourceProjectField = "project"
@@ -63,6 +70,18 @@ func sourceTool(name, title, description string, schema *jsonschema.Schema) *mcp
 }
 func addSourceTools(server *mcp.Server, projects *project.Store) {
 	files := srcview.NewProjectService(projects)
+	listSchema := sourceSchema[sourceListInput]()
+	mcp.AddTool(server, sourceTool("source_list", "List source directory",
+		"List up to 200 direct children of one registered project directory.", listSchema),
+		func(_ context.Context, _ *mcp.CallToolRequest, in sourceListInput) (
+			*mcp.CallToolResult, sourceListOutput, error,
+		) {
+			result, err := files.ListDirectory(in.Project, in.Path)
+			if err != nil {
+				return nil, sourceListOutput{}, err
+			}
+			return nil, sourceListOutput{ListResult: result}, nil
+		})
 	symbolsSchema := sourceSchema[sourcePathInput]()
 	readSchema := sourceSchema[sourceReadInput]()
 	readSchema.Properties["offset"].Minimum = jsonschema.Ptr(1.0)

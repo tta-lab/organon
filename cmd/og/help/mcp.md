@@ -17,6 +17,11 @@ symlink. Search takes a `pattern` in ripgrep regex syntax and returns path,
 line, column, and text for at most 50 matches by default (maximum 200). It reports
 `truncated` when more matches exist. Results use ripgrep traversal order without
 a global path sort. An empty match list is success.
+`source_list` returns direct children of the current checkout, including
+untracked and ignored entries, in name order. It omits the root `.git` entry
+and returns at most 200 entries with `truncated` if more exist. Symlinks are
+identified but not followed in the listing; explicit paths still cannot
+escape the registered checkout.
 `source_read` is text-only; image and binary files produce errors (the `src`
 JSON CLI retains its Pi media result). It uses one-indexed line `offset` and
 optional `limit`, with `next_offset` for continuation; returned content is capped by the shared
@@ -38,8 +43,14 @@ Tools:
   project_get             # get one registered project by exact reference
 
   source_search           # bounded ripgrep regex search in a registered checkout
+  source_list             # direct children of a checkout directory
   source_symbols          # depth-two code symbols or Markdown headings with opaque IDs
   source_read             # bounded text read by path or symbol/section ID
+
+  repo_status             # branch, HEAD, and staged/unstaged/untracked/conflicted paths
+  repo_commits            # recent commits from HEAD or local origin default branch
+  repo_compare            # bounded patch and file summary between exact commit IDs
+  repo_diff               # default-branch merge-base through current working tree
 
   auth_status             # inspect secret-free forge authentication state
   clone                   # clone registered project reference or URL

@@ -70,7 +70,7 @@ func WorkingDiff(ctx context.Context, workDir, path string) (WorkingDiffResult, 
 	if err != nil {
 		return WorkingDiffResult{}, fmt.Errorf("read working diff: %w", err)
 	}
-	files, err := workingDiffFiles(ctx, workDir, mergeBase, path)
+	files, err := diffFiles(ctx, workDir, mergeBase, "", path)
 	if err != nil {
 		return WorkingDiffResult{}, err
 	}
@@ -103,12 +103,16 @@ func appendWorkingDiffPath(args []string, path string) []string {
 	if path == "" {
 		return args
 	}
-	return append(args, "--", path)
+	return append(args, "--", ":(literal)"+path)
 }
 
-func workingDiffFiles(ctx context.Context, workDir, mergeBase, path string) ([]WorkingDiffFile, error) {
+func diffFiles(ctx context.Context, workDir, base, head, path string) ([]WorkingDiffFile, error) {
+	revisions := []string{base}
+	if head != "" {
+		revisions = append(revisions, head)
+	}
 	statusArgs := appendWorkingDiffPath(
-		[]string{gitDiffCommand, "--name-status", "-z", noRenamesFlag, mergeBase}, path,
+		append([]string{gitDiffCommand, "--name-status", "-z", noRenamesFlag}, revisions...), path,
 	)
 	statusRaw, err := workingDiffGitRaw(ctx, workDir, statusArgs...)
 	if err != nil {
@@ -121,7 +125,7 @@ func workingDiffFiles(ctx context.Context, workDir, mergeBase, path string) ([]W
 	}
 
 	numstatArgs := appendWorkingDiffPath(
-		[]string{gitDiffCommand, "--numstat", "-z", noRenamesFlag, mergeBase}, path,
+		append([]string{gitDiffCommand, "--numstat", "-z", noRenamesFlag}, revisions...), path,
 	)
 	numstatRaw, err := workingDiffGitRaw(ctx, workDir, numstatArgs...)
 	if err != nil {
@@ -180,7 +184,7 @@ func workingDiffGit(ctx context.Context, workDir string, args ...string) (string
 
 func workingDiffGitRaw(ctx context.Context, workDir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workDir}, args...)...)
-	cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
+	cmd.Env = append(gitutil.AnonymousGitEnv(os.Environ()), "GIT_OPTIONAL_LOCKS=0")
 	out, err := cmd.Output()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
