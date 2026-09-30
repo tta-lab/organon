@@ -23,3 +23,26 @@ func TestNormalizePRMergeRequestSharesTimeoutDefaultsAndValidation(t *testing.T)
 		t.Fatalf("negative timeout error = %v", err)
 	}
 }
+
+func TestValidateDirectMergeRejectsMisleadingOutcomes(t *testing.T) {
+	valid := PRMergeResult{ApprovalPolicy: "none", Status: PRMergeStatusExecuted,
+		NextAction: PRMergeNextNone, Completion: "complete",
+		Snapshot: PRMergeSnapshot{PRNumber: 7, PRURL: "https://fixture/pull/7"}}
+	for _, mutate := range []func(*PRMergeResult){
+		func(r *PRMergeResult) { r.ApprovalPolicy = "" },
+		func(r *PRMergeResult) { r.ActionID = "action" },
+		func(r *PRMergeResult) { r.InboxURL = "https://fixture/inbox" },
+		func(r *PRMergeResult) { r.ReceiptError = "receipt" },
+		func(r *PRMergeResult) { r.Status = PRMergeStatusApproved },
+		func(r *PRMergeResult) { r.Status = PRMergeStatusFailed; r.NextAction = PRMergeNextNewApproval },
+		func(r *PRMergeResult) { r.Status = PRMergeStatusBlocked },
+		func(r *PRMergeResult) { r.CleanupError = "cleanup" },
+		func(r *PRMergeResult) { r.Snapshot.PRNumber = 8 },
+	} {
+		invalid := valid
+		mutate(&invalid)
+		if err := ValidatePRMergeResponse(Response{Merge: &invalid}, 7); err == nil {
+			t.Fatalf("accepted %+v", invalid)
+		}
+	}
+}

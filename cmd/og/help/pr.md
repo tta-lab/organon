@@ -3,11 +3,11 @@
 Pull request operations.
 
 The CLI supports view/list, find, get, comment, checks/status, failure logs,
-and approval-gated squash merge. Pull-request creation and modification are typed-only:
+and policy-controlled squash merge. Pull-request creation and modification are typed-only:
 use the MCP `pr_create`/`pr_modify` tools.
 Their multiline free-text bodies stay out of shell arguments; merge remains a
 CLI adapter because it accepts only short scalar flags, while agents should
-default to typed MCP. Both merge adapters use the same Impri gate.
+default to typed MCP. Both merge adapters honor the same global policy.
 
 Behavior:
 
@@ -22,7 +22,7 @@ Behavior:
   `og pr log --tail <lines>` show CI failure detail. The structured state is in
   `pr.ci.state`; `not_configured` is an explicit no-check state whose policy
   message says a merge may proceed without checks.
-- `og pr merge [--pr-id <number>]` creates or repeats an idempotent Impri approval action.
+- Under the default `impri` policy, `og pr merge [--pr-id <number>]` creates or repeats an idempotent Impri approval action.
   The immutable action includes the forge, repository, PR number, head branch,
   head SHA, base branch, squash method, and execution mode. Use `--dry-run` for the
   non-destructive mock merge, or `--wait --timeout <duration>` to poll.
@@ -46,7 +46,35 @@ Behavior:
   by repeating the same request and never invokes a second merge. The returned
   action ID is audit/web identification only.
 
-Configure Impri in the existing user-owned `~/.config/ttal/og.toml`:
+The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy:
+
+```toml
+[merge]
+approval = "none" # direct execution; omitted or "impri" requires web approval
+```
+
+Only `impri` and `none` are valid; this is global with no per-project overrides.
+Direct policy needs no Impri configuration, makes no Impri requests, and sends
+no notifications. A configured Impri section still receives whole-file validation.
+Both transports share eligibility checks and expected-head squash execution.
+CI `success` or `not_configured` permits real execution; pending or unverifiable
+CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
+immediately. CI `failure`/`error`, closed-unmerged/nonmergeable PRs, and changed
+identity return `failed` with `next_action=none`. Resolve the condition before a
+fresh request. Remote trust, forge protections, supported providers, and safe
+checkout guards remain enforced.
+
+Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
+have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
+wait only for Impri approval. Dry-run uses the existing non-destructive mock
+semantics without forge mutation or checkout switch/pull/deletion. Real mode
+pulls the registered default branch and removes matching local/origin head refs.
+An `executed` result with `cleanup_error` repeats the same project, **explicit PR
+ID**, and mode to finish cleanup; an observed merged PR never merges again,
+including after an uncertain provider response. Completion requires executed
+with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
+
+For the default `impri` policy, configure Impri in the existing user-owned `~/.config/ttal/og.toml`:
 
 ```toml
 [impri]

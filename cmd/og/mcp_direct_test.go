@@ -387,7 +387,7 @@ func TestOGMCPPRMergeIsDestructiveAndKeepsActionIDOutputOnly(t *testing.T) { //n
 		if req.Index != 7 || !req.DryRun {
 			t.Fatalf("merge request = %+v", req)
 		}
-		return og.Response{Merge: &og.PRMergeResult{
+		return og.Response{Merge: &og.PRMergeResult{ApprovalPolicy: "impri",
 			ActionID: "act-1", Status: og.PRMergeStatusPending,
 			InboxURL: "http://impri.example/actions",
 			Snapshot: og.PRMergeSnapshot{
@@ -441,7 +441,7 @@ func TestOGMCPPRMergeIsDestructiveAndKeepsActionIDOutputOnly(t *testing.T) { //n
 }
 
 func TestOGMCPPRMergeRetryableErrorKeepsStructuredRecoveryOutcome(t *testing.T) {
-	merge := og.PRMergeResult{
+	merge := og.PRMergeResult{ApprovalPolicy: "impri",
 		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
 		InboxURL: "http://impri.example/actions", Retryable: true,
 		NextAction: og.PRMergeNextRetry,
@@ -477,7 +477,7 @@ func TestOGMCPPRMergeUsesSharedTimeoutNormalization(t *testing.T) {
 	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
 		calls++
 		got = req
-		return og.Response{Merge: &og.PRMergeResult{
+		return og.Response{Merge: &og.PRMergeResult{ApprovalPolicy: "impri",
 			ActionID: "act-timeout", Status: og.PRMergeStatusPending,
 			InboxURL:   "http://impri.example/actions",
 			Snapshot:   og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
@@ -522,7 +522,7 @@ func TestOGMCPPRMergeUnavailableOutcomesKeepStructuredRecoveryContract(t *testin
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			merge := og.PRMergeResult{
+			merge := og.PRMergeResult{ApprovalPolicy: "impri",
 				ActionID: "act-unavailable", Status: og.PRMergeStatusUnavailable,
 				InboxURL: "http://impri.example/actions", Snapshot: tc.snapshot,
 				Retryable: true, NextAction: og.PRMergeNextRetry,
@@ -554,7 +554,7 @@ func TestOGMCPPRMergeUnavailableOutcomesKeepStructuredRecoveryContract(t *testin
 }
 
 func TestOGMCPPRMergeFailedReceiptKeepsApprovedStructuredOutcome(t *testing.T) {
-	merge := og.PRMergeResult{
+	merge := og.PRMergeResult{ApprovalPolicy: "impri",
 		ActionID: "act-failed-receipt", Status: og.PRMergeStatusApproved,
 		InboxURL: "http://impri.example/actions", Retryable: true,
 		NextAction: og.PRMergeNextRetry,
@@ -939,6 +939,45 @@ func TestOGProjectTargetingSeamNormalizesEveryRegisteredOperation(t *testing.T) 
 			}
 			if canonical != "fb" {
 				t.Fatalf("canonical alias = %q, want fb", canonical)
+			}
+		})
+	}
+}
+
+func TestOGMCPDirectMergeOutcomes(t *testing.T) {
+	for _, status := range []string{og.PRMergeStatusBlocked, og.PRMergeStatusFailed, og.PRMergeStatusExecuted} {
+		t.Run(status, func(t *testing.T) {
+			merge := og.PRMergeResult{ApprovalPolicy: "none", Status: status,
+				NextAction: og.PRMergeNextNone, Completion: "resolve or complete",
+				Snapshot: og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"}}
+			if status == og.PRMergeStatusBlocked {
+				merge.Retryable = true
+				merge.NextAction = og.PRMergeNextRetry
+			}
+			executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+				response := og.Response{Merge: &merge}
+				if merge.Retryable {
+					return response, &og.PRMergeRetryableError{Result: merge}
+				}
+				return response, nil
+			}}
+			session := connectDirectMCP(t, executor, testProjectStore(t))
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "pr_merge", Arguments: map[string]any{"project": "ko", "pr_id": 7}})
+			if err != nil || result == nil || result.IsError != merge.Retryable {
+				t.Fatalf("result %#v error %v", result, err)
+			}
+			data, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output ogPRMergeOutput
+			if err := json.Unmarshal(data, &output); err != nil {
+				t.Fatal(err)
+			}
+			if output.Merge.Status != status || output.Merge.ApprovalPolicy != "none" ||
+				strings.Contains(string(data), "action_id") || strings.Contains(string(data), "inbox_url") {
+				t.Fatalf("result %s", data)
 			}
 		})
 	}

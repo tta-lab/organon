@@ -159,11 +159,14 @@ func renderPRMergeResult(cmd *cobra.Command, alias string, merge og.PRMergeResul
 		cmd.Printf("Project %s:\n", alias)
 	}
 	if merge.Snapshot.PRNumber > 0 {
-		cmd.Printf("PR #%d merge approval: %s\n", merge.Snapshot.PRNumber, merge.Status)
+		cmd.Printf("PR #%d merge: %s\n", merge.Snapshot.PRNumber, merge.Status)
 	} else {
-		cmd.Printf("PR merge approval: %s\n", merge.Status)
+		cmd.Printf("PR merge: %s\n", merge.Status)
 	}
-	cmd.Printf("  Action: %s\n", merge.ActionID)
+	cmd.Printf("  Approval policy: %s\n", merge.ApprovalPolicy)
+	if merge.ActionID != "" {
+		cmd.Printf("  Action: %s\n", merge.ActionID)
+	}
 	if merge.InboxURL != "" {
 		cmd.Printf("  Impri inbox: %s\n", merge.InboxURL)
 	}

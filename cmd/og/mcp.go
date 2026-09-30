@@ -73,7 +73,7 @@ type ogPRMergeInput struct {
 	Project        string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID           *int64 `json:"pr_id,omitempty" jsonschema:"optional positive PR ID; omitted uses current branch"`
 	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"record a mock merge without changing the forge"`
-	Wait           bool   `json:"wait,omitempty" jsonschema:"wait for the Impri approval decision"`
+	Wait           bool   `json:"wait,omitempty" jsonschema:"wait for Impri only; none returns immediately"`
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty" jsonschema:"wait timeout seconds; defaults to 30"`
 }
 type ogIssuePageInput struct {
@@ -362,8 +362,13 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	addPRLinesTool(server, projects, "pr_failures", "Inspect pull request failures", executor.PRFailures, true)
 
 	mcp.AddTool(server, setInputSchema[ogPRMergeInput](ogTool(
-		"pr_merge", "Approval-gated squash merge",
-		"Submit an immutable pull-request snapshot to Impri. Surface the inbox link "+
+		"pr_merge", "Policy-controlled squash merge",
+		"Honor global merge.approval: impri (default) submits an immutable snapshot to Impri; "+
+			"none executes immediately without Impri or notifications. Direct results identify approval_policy=none, "+
+			"omit action/inbox/receipt, and use blocked (retry_same_request), failed (none), or executed. "+
+			"Pending/unverifiable CI returns retryable immediately. Wait/timeout wait only under impri. "+
+			"Repeat the same project, explicit PR ID, and mode for uncertain outcomes or cleanup-only recovery; "+
+			"observed merged PRs never merge again. Under impri, surface the inbox link "+
 			"and execute only after web approval; dry-run records a mock merge and "+
 			"real mode performs a squash merge followed by guarded single-checkout "+
 			"default-branch pull and approved-head cleanup. Dry-run performs no Git "+

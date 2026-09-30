@@ -139,7 +139,43 @@ This is a transport preference for HTTP/2 framing failures, not a fix for TCP
 API/MCP schema, deployment, or secret-handling behavior changes with this
 exception.
 
-Pull-request merging is approval-gated through Impri. Configure the optional
+Pull-request merging honors the global operator-owned `merge.approval` policy
+in `~/.config/ttal/og.toml` through both CLI and typed MCP. Omitted policy defaults
+to `impri`; only `impri` and `none` are accepted. There are no per-project overrides.
+For direct execution, configure:
+
+```toml
+[merge]
+approval = "none"
+```
+
+Under `none`, requesting a merge immediately runs the existing guards and
+expected-head squash operation without initializing or contacting Impri. No
+Impri section or credentials are required, and no notifications are sent. An
+explicit Impri section is still validated as part of the complete config file.
+`--wait` and `--timeout` retain their argument validation but do not wait under
+`none`; they control approval waiting only under `impri`.
+
+Direct results identify `approval_policy=none`. `blocked` is retryable with
+`next_action=retry_same_request` for pending or unverifiable CI and temporary
+provider/checkout failures. CI `failure`/`error`, a closed-unmerged or
+nonmergeable PR, or identity changes during the request return terminal `failed`
+with `next_action=none`; resolve the reported condition before a fresh request.
+CI `success` or `not_configured` permits execution. Remote trust, provider
+support, immutable expected head, forge protections, and safe checkout checks
+still apply. A subsequent request snapshots the current PR anew.
+
+An `executed` direct result has no action ID, inbox, or receipt. Real execution
+pulls the registered default branch and removes matching local/origin head refs.
+If cleanup fails, it stays `executed` with `cleanup_error` and
+`next_action=retry_same_request`. Retry with the same project, **explicit PR ID**,
+and mode: observing the PR as merged resumes cleanup without a second forge
+merge, including after an uncertain provider response. Completion requires
+`executed` with no cleanup error. Direct dry-run uses the existing mock executor
+without forge mutation or checkout switch, pull, or deletion; it is not an
+expanded preflight check.
+
+Under the default `impri` policy, merging is approval-gated. Configure the optional
 operator-owned section in the existing `~/.config/ttal/og.toml`; the API key is
 never accepted by a tool request or shown in output:
 
@@ -385,7 +421,7 @@ Individual `SKILL.md` files larger than 1 MiB are rejected before parsing.
 `og mcp` exposes typed project discovery, read-only `source_list`,
 `source_search`, `source_symbols`, `source_read`, `repo_status`,
 `repo_commits`, `repo_compare`, and `repo_diff`, plus auth, clone, push, pull, PR
-create/find, PR get/modify/comment/checks/log/failures, and approval-gated
+create/find, PR get/modify/comment/checks/log/failures, and policy-controlled
 `pr_merge`. `source_search(project, pattern, limit?)` accepts a ripgrep
 regular-expression pattern as one argument; Organon controls all rg flags and
 the registered checkout root. `repo_diff(project, path?)` returns the tracked
@@ -400,13 +436,15 @@ user-controlled title/body fields may contain multiline free text; exposing
 those bodies through shell CLI arguments would reintroduce quoting and
 escaping ambiguity. `pr_merge` remains available through both typed MCP and
 `og pr merge` because its inputs are structured short scalar flags; agents
-should default to MCP, and both adapters call the identical Impri approval-gated
-domain operation.
+should default to MCP, and both adapters call the identical shared merge domain operation.
 
-Merge callers consume the structured result fields `status`, `retryable`,
+Merge callers consume `approval_policy` independently of `snapshot.execution_mode`,
+and the structured result fields `status`, `retryable`,
 `next_action`, `completion`, `detail`, `action_id`, `inbox_url`,
 `receipt_error`, `cleanup_error`, and
-`snapshot`. The `action_id` is audit/web identification only. Surface the inbox
+`snapshot`. Direct policy omits approval metadata and uses `blocked`, `failed`,
+and `executed` as described above. The remaining approval lifecycle guidance
+applies to `approval_policy=impri`. The `action_id` is audit/web identification only. Surface the inbox
 and wait for pending actions; `retry_same_request` means repeat the exact same
 project, PR ID, and mode request; treat executed with no receipt or cleanup
 error as complete. Repeating the same request after rejection or expiry creates

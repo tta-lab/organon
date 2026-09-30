@@ -154,6 +154,8 @@ const (
 	// PRMergeStatusUnavailable is a local outcome used when Impri's current
 	// approval state cannot be read. It is never sent to Impri as a result.
 	PRMergeStatusUnavailable = "unavailable"
+	PRMergeStatusBlocked     = "blocked"
+	PRMergeStatusFailed      = "failed"
 
 	// PRMergeNextAction values are machine-readable routing instructions for
 	// agents consuming PRMergeResult.
@@ -168,7 +170,7 @@ const (
 	DefaultPRMergeTimeout = 30 * time.Second
 )
 
-// PRMergeSnapshot is the immutable forge identity submitted for approval.
+// PRMergeSnapshot is the immutable forge identity authorized for one request.
 // Fields such as state and CIState are descriptive; the provider, forge,
 // repository, PR number, PR URL, head branch, head SHA, base branch, method,
 // and mode form the authorization identity.
@@ -190,20 +192,21 @@ type PRMergeSnapshot struct {
 	Mergeable     bool   `json:"mergeable"`
 }
 
-// PRMergeResult is the approval and execution state returned by CLI and MCP.
+// PRMergeResult separates approval policy from execution mode for CLI and MCP.
 // An executed result can remain retryable when receipt or automatic checkout
 // cleanup has not finished; cleanup errors are distinct from receipt errors.
 type PRMergeResult struct {
-	ActionID     string          `json:"action_id"`
-	Status       string          `json:"status"`
-	InboxURL     string          `json:"inbox_url"`
-	Snapshot     PRMergeSnapshot `json:"snapshot"`
-	Retryable    bool            `json:"retryable"`
-	NextAction   string          `json:"next_action"`
-	Completion   string          `json:"completion"`
-	Detail       string          `json:"detail,omitempty"`
-	ReceiptError string          `json:"receipt_error,omitempty"`
-	CleanupError string          `json:"cleanup_error,omitempty"`
+	ApprovalPolicy string          `json:"approval_policy"`
+	ActionID       string          `json:"action_id,omitempty"`
+	Status         string          `json:"status"`
+	InboxURL       string          `json:"inbox_url,omitempty"`
+	Snapshot       PRMergeSnapshot `json:"snapshot"`
+	Retryable      bool            `json:"retryable"`
+	NextAction     string          `json:"next_action"`
+	Completion     string          `json:"completion"`
+	Detail         string          `json:"detail,omitempty"`
+	ReceiptError   string          `json:"receipt_error,omitempty"`
+	CleanupError   string          `json:"cleanup_error,omitempty"`
 }
 
 // PRMergeRetryableError carries the structured merge outcome alongside its

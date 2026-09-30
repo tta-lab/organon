@@ -241,7 +241,8 @@ func TestCLIPRChecksExposeNotConfiguredStateAndPolicyMessage(t *testing.T) {
 		!strings.Contains(stdout, "CI is not configured for this commit; merge policy allows proceeding without checks") {
 		t.Fatalf("human output = %q, err = %v", stdout, err)
 	}
-	stdout, _, err = runDirectCLI(t, executor, projects, "", "pr", "checks", "--project", "ko", "--pr-id", "7", "--json")
+	stdout, _, err = runDirectCLI(t, executor, projects, "", "pr", "checks", "--project", "ko",
+		"--pr-id", "7", "--json")
 	if err != nil {
 		t.Fatalf("JSON checks: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
 	var got og.Request
 	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
 		got = req
-		return og.Response{Merge: &og.PRMergeResult{
+		return og.Response{Merge: &og.PRMergeResult{ApprovalPolicy: "impri",
 			ActionID: "act-1", Status: og.PRMergeStatusPending,
 			InboxURL: "http://impri.example/actions",
 			Snapshot: og.PRMergeSnapshot{
@@ -295,7 +296,7 @@ func TestCLIPRMergeReturnsApprovalResultAndForwardsControls(t *testing.T) {
 
 func TestCLIPRMergeRetryableErrorPrintsRecoveryOutcome(t *testing.T) {
 	projects := testProjectStore(t)
-	merge := og.PRMergeResult{
+	merge := og.PRMergeResult{ApprovalPolicy: "impri",
 		ActionID: "act-retry", Status: og.PRMergeStatusApproved,
 		InboxURL: "http://impri.example/actions", Retryable: true,
 		NextAction: og.PRMergeNextRetry,
@@ -321,7 +322,7 @@ func TestCLIPRMergeUsesSharedTimeoutNormalization(t *testing.T) {
 	var got og.Request
 	executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
 		got = req
-		return og.Response{Merge: &og.PRMergeResult{
+		return og.Response{Merge: &og.PRMergeResult{ApprovalPolicy: "impri",
 			ActionID: "act-timeout", Status: og.PRMergeStatusPending,
 			InboxURL:   "http://impri.example/actions",
 			Snapshot:   og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"},
@@ -365,7 +366,7 @@ func TestCLIPRMergeUnavailableOutcomesRenderRecoveryContract(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			projects := testProjectStore(t)
-			merge := og.PRMergeResult{
+			merge := og.PRMergeResult{ApprovalPolicy: "impri",
 				ActionID: "act-unavailable", Status: og.PRMergeStatusUnavailable,
 				InboxURL: "http://impri.example/actions", Snapshot: tc.snapshot,
 				Retryable: true, NextAction: og.PRMergeNextRetry,
@@ -389,7 +390,7 @@ func TestCLIPRMergeUnavailableOutcomesRenderRecoveryContract(t *testing.T) {
 
 func TestCLIPRMergeFailedReceiptRendersApprovedRetryOutcome(t *testing.T) {
 	projects := testProjectStore(t)
-	merge := og.PRMergeResult{
+	merge := og.PRMergeResult{ApprovalPolicy: "impri",
 		ActionID: "act-failed-receipt", Status: og.PRMergeStatusApproved,
 		InboxURL: "http://impri.example/actions", Retryable: true,
 		NextAction: og.PRMergeNextRetry,
@@ -720,5 +721,39 @@ func TestCLIRejectsUnknownOGProjectBeforeExecutorWithRecovery(t *testing.T) {
 	}
 	if called {
 		t.Fatal("executor called for unknown project")
+	}
+}
+
+func TestCLIDirectMergeOutcomes(t *testing.T) {
+	for _, status := range []string{og.PRMergeStatusBlocked, og.PRMergeStatusFailed, og.PRMergeStatusExecuted} {
+		t.Run(status, func(t *testing.T) {
+			merge := og.PRMergeResult{ApprovalPolicy: "none", Status: status,
+				NextAction: og.PRMergeNextNone, Completion: "resolve or complete",
+				Snapshot: og.PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/ko/pull/7"}}
+			if status == og.PRMergeStatusBlocked {
+				merge.Retryable = true
+				merge.NextAction = og.PRMergeNextRetry
+			}
+			executor := &directExecutor{prMerge: func(req og.Request) (og.Response, error) {
+				response := og.Response{Merge: &merge}
+				if merge.Retryable {
+					return response, &og.PRMergeRetryableError{Result: merge}
+				}
+				return response, nil
+			}}
+			stdout, _, err := runDirectCLI(t, executor, testProjectStore(t), "", "pr", "merge", "--project", "ko",
+				"--pr-id", "7", "--json")
+			if (err != nil) != merge.Retryable {
+				t.Fatalf("error %v", err)
+			}
+			var result ogPRMergeJSON
+			if err := json.NewDecoder(strings.NewReader(stdout)).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Merge.Status != status || result.Merge.ApprovalPolicy != "none" ||
+				strings.Contains(stdout, "action_id") || strings.Contains(stdout, "inbox_url") {
+				t.Fatalf("result %s", stdout)
+			}
+		})
 	}
 }

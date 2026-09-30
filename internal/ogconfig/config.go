@@ -17,6 +17,35 @@ type Config struct {
 	GitHubApp *githubapp.Config `toml:"github_app"`
 	Forgejo   ForgejoConfig     `toml:"forgejo"`
 	Impri     *ImpriConfig      `toml:"impri"`
+	Merge     MergeConfig       `toml:"merge"`
+}
+
+// MergeConfig selects the global approval policy for both merge transports.
+type MergeConfig struct {
+	Approval string `toml:"approval"`
+}
+
+const (
+	MergeApprovalImpri = "impri"
+	MergeApprovalNone  = "none"
+)
+
+// Policy returns the default policy when approval is omitted.
+func (c MergeConfig) Policy() string {
+	if c.Approval == "" {
+		return MergeApprovalImpri
+	}
+	return c.Approval
+}
+
+// Validate rejects unsupported policies.
+func (c MergeConfig) Validate() error {
+	switch c.Policy() {
+	case MergeApprovalImpri, MergeApprovalNone:
+		return nil
+	default:
+		return fmt.Errorf("merge.approval must be impri or none")
+	}
 }
 
 // ImpriConfig configures the approval service used by destructive forge
@@ -67,8 +96,15 @@ type ForgejoConfig struct {
 // Load reads and validates the complete og configuration file.
 func Load(path string) (Config, error) {
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	metadata, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return Config{}, fmt.Errorf("read og config %s: %w", path, err)
+	}
+	if metadata.IsDefined("merge", "approval") && cfg.Merge.Approval == "" {
+		return Config{}, fmt.Errorf("merge.approval must be impri or none")
+	}
+	if err := cfg.Merge.Validate(); err != nil {
+		return Config{}, err
 	}
 	if cfg.GitHubApp != nil {
 		if err := cfg.GitHubApp.Validate(); err != nil {

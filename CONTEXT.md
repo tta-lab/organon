@@ -5,6 +5,12 @@ source editing, skills, project registries, token counts, and forge workflows.
 
 ## Language
 
+**Direct merge**:
+A pull request merge authorized by the configured merge policy when requested,
+without an Impri approval decision. PR eligibility, CI, and forge protections
+still govern whether the merge can proceed.
+_Avoid_: auto-merge when it implies scheduling a future merge
+
 **Registered project**:
 A repository identified by a canonical remote, with a configured alias and local
 checkout path. A standalone local directory without a canonical remote is not a

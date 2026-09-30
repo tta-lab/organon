@@ -4,34 +4,49 @@ Organon forge operations.
 
 `og` is the local entrypoint for typed repository and forge workflows. It
 contains registry- and URL-based clone, issue discovery/reading, pull request inspection/commenting,
-approval-gated merge, guarded push/pull/tag, and auth operations. Pull-request
+policy-controlled merge, guarded push/pull/tag, and auth operations. Pull-request
 creation and modification are available only through the typed MCP
 `pr_create`/`pr_modify` tools; merge also
 has a CLI adapter because it accepts only structured scalar flags. Agents should
-default to typed MCP, and both merge adapters use the same Impri gate.
+default to typed MCP, and both merge adapters honor the same global policy.
 
-Merge is squash-only and always goes through Impri. Configure the optional
-`[impri]` section in `~/.config/ttal/og.toml` with `base_url` and `api_key`.
-`og pr merge --dry-run` creates a non-destructive approval card, prints its
-inbox URL, and records a mock execution only after a web approval. Use
-`--wait --timeout 30s`; repeat the same project, PR, and mode request to recover
-the idempotent action. The returned action ID is audit/web identification only.
-Real merges use the same gate and recheck the PR, CI, and head SHA immediately
-before the forge call; CI must be `success` or explicit `not_configured`. After
-the forge merge, og automatically fast-forwards the registered single-checkout
-default branch and removes only local and `origin` head refs that still match
-the approved SHA. Dry-run approval remains non-destructive and performs no
-checkout switch, pull, or branch deletion.
-Rejection, expiry, timeout, and execution failure leave
-the PR untouched. Temporary provider/API failures keep the approved action
-retryable; repeat the same request. If Impri approval state cannot be read, the
-outcome is `unavailable` and no forge call was made; repeat the same request.
-If an executed result contains `cleanup_error`, the forge merge and Impri
-receipt are already complete: repeat the same project, PR, and mode request to
-finish cleanup, and do not run the forge merge again. `og pull` remains
-available for its existing guarded closed-PR workflow. Worktree coordination is
-outside this version. Impri configuration is read only from this `og.toml`; no
-`IMPRI_*` environment-variable fallback or second config file exists.
+The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy:
+
+```toml
+[merge]
+approval = "none" # direct execution; omitted or "impri" requires web approval
+```
+
+Only `impri` and `none` are valid; this is global with no per-project overrides.
+Direct policy needs no Impri configuration, makes no Impri requests, and sends
+no notifications. A configured Impri section still receives whole-file validation.
+Both transports share eligibility checks and expected-head squash execution.
+CI `success` or `not_configured` permits real execution; pending or unverifiable
+CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
+immediately. CI `failure`/`error`, closed-unmerged/nonmergeable PRs, and changed
+identity return `failed` with `next_action=none`. Resolve the condition before a
+fresh request. Remote trust, forge protections, supported providers, and safe
+checkout guards remain enforced.
+
+Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
+have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
+wait only for Impri approval. Dry-run uses the existing non-destructive mock
+semantics without forge mutation or checkout switch/pull/deletion. Real mode
+pulls the registered default branch and removes matching local/origin head refs.
+An `executed` result with `cleanup_error` repeats the same project, **explicit PR
+ID**, and mode to finish cleanup; an observed merged PR never merges again,
+including after an uncertain provider response. Completion requires executed
+with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
+
+Under default `impri`, configure `[impri]` with `base_url` and `api_key` in
+og.toml. Surface the inbox URL and wait for web approval. Temporary approved
+failures and `unavailable` approval state repeat the same request; terminal
+execution failure requires new approval. Executed `receipt_error` uses
+`repair_receipt` without another forge merge, then continues checkout cleanup.
+The action ID is audit/web identification only. Impri has no environment-variable
+fallback or second config file. Worktree coordination is outside this version.
+`og pull` remains available for guarded closed-PR cleanup; successful merge
+cleanup is automatic.
 
 `og project` owns local registered-project discovery and navigation. Use
 `og project list`, `find`, `get`, `resolve`, and `jump`; resolve emits JSON

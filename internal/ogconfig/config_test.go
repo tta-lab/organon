@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -174,4 +175,35 @@ func writeConfig(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestLoadMergeApprovalPolicy(t *testing.T) {
+	for _, policy := range []string{"omitted", "", "impri", "none", "invalid", "NONE", " none "} {
+		t.Run(policy, func(t *testing.T) {
+			content := ""
+			if policy != "omitted" {
+				content = "[merge]\napproval = " + strconv.Quote(policy) + "\n"
+			}
+			cfg, err := Load(writeConfig(t, content))
+			valid := policy == "omitted" || policy == "impri" || policy == "none"
+			if valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := policy
+				if want == "omitted" {
+					want = "impri"
+				}
+				if cfg.Merge.Policy() != want {
+					t.Fatalf("policy %s", cfg.Merge.Policy())
+				}
+			} else if err == nil {
+				t.Fatal("invalid policy accepted")
+			}
+		})
+	}
+	if _, err := Load(writeConfig(t,
+		"[merge]\napproval = \"none\"\n[impri]\nbase_url = \"http://fixture\"\n")); err == nil {
+		t.Fatal("explicit malformed Impri ignored")
+	}
 }

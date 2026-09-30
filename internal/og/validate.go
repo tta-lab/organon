@@ -285,12 +285,20 @@ func ValidateMessageResponse(resp Response) error {
 	return nil
 }
 
-// ValidatePRMergeResponse requires the stable approval-gated merge shape.
+// ValidatePRMergeResponse checks the shared policy and execution contract.
+//
+//nolint:gocyclo
 func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 	if resp.Merge == nil {
 		return fmt.Errorf("og returned no pull request merge result")
 	}
 	merge := resp.Merge
+	if merge.ApprovalPolicy != "impri" && merge.ApprovalPolicy != "none" {
+		return fmt.Errorf("og returned invalid merge approval policy %q", merge.ApprovalPolicy)
+	}
+	if merge.ApprovalPolicy == "none" {
+		return validateDirectMergeResponse(*merge, expectedID)
+	}
 	if strings.TrimSpace(merge.ActionID) == "" {
 		return fmt.Errorf("og returned an invalid pull request merge result")
 	}
@@ -316,6 +324,33 @@ func ValidatePRMergeResponse(resp Response, expectedID int64) error {
 		return fmt.Errorf("og returned pull request merge result without recovery instructions")
 	}
 	return validatePRMergeOutcome(*merge)
+}
+
+//nolint:gocyclo
+func validateDirectMergeResponse(merge PRMergeResult, expectedID int64) error {
+	if merge.ActionID != "" || merge.InboxURL != "" || merge.ReceiptError != "" {
+		return fmt.Errorf("direct merge result contains approval metadata")
+	}
+	if merge.Snapshot.PRNumber <= 0 || strings.TrimSpace(merge.Snapshot.PRURL) == "" ||
+		(expectedID > 0 && merge.Snapshot.PRNumber != expectedID) ||
+		strings.TrimSpace(merge.Completion) == "" {
+		return fmt.Errorf("og returned invalid direct merge identity or recovery instructions")
+	}
+	switch merge.Status {
+	case PRMergeStatusBlocked:
+		if !merge.Retryable || merge.NextAction != PRMergeNextRetry || merge.CleanupError != "" {
+			return fmt.Errorf("og returned invalid direct merge blockage")
+		}
+	case PRMergeStatusFailed:
+		if merge.Retryable || merge.NextAction != PRMergeNextNone || merge.CleanupError != "" {
+			return fmt.Errorf("og returned invalid direct merge failure")
+		}
+	case PRMergeStatusExecuted:
+		return validateExecutedPRMergeOutcome(merge)
+	default:
+		return fmt.Errorf("og returned invalid direct merge status %q", merge.Status)
+	}
+	return nil
 }
 
 func validatePRMergeOutcome(merge PRMergeResult) error { //nolint:gocyclo

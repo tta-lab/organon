@@ -64,9 +64,15 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	if err := requireRemoteWrite(ctxInfo, "merge pull request"); err != nil {
 		return Response{}, err
 	}
-	client, err := newImpriClient(operationContext(ctxInfo), ctxInfo.config.Impri)
-	if err != nil {
+	if err := ctxInfo.config.Merge.Validate(); err != nil {
 		return Response{}, err
+	}
+	var client *impriClient
+	if ctxInfo.config.Merge.Policy() == ogconfig.MergeApprovalImpri {
+		client, err = newImpriClient(operationContext(ctxInfo), ctxInfo.config.Impri)
+		if err != nil {
+			return Response{}, err
+		}
 	}
 
 	mode := PRMergeModeReal
@@ -87,10 +93,19 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	}
 	snapshot, err := loadMergeSnapshot(ctxInfo, provider, index, mode)
 	if err != nil {
+		if ctxInfo.config.Merge.Policy() == ogconfig.MergeApprovalNone && req.Index > 0 && snapshot.PRNumber > 0 {
+			return retryableMergeError(impriAction{}, snapshot,
+				"pull request retrieval is temporarily unavailable: "+err.Error())
+		}
 		return Response{}, err
 	}
 	if req.Index > 0 && snapshot.PRNumber != req.Index {
 		return Response{}, fmt.Errorf("provider returned PR #%d, want #%d", snapshot.PRNumber, req.Index)
+	}
+	if ctxInfo.config.Merge.Policy() == ogconfig.MergeApprovalNone {
+		// No approval client or action exists in direct policy. The shared executor
+		// uses a nil client only to skip approval receipts, never eligibility guards.
+		return s.executeMerge(ctxInfo, nil, impriAction{}, snapshot)
 	}
 	key, keyErr := mergeIdempotencyKey(snapshot)
 	if keyErr != nil {
@@ -180,7 +195,8 @@ func loadMergeSnapshot(
 	}
 	pr, err := provider.GetPR(ctxInfo.Owner, ctxInfo.Repo, index)
 	if err != nil {
-		return PRMergeSnapshot{}, err
+		// Only request identity is known; leave unobserved forge identity unset.
+		return PRMergeSnapshot{PRNumber: index, PRURL: fallbackPRURL(ctxInfo, index), ExecutionMode: mode}, err
 	}
 	if !validProviderPRIdentity(pr, index) {
 		return PRMergeSnapshot{}, fmt.Errorf("provider returned invalid PR snapshot for #%d", index)
@@ -351,7 +367,7 @@ func (s Service) processMergeAction(
 		}
 		result.Detail = "approval was already executed; no merge was attempted"
 	case PRMergeStatusApproved:
-		return s.executeApprovedMerge(ctxInfo, client, action, snapshot)
+		return s.executeMerge(ctxInfo, client, action, snapshot)
 	default:
 		return Response{}, fmt.Errorf("unknown Impri action status %q; refusing to execute", status)
 	}
@@ -396,7 +412,7 @@ func waitForImpriAction(
 }
 
 //nolint:gocyclo
-func (s Service) executeApprovedMerge(
+func (s Service) executeMerge(
 	ctxInfo *repoContext, client *impriClient, action impriAction,
 	approved PRMergeSnapshot,
 ) (Response, error) {
@@ -423,7 +439,7 @@ func (s Service) executeApprovedMerge(
 		return retryableMergeError(action, approved, "the current pull request identity could not be verified")
 	}
 	if !mergeIdentityEqual(approved, currentSnapshot) {
-		return s.executionFailure(ctxInfo, client, action, approved, "pull request identity changed after approval")
+		return s.executionFailure(ctxInfo, client, action, approved, "pull request identity changed during merge request")
 	}
 	if current.Merged || strings.EqualFold(current.State, "merged") {
 		if approved.ExecutionMode == PRMergeModeDryRun {
@@ -431,7 +447,7 @@ func (s Service) executeApprovedMerge(
 				"dry-run mock merge observed an already merged PR; the forge was not changed")
 		}
 		return s.finishRealMerge(ctxInfo, client, action, approved,
-			"pull request is already merged; repaired the approval receipt without merging again")
+			"pull request is already merged; no forge merge was attempted")
 	}
 	if !strings.EqualFold(current.State, "open") {
 		if strings.EqualFold(current.State, "closed") {
@@ -578,6 +594,12 @@ func setCompletedRealMergeResult(result *PRMergeResult, detail string) {
 	result.NextAction = PRMergeNextNone
 	result.ReceiptError = ""
 	result.CleanupError = ""
+	if result.ApprovalPolicy == ogconfig.MergeApprovalNone {
+		result.Detail = detail + "; default branch pulled; matching head cleanup completed locally and remotely"
+		result.Completion = "the direct merge, default-branch pull, and matching head cleanup are complete; " +
+			"do not merge again"
+		return
+	}
 	result.Detail = detail + "; Impri executed receipt recorded; default branch pulled; " +
 		"approved head branch cleanup completed locally and remotely"
 	result.Completion = "the approved merge, executed receipt, default-branch pull, and " +
@@ -604,6 +626,10 @@ func cleanupRetryableResult(
 	result.Completion = "the forge merge and Impri executed receipt are complete; repeat the " +
 		"same project, PR, and mode request to finish checkout cleanup; the forge merge " +
 		"must not run again"
+	if result.ApprovalPolicy == ogconfig.MergeApprovalNone {
+		result.Completion = "the forge merge is complete; repeat the same project, explicit PR ID, and mode request " +
+			"to finish checkout cleanup without merging again"
+	}
 	result.Detail = "the forge merge is complete and must not run again; automatic checkout " +
 		"cleanup remains incomplete: " + cleanupErr
 	response := Response{Error: result.Detail, Message: result.Detail, Merge: result}
@@ -633,11 +659,11 @@ func (s Service) recoverMergeAfterProviderError(
 	}
 	if current.Merged || strings.EqualFold(current.State, "merged") {
 		return s.finishRealMerge(ctxInfo, client, action, approved,
-			"forge reported an error, but the approved PR is merged; repaired the approval receipt")
+			"forge reported an error, but the matching PR is merged; no further merge was attempted")
 	}
 	if strings.EqualFold(current.State, "open") {
 		return retryableMergeError(action, approved,
-			failure+"; forge outcome is ambiguous and the approved PR remains open")
+			failure+"; forge outcome is ambiguous and the matching PR remains open")
 	}
 	if strings.EqualFold(current.State, "closed") {
 		return s.executionFailure(ctxInfo, client, action, approved,
@@ -662,6 +688,12 @@ func retryableMergeErrorWithCompletion(
 		Completion: completion,
 		Detail:     fmt.Sprintf("impri action %s remains approved; repeat the same request: %s", action.ID, detail),
 	}
+	result.ApprovalPolicy = ogconfig.MergeApprovalImpri
+	if action.ID == "" {
+		result.ApprovalPolicy = ogconfig.MergeApprovalNone
+		result.Status = PRMergeStatusBlocked
+		result.Detail = "direct merge blocked; repeat the same request: " + detail
+	}
 	return Response{Error: result.Detail, Message: result.Detail, Merge: &result}, &PRMergeRetryableError{Result: result}
 }
 
@@ -669,7 +701,7 @@ func retryableImpriUnavailable(
 	actionID, inboxURL string, snapshot PRMergeSnapshot, detail string,
 ) (Response, error) {
 	result := PRMergeResult{
-		ActionID: actionID, Status: PRMergeStatusUnavailable, InboxURL: inboxURL,
+		ApprovalPolicy: ogconfig.MergeApprovalImpri, ActionID: actionID, Status: PRMergeStatusUnavailable, InboxURL: inboxURL,
 		Snapshot: snapshot, Retryable: true,
 		NextAction: PRMergeNextRetry,
 		Completion: "repeat the same project, PR, and mode request when Impri approval state is available; " +
@@ -717,6 +749,9 @@ func (s Service) reportExecution(
 		Snapshot: snapshot, Detail: detail,
 	}
 	setMergeOutcome(result)
+	if client == nil {
+		return success(Response{Message: result.Detail, Merge: result}), nil
+	}
 	reportErr := client.reportResult(operationContext(ctxInfo), action.ID, status, detail, mergeActionPayload(snapshot))
 	if reportErr != nil {
 		if status != PRMergeStatusExecuted {
@@ -746,6 +781,24 @@ func (s Service) executionFailure(
 }
 
 func setMergeOutcome(result *PRMergeResult) {
+	result.ApprovalPolicy = ogconfig.MergeApprovalImpri
+	if result.ActionID == "" {
+		result.ApprovalPolicy = ogconfig.MergeApprovalNone
+		switch result.Status {
+		case PRMergeStatusExecuted:
+			result.NextAction = PRMergeNextNone
+			result.Completion = "the direct merge is complete; do not merge this PR again"
+			if result.Snapshot.ExecutionMode == PRMergeModeDryRun {
+				result.Completion = "the dry-run mock completed; the forge is unchanged; a subsequent real request can merge"
+			}
+		case PRMergeStatusExecuteFailed:
+			result.Status = PRMergeStatusFailed
+			result.NextAction = PRMergeNextNone
+			result.Completion = "this request failed; resolve the reported condition before another attempt"
+		}
+		return
+	}
+
 	switch result.Status {
 	case PRMergeStatusPending:
 		result.NextAction = PRMergeNextWait

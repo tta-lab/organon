@@ -118,17 +118,18 @@ func newPRCmd() *cobra.Command {
 }
 
 func newPRMergeCmd() *cobra.Command {
-	cmd := newRunnableCmd("merge", "Approval-gated squash merge", runPRMerge)
-	cmd.Long = "Submit a pull-request snapshot to Impri and execute only after web approval. " +
-		"Use --dry-run for the non-destructive mock merge; --wait polls until the decision or timeout. " +
-		"Real merges automatically fast-forward the registered single-checkout default branch and " +
-		"remove the approved head refs; dry-run performs no checkout cleanup. Repeat the same request " +
-		"after a partial cleanup and never invoke the forge merge again."
+	cmd := newRunnableCmd("merge", "Policy-controlled squash merge", runPRMerge)
+	cmd.Long = "Honor global merge.approval in og.toml: impri (default) requires web approval; " +
+		"none executes immediately without Impri or notifications. Pending/unverifiable CI returns retryable. " +
+		"Use --dry-run for a non-destructive mock; --wait/timeout wait only for Impri approval. " +
+		"Real merges revalidate identity and CI, squash at the expected head, pull the registered " +
+		"default branch, and remove matching head refs. Repeat the same project, explicit PR ID, " +
+		"and mode after partial cleanup without merging again."
 	cmd.Flags().String("pr-id", "", "PR number override")
-	cmd.Flags().Bool("dry-run", false, "approve and record a mock merge without changing the forge")
+	cmd.Flags().Bool("dry-run", false, "record a mock merge without changing forge or checkout")
 	cmd.Flags().Bool("wait", false, "wait for the Impri approval decision")
 	cmd.Flags().Duration("timeout", 0, "maximum wait duration (defaults to 30s with --wait)")
-	cmd.Flags().Bool("json", false, "Output the structured approval result as JSON")
+	cmd.Flags().Bool("json", false, "Output the structured merge result as JSON")
 	return cmd
 }
 

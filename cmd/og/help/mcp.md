@@ -64,7 +64,7 @@ Tools:
   pr_checks               # inspect pull request checks
   pr_log                  # inspect CI state and failure log tail
   pr_failures             # inspect failing checks and log tails
-  pr_merge                # submit an Impri approval-gated squash merge
+  pr_merge                # request a policy-controlled squash merge
   issue_list              # list issues (open by default)
   issue_search            # search repository issues (all states by default)
   issue_get               # get an explicit issue ID
@@ -87,7 +87,35 @@ the known default branch; push, tag, PR mutation/comment, and branch cleanup are
 blocked. Registry additions are visible on the next tool call without
 restarting this MCP process.
 
-`pr_merge` is destructive and always requires an Impri web decision. Its input
+The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy:
+
+```toml
+[merge]
+approval = "none" # direct execution; omitted or "impri" requires web approval
+```
+
+Only `impri` and `none` are valid; this is global with no per-project overrides.
+Direct policy needs no Impri configuration, makes no Impri requests, and sends
+no notifications. A configured Impri section still receives whole-file validation.
+Both transports share eligibility checks and expected-head squash execution.
+CI `success` or `not_configured` permits real execution; pending or unverifiable
+CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
+immediately. CI `failure`/`error`, closed-unmerged/nonmergeable PRs, and changed
+identity return `failed` with `next_action=none`. Resolve the condition before a
+fresh request. Remote trust, forge protections, supported providers, and safe
+checkout guards remain enforced.
+
+Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
+have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
+wait only for Impri approval. Dry-run uses the existing non-destructive mock
+semantics without forge mutation or checkout switch/pull/deletion. Real mode
+pulls the registered default branch and removes matching local/origin head refs.
+An `executed` result with `cleanup_error` repeats the same project, **explicit PR
+ID**, and mode to finish cleanup; an observed merged PR never merges again,
+including after an uncertain provider response. Completion requires executed
+with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
+
+Under default `impri`, `pr_merge` requires an Impri web decision. Its input
 contains only the project, optional PR ID, dry-run flag,
 and wait/timeout controls; it never accepts an API key. The structured result
 contains the immutable approved snapshot, action ID, status, and inbox URL; the

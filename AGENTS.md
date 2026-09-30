@@ -68,13 +68,26 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
-The approval-gated merge domain operation is the only supported merge operation;
-its adapters are typed MCP (the agent default) and the structured-flag CLI.
-Both adapters call the same Impri gate, and neither accepts an Impri API key or
-bypasses web approval with GitHub, Forgejo, `gh`, or raw API tooling.
+The shared merge domain operation honors global operator-owned `merge.approval`
+in og.toml: omitted or `impri` uses Impri web approval; `none` directly executes
+an eligible merge. Typed MCP is the agent default; structured-flag CLI calls the
+same service. Tools never accept an Impri API key. Use this domain operation for
+both policies rather than invoking forge merge tooling directly.
 
+Read `approval_policy` independently of `snapshot.execution_mode`. Under `none`,
+there is no Impri action, inbox, approval decision, receipt, or notification.
+`blocked` with `retry_same_request` means repeat the same project, explicit PR ID,
+and mode after CI or another temporary condition settles. Pending and
+unverifiable CI return immediately; `--wait`/timeout wait only under `impri`.
+`failed` is terminal for that request: resolve the condition before another
+attempt. An `executed` result with `cleanup_error` retries only checkout cleanup;
+an observed merged PR never invokes forge merge again, including recovery from
+an uncertain provider response. Executed with no cleanup error is complete.
+Direct dry-run is a non-destructive mock without checkout cleanup.
+
+The following approval lifecycle guidance applies to `approval_policy=impri`.
 Agents must treat `PRMergeResult` as the merge feedback contract. Every retry
-is the same `pr_merge` request with the exact `project`, PR ID, and mode; the
+is the same `pr_merge` request with the exact `project`, explicit PR ID, and mode; the
 returned `action_id` is informational for audit and the web inbox, never an
 input. Surface `inbox_url` for `status=pending` and wait. For an approved
 temporary failure or local `status=unavailable` (approval state unknown; no
