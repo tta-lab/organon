@@ -45,7 +45,7 @@ func (p *recordingIssueProvider) CreateIssueComment(
 func TestApplyIssueEditsPreservesMarkdownAndDeletes(t *testing.T) {
 	body := "# Heading\n\nold one\n\nold two\n"
 	edits := []BodyEdit{{OldText: "old one", NewText: "new **one**"}, {OldText: "old two\n", NewText: ""}}
-	got, err := applyIssueEdits(body, edits)
+	got, err := applyBodyEdits(body, edits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,17 +62,17 @@ func TestApplyIssueEditsRejectsInvalidBatches(t *testing.T) {
 		{{OldText: "abc", NewText: "x"}, {OldText: "bc", NewText: "y"}},
 		{{OldText: "same", NewText: "same"}},
 	} {
-		if err := ValidateIssueEdits(edits); err == nil && len(edits) == 1 && edits[0].OldText == edits[0].NewText {
+		if err := ValidateBodyEdits(edits); err == nil && len(edits) == 1 && edits[0].OldText == edits[0].NewText {
 			continue
 		}
-		if _, err := applyIssueEdits("same abc same", edits); err == nil {
+		if _, err := applyBodyEdits("same abc same", edits); err == nil {
 			t.Fatalf("edits %#v unexpectedly succeeded", edits)
 		}
 	}
 }
 
 func TestApplyIssueEditsRejectsOverlappingOccurrences(t *testing.T) {
-	if _, err := applyIssueEdits("aaa", []BodyEdit{{OldText: "aa", NewText: "b"}}); err == nil {
+	if _, err := applyBodyEdits("aaa", []BodyEdit{{OldText: "aa", NewText: "b"}}); err == nil {
 		t.Fatal("overlapping occurrences must be ambiguous")
 	}
 }

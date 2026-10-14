@@ -120,6 +120,27 @@ List defaults to open, search to all; pagination defaults to page 1 / 30 items
 and accepts at most 100. Comments are oldest first. Provider search ranking and
 tokenization differ, and neither uncertain creates nor comments are retried.
 
+`pr_edit_body` is the typed MCP counterpart to `issue_edit_body`, using the
+same exact `oldText`/`newText` batch envelope:
+
+```json
+{
+  "project": "orga",
+  "pr_id": 123,
+  "edits": [
+    {"oldText": "Old paragraph\n", "newText": "New paragraph\n"},
+    {"oldText": "Obsolete paragraph\n", "newText": ""}
+  ]
+}
+```
+
+For an issue, call `issue_edit_body` with `issue_id` instead of `pr_id`.
+Omit `pr_id` to target the current branch's PR; an explicit positive ID works
+without a current branch. Both tools require a nonempty batch and nonempty,
+unique original-body matches; empty `newText` deletes. PR edits preserve the
+title and comments. An uncertain write is not automatically retried; a
+provider error after writing does not guarantee rollback.
+
 `og` runs GitHub PR and Git network operations directly inside the calling CLI or MCP
 process. GitHub authentication uses repository-scoped installation tokens minted by a GitHub
 App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo

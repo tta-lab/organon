@@ -11,6 +11,7 @@ type Executor interface {
 	PRView(Request) (Response, error)
 	PRFind(Request) (Response, error)
 	PRGet(Request) (Response, error)
+	PREditBody(Request) (Response, error)
 	PRModify(Request) (Response, error)
 	PRComment(Request) (Response, error)
 	PRChecks(Request) (Response, error)

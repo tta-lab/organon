@@ -108,6 +108,47 @@ func (s Service) PRModify(req Request) (Response, error) {
 	return success(Response{Message: fmt.Sprintf("PR #%d updated: %s", pr.Index, DisplayPRURL(pr)), PR: pr}), nil
 }
 
+func (s Service) PREditBody(req Request) (Response, error) {
+	if req.Index < 0 {
+		return Response{}, fmt.Errorf("PR ID must not be negative")
+	}
+	if err := ValidateBodyEdits(req.Edits); err != nil {
+		return Response{}, err
+	}
+	ctx, err := s.resolvePRContextForRequest(req)
+	if err != nil {
+		return Response{}, err
+	}
+	if err := requireRemoteWrite(ctx, "edit pull request body"); err != nil {
+		return Response{}, err
+	}
+	index := req.Index
+	if index == 0 {
+		pr, err := findPR(ctx, stateAll)
+		if err != nil {
+			return Response{}, err
+		}
+		index = pr.Index
+	}
+	current, err := getPR(ctx, index)
+	if err != nil {
+		return Response{}, err
+	}
+	body, err := applyBodyEdits(current.Body, req.Edits)
+	if err != nil {
+		return Response{}, err
+	}
+	provider, err := newProvider(ctx)
+	if err != nil {
+		return Response{}, err
+	}
+	pr, err := writePR(provider, ctx, index, current.Title, body)
+	if err != nil {
+		return Response{}, err
+	}
+	return success(Response{PR: pr}), nil
+}
+
 func (s Service) PRComment(req Request) (Response, error) {
 	if req.Index < 0 {
 		return Response{}, fmt.Errorf("PR ID must not be negative")

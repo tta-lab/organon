@@ -97,3 +97,7 @@ func (e deferredExecutor) IssueEditBody(request og.Request) (og.Response, error)
 func (e deferredExecutor) IssueComment(request og.Request) (og.Response, error) {
 	return e.call(func(executor og.Executor) (og.Response, error) { return executor.IssueComment(request) })
 }
+
+func (e deferredExecutor) PREditBody(request og.Request) (og.Response, error) {
+	return e.call(func(executor og.Executor) (og.Response, error) { return executor.PREditBody(request) })
+}

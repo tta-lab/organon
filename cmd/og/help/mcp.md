@@ -60,6 +60,7 @@ Tools:
   pr_find                 # find a pull request for the current branch
   pr_get                  # get by ID, or view current branch PR and CI
   pr_modify               # replace title and/or body
+  pr_edit_body            # exact oldText/newText body edits
   pr_comment              # create a pull request comment
   pr_checks               # inspect pull request checks
   pr_log                  # inspect CI state and failure log tail
@@ -146,9 +147,15 @@ version. Real merge performs guarded single-checkout cleanup automatically;
 Issue operations support GitHub and Forgejo only; generic remotes fail before a
 provider request. Every explicit issue ID rejects pull requests. Issue writes
 are MCP-only and do not retry uncertain create/comment requests. `issue_edit_body`
-reads the current body then requires every `oldText` to match exactly once in
-that same body; duplicate, missing, ambiguous, nested, overlapping, and no-op
-edits fail before its one body write. Concurrent remote body edits can still race.
+and `pr_edit_body` share the `edits: [{"oldText": "old", "newText": "new"}]`
+envelope. Both read the current body then require every `oldText` to match
+exactly once in that same body; duplicate, missing, ambiguous, nested, overlapping, and no-op
+edits fail before one body write. The batch and every `oldText` must be nonempty;
+empty `newText` deletes. Matching preserves whitespace and line endings exactly.
+For `pr_edit_body`, omit `pr_id` to use the current branch or supply a positive
+ID independently of the branch. The PR title and comments stay unchanged.
+Uncertain writes are not automatically retried; an error after an attempted
+write does not guarantee rollback. Concurrent remote body edits can still race.
 
 Example MCP client configuration:
 

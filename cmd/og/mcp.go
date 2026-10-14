@@ -57,6 +57,12 @@ type ogPRModifyInput struct {
 	Body    *string `json:"body,omitempty" jsonschema:"optional replacement pull request body; an empty string clears it"`
 }
 
+type ogPREditsInput struct {
+	Project string        `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
+	PRID    *int64        `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
+	Edits   []og.BodyEdit `json:"edits" jsonschema:"exact unique body matches; empty newText deletes"`
+}
+
 type ogPRCommentInput struct {
 	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
@@ -271,6 +277,13 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	addProjectTools(server, projects)
 	addSourceTools(server, projects)
 	addRepoTools(server, projects)
+
+	mcp.AddTool(server, setInputSchema[ogPREditsInput](ogTool(
+		"pr_edit_body", "Edit pull request body",
+		"Apply exact oldText/newText edits matched uniquely against the original PR body. "+
+			"Reject empty, no-op, duplicate or overlapping edits before one update; omitted pr_id uses the current branch.",
+		false, true, false,
+	), false), prEditBodyHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",
@@ -708,5 +721,29 @@ func newOGMCPCmd() *cobra.Command {
 			})
 			return newOGMCPServer(projects, executor).Run(cmd.Context(), &mcp.StdioTransport{})
 		},
+	}
+}
+
+func prEditBodyHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerFor[ogPREditsInput, ogPROutput] {
+	return func(
+		ctx context.Context, _ *mcp.CallToolRequest, input ogPREditsInput,
+	) (*mcp.CallToolResult, ogPROutput, error) {
+		prID, err := optionalMCPPRID(input.PRID)
+		if err != nil {
+			return nil, ogPROutput{}, err
+		}
+		if err := og.ValidateBodyEdits(input.Edits); err != nil {
+			return nil, ogPROutput{}, err
+		}
+		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
+			Index: prID, Edits: input.Edits,
+		}, executor.PREditBody)
+		if err != nil {
+			return nil, ogPROutput{}, err
+		}
+		if err := og.ValidatePRResponse(resp, prID); err != nil {
+			return nil, ogPROutput{}, err
+		}
+		return nil, ogPROutput{Project: canonical, PR: *resp.PR}, nil
 	}
 }

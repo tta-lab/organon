@@ -44,3 +44,8 @@ _Avoid_: issue content when it could include comments
 **Issue comment**:
 A discussion entry attached to an issue, separate from its primary body.
 Adding a comment leaves the issue title and body unchanged.
+
+**Pull request body**:
+The pull request's primary description, separate from its title, code changes,
+review comments, and discussion comments.
+_Avoid_: pull request content when it could include code or comments

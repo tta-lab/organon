@@ -75,26 +75,26 @@ func normalizeIssuePage(state string, page, per int, search bool) (string, int, 
 	}
 	return state, page, per, nil
 }
-func ValidateIssueEdits(edits []BodyEdit) error {
+func ValidateBodyEdits(edits []BodyEdit) error {
 	if len(edits) == 0 {
-		return fmt.Errorf("issue edits must not be empty")
+		return fmt.Errorf("body edits must not be empty")
 	}
 	seen := map[string]bool{}
 	for _, edit := range edits {
 		if edit.OldText == "" {
-			return fmt.Errorf("issue edit oldText must not be empty")
+			return fmt.Errorf("body edit oldText must not be empty")
 		}
 		if edit.OldText == edit.NewText {
-			return fmt.Errorf("issue edit oldText and newText must differ")
+			return fmt.Errorf("body edit oldText and newText must differ")
 		}
 		if seen[edit.OldText] {
-			return fmt.Errorf("issue edits contain duplicate oldText")
+			return fmt.Errorf("body edits contain duplicate oldText")
 		}
 		seen[edit.OldText] = true
 	}
 	return nil
 }
-func applyIssueEdits(body string, edits []BodyEdit) (string, error) {
+func applyBodyEdits(body string, edits []BodyEdit) (string, error) {
 	type match struct {
 		start, end  int
 		replacement string
@@ -103,17 +103,17 @@ func applyIssueEdits(body string, edits []BodyEdit) (string, error) {
 	for _, edit := range edits {
 		start := strings.Index(body, edit.OldText)
 		if start < 0 {
-			return "", fmt.Errorf("issue edit oldText was not found")
+			return "", fmt.Errorf("body edit oldText was not found")
 		}
 		if strings.Contains(body[start+1:], edit.OldText) {
-			return "", fmt.Errorf("issue edit oldText is ambiguous")
+			return "", fmt.Errorf("body edit oldText is ambiguous")
 		}
 		matches = append(matches, match{start, start + len(edit.OldText), edit.NewText})
 	}
 	for i := range matches {
 		for j := i + 1; j < len(matches); j++ {
 			if matches[i].start < matches[j].end && matches[j].start < matches[i].end {
-				return "", fmt.Errorf("issue edits overlap or are nested")
+				return "", fmt.Errorf("body edits overlap or are nested")
 			}
 		}
 	}

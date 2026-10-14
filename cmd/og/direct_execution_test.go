@@ -20,11 +20,11 @@ import (
 
 type directOperation func(og.Request) (og.Response, error)
 type directExecutor struct {
-	gitPush, gitPull, gitTag, gitClone                              directOperation
-	prCreate, prView, prFind, prGet, prModify, prComment            directOperation
-	prChecks, prLog, prFailures, prMerge, authStatus                directOperation
-	issueList, issueSearch, issueGet, issueComments, issueCreate    directOperation
-	issueUpdateTitle, issueReplaceBody, issueEditBody, issueComment directOperation
+	gitPush, gitPull, gitTag, gitClone                               directOperation
+	prCreate, prView, prFind, prGet, prModify, prEditBody, prComment directOperation
+	prChecks, prLog, prFailures, prMerge, authStatus                 directOperation
+	issueList, issueSearch, issueGet, issueComments, issueCreate     directOperation
+	issueUpdateTitle, issueReplaceBody, issueEditBody, issueComment  directOperation
 }
 
 func (e *directExecutor) IssueList(r og.Request) (og.Response, error) {
@@ -756,4 +756,8 @@ func TestCLIDirectMergeOutcomes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (e *directExecutor) PREditBody(req og.Request) (og.Response, error) {
+	return e.call("pr edit body", e.prEditBody, req)
 }

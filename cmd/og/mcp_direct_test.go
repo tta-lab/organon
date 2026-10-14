@@ -84,7 +84,7 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 		"auth_status", "clone", "issue_comment", "issue_comments", "issue_create",
 		"issue_edit_body", "issue_get", "issue_list", "issue_replace_body",
 		"issue_search", "issue_update_title", "pr_checks", "pr_comment", "pr_create",
-		"pr_failures", "pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify",
+		"pr_edit_body", "pr_failures", "pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify",
 		"project_find", "project_get", "project_list", "pull", "push",
 		"repo_commits", "repo_compare", "repo_diff", "repo_status",
 		"source_list", "source_read", "source_search", "source_symbols",

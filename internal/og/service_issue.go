@@ -151,7 +151,7 @@ func (s Service) IssueEditBody(req Request) (Response, error) {
 	if err := ValidatePositiveIssueID(req.Index); err != nil {
 		return Response{}, err
 	}
-	if err := ValidateIssueEdits(req.Edits); err != nil {
+	if err := ValidateBodyEdits(req.Edits); err != nil {
 		return Response{}, err
 	}
 	ctx, err := s.resolveRemoteRepoContextForRequest(req)
@@ -172,7 +172,7 @@ func (s Service) IssueEditBody(req Request) (Response, error) {
 	if !validIssue(issue, req.Index) {
 		return Response{}, issueIdentityError(issue, req.Index)
 	}
-	body, err := applyIssueEdits(issue.Body, req.Edits)
+	body, err := applyBodyEdits(issue.Body, req.Edits)
 	if err != nil {
 		return Response{}, err
 	}

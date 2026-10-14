@@ -107,19 +107,21 @@ func updatePR(ctx *repoContext, index int64, title, body *string) (*PullRequest,
 	if body != nil {
 		desiredBody = *body
 	}
-	pr, err := provider.EditPR(ctx.Owner, ctx.Repo, index, desiredTitle, desiredBody)
+	return writePR(provider, ctx, index, desiredTitle, desiredBody)
+}
+
+func writePR(provider gitprovider.Provider, ctx *repoContext, index int64, title, body string) (*PullRequest, error) {
+	pr, err := provider.EditPR(ctx.Owner, ctx.Repo, index, title, body)
 	if err != nil {
 		return nil, err
 	}
 	if !validProviderPRIdentity(pr, index) {
 		return nil, fmt.Errorf("provider returned invalid PR ID after updating #%d", index)
 	}
-	if title != nil && pr.Title != *title {
-		return nil, fmt.Errorf(
-			"provider returned title %q after updating PR #%d, want %q", pr.Title, index, *title,
-		)
+	if pr.Title != title {
+		return nil, fmt.Errorf("provider returned unexpected title after updating PR #%d", index)
 	}
-	if body != nil && pr.Body != *body {
+	if pr.Body != body {
 		return nil, fmt.Errorf("provider returned body that does not match update for PR #%d", index)
 	}
 	return fromProviderPR(pr), nil
