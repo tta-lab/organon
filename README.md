@@ -504,6 +504,10 @@ Organon solves this by replacing text matching with **symbol targeting**. The LL
 
 ## Install
 
+`og mcp` source search and `make test` require ripgrep (`rg`) on `PATH`.
+Install it with `brew install ripgrep` on macOS or `sudo apt-get install ripgrep`
+on Debian/Ubuntu.
+
 ### Homebrew
 
 ```bash
