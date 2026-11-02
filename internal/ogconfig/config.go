@@ -15,9 +15,16 @@ import (
 // Config is the validated content of og.toml.
 type Config struct {
 	GitHubApp *githubapp.Config `toml:"github_app"`
+	GitHubPAT *GitHubPATConfig  `toml:"github_pat"`
 	Forgejo   ForgejoConfig     `toml:"forgejo"`
 	Impri     *ImpriConfig      `toml:"impri"`
 	Merge     MergeConfig       `toml:"merge"`
+}
+
+// GitHubPATConfig selects a single owner and a private token file.
+type GitHubPATConfig struct {
+	Owner     string `toml:"owner"`
+	TokenFile string `toml:"token_file"`
 }
 
 // MergeConfig selects the global approval policy for both merge transports.
@@ -28,6 +35,7 @@ type MergeConfig struct {
 const (
 	MergeApprovalImpri = "impri"
 	MergeApprovalNone  = "none"
+	MergeApprovalDeny  = "deny"
 )
 
 // Policy returns the default policy when approval is omitted.
@@ -41,10 +49,10 @@ func (c MergeConfig) Policy() string {
 // Validate rejects unsupported policies.
 func (c MergeConfig) Validate() error {
 	switch c.Policy() {
-	case MergeApprovalImpri, MergeApprovalNone:
+	case MergeApprovalImpri, MergeApprovalNone, MergeApprovalDeny:
 		return nil
 	default:
-		return fmt.Errorf("merge.approval must be impri or none")
+		return fmt.Errorf("merge.approval must be impri, none, or deny")
 	}
 }
 
@@ -101,15 +109,13 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("read og config %s: %w", path, err)
 	}
 	if metadata.IsDefined("merge", "approval") && cfg.Merge.Approval == "" {
-		return Config{}, fmt.Errorf("merge.approval must be impri or none")
+		return Config{}, fmt.Errorf("merge.approval must be impri, none, or deny")
 	}
 	if err := cfg.Merge.Validate(); err != nil {
 		return Config{}, err
 	}
-	if cfg.GitHubApp != nil {
-		if err := cfg.GitHubApp.Validate(); err != nil {
-			return Config{}, err
-		}
+	if err := validateGitHubAuth(&cfg); err != nil {
+		return Config{}, err
 	}
 	if cfg.Impri != nil {
 		if err := cfg.Impri.Validate(); err != nil {
@@ -129,6 +135,28 @@ func Load(path string) (Config, error) {
 		cfg.Forgejo.AllowedBaseURLs[i] = normalized
 	}
 	return cfg, nil
+}
+
+func validateGitHubAuth(cfg *Config) error {
+	if cfg.GitHubApp != nil && cfg.GitHubPAT != nil {
+		return fmt.Errorf("github_app and github_pat are mutually exclusive")
+	}
+	if cfg.GitHubPAT != nil {
+		c := cfg.GitHubPAT
+		if strings.TrimSpace(c.Owner) == "" || strings.TrimSpace(c.Owner) != c.Owner ||
+			strings.ContainsAny(c.Owner, "/\\ \t\r\n") {
+			return fmt.Errorf("github_pat.owner must be one GitHub owner")
+		}
+		if strings.TrimSpace(c.TokenFile) == "" || strings.TrimSpace(c.TokenFile) != c.TokenFile {
+			return fmt.Errorf("github_pat.token_file is required")
+		}
+	}
+	if cfg.GitHubApp != nil {
+		if err := cfg.GitHubApp.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ClassifyRemote applies the configured credential boundary to parsed repository metadata.

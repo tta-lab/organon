@@ -50,7 +50,7 @@ type sourceListOutput struct {
 const sourceProjectField = "project"
 
 func sourceSchema[T any]() *jsonschema.Schema {
-	schema := inputSchemaFor[T](false)
+	schema := inputSchemaFor[T]()
 	for _, name := range []string{sourceProjectField, "path"} {
 		if field := schema.Properties[name]; field != nil {
 			field.MinLength = jsonschema.Ptr(1)

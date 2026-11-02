@@ -188,44 +188,6 @@ func getCIStatus(ctx *repoContext, pr *PullRequest) (*CIStatusResponse, error) {
 	return &CIStatusResponse{OK: true, State: status.State, Statuses: statuses}, nil
 }
 
-func getCIFailures(ctx *repoContext, pr *PullRequest, tailLines int) ([]string, error) {
-	failures, err := getCIFailureDetails(ctx, pr, tailLines)
-	if err != nil {
-		return nil, err
-	}
-	return formatCIFailureDetails(failures), nil
-}
-
-func getCIFailureDetails(ctx *repoContext, pr *PullRequest, tailLines int) ([]*gitprovider.JobFailure, error) {
-	provider, err := newProvider(ctx)
-	if err != nil {
-		return nil, err
-	}
-	sha := pr.SHA
-	if sha == "" {
-		sha = headRefName
-	}
-	return provider.GetCIFailureDetails(ctx.Owner, ctx.Repo, sha, tailLines)
-}
-
-func formatCIFailureDetails(failures []*gitprovider.JobFailure) []string {
-	lines := make([]string, 0, len(failures)*4)
-	for _, failure := range failures {
-		title := failure.JobName
-		if failure.WorkflowName != "" {
-			title = failure.WorkflowName + " / " + title
-		}
-		lines = append(lines, title)
-		if failure.HTMLURL != "" {
-			lines = append(lines, failure.HTMLURL)
-		}
-		if failure.LogTail != "" {
-			lines = append(lines, failure.LogTail)
-		}
-	}
-	return lines
-}
-
 var newProviderFunc = newProviderImpl
 
 func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
@@ -239,7 +201,7 @@ func newIssueProvider(ctx *repoContext, purpose githubapp.Purpose) (gitprovider.
 	var provider gitprovider.Provider
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		if ctx.githubBroker == nil {
-			return nil, fmt.Errorf("GitHub App authentication is not configured")
+			return nil, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
 		}
 		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, purpose)
 		if err != nil {
@@ -280,7 +242,7 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 	}
 	if ctx.Provider == gitprovider.ProviderGitHub {
 		if ctx.githubBroker == nil {
-			return nil, fmt.Errorf("GitHub App authentication is not configured")
+			return nil, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
 		}
 		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, githubapp.PurposeAPI)
 		if err != nil {

@@ -177,4 +177,7 @@ func writePEM(t *testing.T, path, blockType string, der []byte, mode os.FileMode
 	if err := os.WriteFile(path, data, mode); err != nil {
 		t.Fatalf("write PEM: %v", err)
 	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -350,7 +350,7 @@ func runGitClone(ctx context.Context, invocation cloneInvocation) error {
 	)
 	switch gitprovider.ProviderType(invocation.Provider) {
 	case gitprovider.ProviderGitHub:
-		cmd.Env = gitutil.GitHubAppGitEnv(
+		cmd.Env = gitutil.GitHubGitEnv(
 			os.Environ(), invocation.Remote, invocation.Owner, invocation.Repo, invocation.Token,
 		)
 	case gitprovider.ProviderForgejo:

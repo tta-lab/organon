@@ -46,7 +46,7 @@ type repoCompareOutput struct {
 }
 
 func addRepoTools(server *mcp.Server, projects *project.Store) {
-	statusSchema := inputSchemaFor[repoStatusInput](false)
+	statusSchema := inputSchemaFor[repoStatusInput]()
 	statusSchema.Properties[sourceProjectField].MinLength = jsonschema.Ptr(1)
 	mcp.AddTool(server, sourceTool(
 		"repo_status", "Inspect repository status",
@@ -65,7 +65,7 @@ func addRepoTools(server *mcp.Server, projects *project.Store) {
 		}
 		return nil, repoStatusOutput{Project: entry.Alias, RepositoryStatus: result}, nil
 	})
-	commitsSchema := inputSchemaFor[repoCommitsInput](false)
+	commitsSchema := inputSchemaFor[repoCommitsInput]()
 	commitsSchema.Properties[sourceProjectField].MinLength = jsonschema.Ptr(1)
 	commitsSchema.Properties["limit"].Minimum = jsonschema.Ptr(1.0)
 	commitsSchema.Properties["limit"].Maximum = jsonschema.Ptr(float64(og.MaxCommitLimit))
@@ -90,7 +90,7 @@ func addRepoTools(server *mcp.Server, projects *project.Store) {
 		}
 		return nil, repoCommitsOutput{Project: entry.Alias, CommitListResult: result}, nil
 	})
-	compareSchema := inputSchemaFor[repoCompareInput](false)
+	compareSchema := inputSchemaFor[repoCompareInput]()
 	for _, field := range []string{sourceProjectField, "base_commit", "head_commit"} {
 		compareSchema.Properties[field].MinLength = jsonschema.Ptr(1)
 	}
@@ -111,7 +111,7 @@ func addRepoTools(server *mcp.Server, projects *project.Store) {
 		}
 		return nil, repoCompareOutput{Project: entry.Alias, CommitCompareResult: result}, nil
 	})
-	schema := inputSchemaFor[repoDiffInput](false)
+	schema := inputSchemaFor[repoDiffInput]()
 	if field := schema.Properties[sourceProjectField]; field != nil {
 		field.MinLength = jsonschema.Ptr(1)
 	}

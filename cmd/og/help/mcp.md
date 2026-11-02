@@ -30,7 +30,7 @@ optional `limit`, with `next_offset` for continuation; returned content is cappe
 The MCP server loads the local project registry at startup. It initializes forge
 configuration and service state on the first forge tool call, then retains that
 result (including an initialization error) for its lifetime. All pull request tools
-require a project reference. Get, modify, comment, checks, log, and failures
+require a project reference. Get, modify, comment, and checks
 accept an optional positive PR ID and use the registered checkout's current
 branch when it is omitted. Structured results return the canonical alias.
 Unlike the shell `og pr` command, this typed interface also exposes
@@ -58,13 +58,11 @@ Tools:
   pull                    # run the complete guarded CLI pull workflow
   pr_create               # push current branch and create its pull request
   pr_find                 # find a pull request for the current branch
-  pr_get                  # get by ID, or view current branch PR and CI
+  pr_get                  # get by ID, or view current branch PR (CI only for Forgejo)
   pr_modify               # replace title and/or body
   pr_edit_body            # exact oldText/newText body edits
   pr_comment              # create a pull request comment
-  pr_checks               # inspect pull request checks
-  pr_log                  # inspect CI state and failure log tail
-  pr_failures             # inspect failing checks and log tails
+  pr_checks               # inspect Forgejo pull request checks
   pr_merge                # request a policy-controlled squash merge
   issue_list              # list issues (open by default)
   issue_search            # search repository issues (all states by default)
@@ -88,6 +86,9 @@ the known default branch; push, tag, PR mutation/comment, and branch cleanup are
 blocked. Registry additions are visible on the next tool call without
 restarting this MCP process.
 
+GitHub merge and CI are unsupported; Forgejo retains merge and CI status.
+Logs and failure details are outside og.
+
 The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy:
 
 ```toml
@@ -95,9 +96,11 @@ The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy
 approval = "none" # direct execution; omitted or "impri" requires web approval
 ```
 
-Only `impri` and `none` are valid; this is global with no per-project overrides.
-Direct policy needs no Impri configuration, makes no Impri requests, and sends
-no notifications. A configured Impri section still receives whole-file validation.
+`impri`, `none`, and `deny` govern Forgejo, with no per-project
+overrides. `deny` rejects all merge requests, including dry-run, before contacting
+Impri or a forge. Neither `deny` nor direct policy needs Impri configuration.
+Direct policy makes no Impri requests and sends no notifications. A configured
+Impri section still receives whole-file validation.
 Both transports share eligibility checks and expected-head squash execution.
 CI `success` or `not_configured` permits real execution; pending or unverifiable
 CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
@@ -108,8 +111,8 @@ checkout guards remain enforced.
 
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
-wait only for Impri approval. Dry-run uses the existing non-destructive mock
-semantics without forge mutation or checkout switch/pull/deletion. Real mode
+wait only for Impri approval. Under `impri` and `none`, dry-run uses the
+non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
 pulls the registered default branch and removes matching local/origin head refs.
 An `executed` result with `cleanup_error` repeats the same project, **explicit PR
 ID**, and mode to finish cleanup; an observed merged PR never merges again,

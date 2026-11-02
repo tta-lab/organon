@@ -1,11 +1,8 @@
 package gitprovider
 
 import (
-	"bufio"
 	"context"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -100,14 +97,6 @@ func notConfiguredCombinedStatus() *CombinedStatus {
 	return &CombinedStatus{State: StateNotConfigured, Statuses: []*CommitStatus{}}
 }
 
-// JobFailure describes a single failed CI job with optional log tail.
-type JobFailure struct {
-	WorkflowName string
-	JobName      string
-	LogTail      string // last ~50 lines of job log (best-effort)
-	HTMLURL      string
-}
-
 type Provider interface {
 	Name() string
 	CreatePR(owner, repo, head, base, title, body string) (*PullRequest, error)
@@ -118,7 +107,6 @@ type Provider interface {
 	CreateComment(owner, repo string, index int64, body string) (*Comment, error)
 	ListComments(owner, repo string, index int64) ([]*Comment, error)
 	GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error)
-	GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error)
 }
 
 // PullRequestMerger is the optional write capability implemented by supported
@@ -152,47 +140,4 @@ func newContextHTTPClient(ctx context.Context, transport http.RoundTripper) *htt
 		transport = http.DefaultTransport
 	}
 	return &http.Client{Transport: contextTransport{context: contextOrBackground(ctx), base: transport}}
-}
-
-func isFailedStatus(s string) bool {
-	return s == StateFailure || s == StateError
-}
-
-func fetchLogTail(ctx context.Context, url string, lines int) string {
-	req, err := http.NewRequestWithContext(contextOrBackground(ctx), http.MethodGet, url, nil)
-	if err != nil {
-		return ""
-	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	return tailReader(resp.Body, lines)
-}
-
-func tailReader(r io.Reader, maxLines int) string {
-	if maxLines <= 0 {
-		return ""
-	}
-
-	recent := make([]string, 0, maxLines)
-	reader := bufio.NewReader(r)
-	for {
-		line, err := reader.ReadString('\n')
-		if line != "" {
-			line = strings.TrimRight(line, "\r\n")
-			if len(recent) == maxLines {
-				copy(recent, recent[1:])
-				recent[len(recent)-1] = line
-			} else {
-				recent = append(recent, line)
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	return strings.Join(recent, "\n")
 }

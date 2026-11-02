@@ -9,6 +9,7 @@ import (
 
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/ogconfig"
 )
 
 func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
@@ -337,177 +338,11 @@ func TestFindPRFallsBackToBranchLookupWhenGitHubCommitLookupMismatches(t *testin
 	}
 }
 
-func TestPRFailuresFetchesFailureDetails(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GITHUB_TOKEN", "token")
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
-	gitRun(t, repo, "commit", "--allow-empty", "-m", "feature")
-	expectedSHA := gitOut(t, repo, "rev-parse", "HEAD")
-	var gotTail int
-	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
-		return fakeProvider{
-			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-				return &gitprovider.PullRequest{
-					Index:   7,
-					Head:    "feature/x",
-					Base:    branchMain,
-					State:   stateAll,
-					HeadSHA: expectedSHA,
-				}, nil
-			},
-			getCIFailureDetails: func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
-				gotTail = tailLines
-				if sha != expectedSHA {
-					t.Fatalf("sha = %q, want %q", sha, expectedSHA)
-				}
-				return []*gitprovider.JobFailure{{
-					WorkflowName: "check",
-					JobName:      "test",
-					LogTail:      "panic: bad\nexit status 1",
-					HTMLURL:      "https://ci/job/1",
-				}}, nil
-			},
-		}, nil
-	})
-	defer restoreProvider()
-
-	resp, err := (Service{}).PRFailures(Request{WorkDir: repo, Tail: 12})
-	if err != nil {
-		t.Fatalf("PRFailures: %v", err)
-	}
-	if gotTail != 12 {
-		t.Fatalf("tail = %d, want 12", gotTail)
-	}
-	got := strings.Join(resp.Lines, "\n")
-	for _, want := range []string{"check / test", "https://ci/job/1", "panic: bad", "exit status 1"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("failure lines = %q, want substring %q", got, want)
-		}
-	}
-}
-
-func TestPRLogPrintsStatusBeforeFailureDetails(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GITHUB_TOKEN", "token")
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
-	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
-		return fakeProvider{
-			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-				return &gitprovider.PullRequest{
-					Index:   7,
-					Head:    "feature/x",
-					Base:    branchMain,
-					State:   stateAll,
-					HeadSHA: "abc123456789",
-				}, nil
-			},
-			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
-				if ref != "abc123456789" {
-					t.Fatalf("ref = %q, want abc123456789", ref)
-				}
-				return &gitprovider.CombinedStatus{
-					State: gitprovider.StateFailure,
-					Statuses: []*gitprovider.CommitStatus{{
-						Context:     "check",
-						State:       gitprovider.StateFailure,
-						Description: "failed",
-					}},
-				}, nil
-			},
-			getCIFailureDetails: func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
-				if sha != "abc123456789" {
-					t.Fatalf("sha = %q, want abc123456789", sha)
-				}
-				if tailLines != 12 {
-					t.Fatalf("tail = %d, want 12", tailLines)
-				}
-				return []*gitprovider.JobFailure{{
-					WorkflowName: "check",
-					JobName:      "test",
-					LogTail:      "panic: bad\nexit status 1",
-					HTMLURL:      "https://ci/job/1",
-				}}, nil
-			},
-		}, nil
-	})
-	defer restoreProvider()
-
-	resp, err := (Service{}).PRLog(Request{WorkDir: repo, Tail: 12})
-	if err != nil {
-		t.Fatalf("PRLog: %v", err)
-	}
-	got := strings.Join(resp.Lines, "\n")
-	for _, want := range []string{
-		"CI Status for abc12345: failed",
-		"check",
-		"Failure Details:",
-		"Workflow: check",
-		"Job: test",
-		"Log tail:",
-		"panic: bad",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("log lines = %q, want substring %q", got, want)
-		}
-	}
-	if strings.Index(got, "CI Status") > strings.Index(got, "Failure Details:") {
-		t.Fatalf("CI summary should appear before failure details:\n%s", got)
-	}
-}
-
-func TestPRLogDoesNotFetchFailureDetailsWhenCIPasses(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GITHUB_TOKEN", "token")
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
-	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
-		return fakeProvider{
-			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-				return &gitprovider.PullRequest{
-					Index:   7,
-					Head:    "feature/x",
-					Base:    branchMain,
-					State:   stateAll,
-					HeadSHA: "abc123456789",
-				}, nil
-			},
-			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
-				return &gitprovider.CombinedStatus{
-					State: gitprovider.StateSuccess,
-					Statuses: []*gitprovider.CommitStatus{{
-						Context: "check",
-						State:   gitprovider.StateSuccess,
-					}},
-				}, nil
-			},
-			getCIFailureDetails: func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
-				t.Fatal("failure details should not be fetched when CI passes")
-				return nil, nil
-			},
-		}, nil
-	})
-	defer restoreProvider()
-
-	resp, err := (Service{}).PRLog(Request{WorkDir: repo, Tail: 12})
-	if err != nil {
-		t.Fatalf("PRLog: %v", err)
-	}
-	got := strings.Join(resp.Lines, "\n")
-	if !strings.Contains(got, "CI Status for abc12345: passed") {
-		t.Fatalf("log lines = %q, want passed status", got)
-	}
-	if strings.Contains(got, "Failure Details:") {
-		t.Fatalf("log lines should not include failure details when CI passes:\n%s", got)
-	}
-}
-
 func TestPRViewIncludesCISummary(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("GITHUB_TOKEN", "token")
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://forge.example/tta-lab/example.git", false)
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
 			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
@@ -547,7 +382,9 @@ func TestPRViewIncludesCISummary(t *testing.T) {
 	})
 	defer restoreProvider()
 
-	resp, err := (Service{}).PRView(Request{WorkDir: repo})
+	resp, err := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+	}).PRView(Request{WorkDir: repo})
 	if err != nil {
 		t.Fatalf("PRView: %v", err)
 	}
@@ -747,7 +584,7 @@ func TestExplicitPROperationsValidateIDsAndReturnPRIdentity(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://forge.example/tta-lab/example.git", false)
 	gitRun(t, repo, "checkout", "--detach")
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
@@ -757,42 +594,26 @@ func TestExplicitPROperationsValidateIDsAndReturnPRIdentity(t *testing.T) {
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
 				return &gitprovider.CombinedStatus{State: gitprovider.StateSuccess}, nil
 			},
-			getCIFailureDetails: func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
-				return nil, nil
-			},
 		}, nil
 	})
 	defer restoreProvider()
 
-	resp, err := NewService(&recordingBroker{}).PRChecks(Request{WorkDir: repo, Index: 12})
+	resp, err := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+	}).PRChecks(Request{WorkDir: repo, Index: 12})
 	if err != nil {
 		t.Fatalf("PRChecks: %v", err)
 	}
 	if resp.PR == nil || resp.PR.Index != 12 {
 		t.Fatalf("checks response PR = %+v, want #12", resp.PR)
 	}
-	for name, call := range map[string]func() (Response, error){
-		"log": func() (Response, error) {
-			return NewService(&recordingBroker{}).PRLog(Request{WorkDir: repo, Index: 12})
-		},
-		"failures": func() (Response, error) {
-			return NewService(&recordingBroker{}).PRFailures(Request{WorkDir: repo, Index: 12})
-		},
-	} {
-		resp, err := call()
-		if err != nil {
-			t.Fatalf("PR%s: %v", name, err)
-		}
-		if resp.PR == nil || resp.PR.Index != 12 {
-			t.Fatalf("%s response PR = %+v, want #12", name, resp.PR)
-		}
-	}
+
 }
 
 func TestPRChecksExposesNotConfiguredStateAndPolicyMessage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://forge.example/tta-lab/example.git", false)
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
 			getPR: func(owner, repo string, index int64) (*gitprovider.PullRequest, error) {
@@ -808,7 +629,9 @@ func TestPRChecksExposesNotConfiguredStateAndPolicyMessage(t *testing.T) {
 	})
 	t.Cleanup(restoreProvider)
 
-	resp, err := (Service{}).PRChecks(Request{WorkDir: repo, Index: 12})
+	resp, err := NewServiceWithConfig(nil, nil, ogconfig.Config{
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+	}).PRChecks(Request{WorkDir: repo, Index: 12})
 	if err != nil {
 		t.Fatalf("PRChecks: %v", err)
 	}
@@ -830,7 +653,7 @@ func TestPRChecksExposesNotConfiguredStateAndPolicyMessage(t *testing.T) {
 func TestExplicitPRChecksRejectInvalidProviderSnapshotBeforeCI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	repo := testRegisteredRepo(t, home, "feature/x", "https://forge.example/tta-lab/example.git", false)
 
 	for _, tt := range []struct {
 		name string
@@ -853,7 +676,9 @@ func TestExplicitPRChecksRejectInvalidProviderSnapshotBeforeCI(t *testing.T) {
 			})
 			defer restoreProvider()
 
-			_, err := NewService(&recordingBroker{}).PRChecks(Request{WorkDir: repo, Index: 12})
+			_, err := NewServiceWithConfig(nil, nil, ogconfig.Config{
+				Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+			}).PRChecks(Request{WorkDir: repo, Index: 12})
 			if err == nil || !strings.Contains(err.Error(), "invalid PR") {
 				t.Fatalf("PRChecks error = %v, want invalid PR snapshot", err)
 			}
@@ -882,14 +707,13 @@ func stubNewProvider(t *testing.T, fn func(*repoContext) (gitprovider.Provider, 
 }
 
 type fakeProvider struct {
-	createPR            func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error)
-	findPRByState       func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
-	editPR              func(owner, repo string, index int64, title, body string) (*gitprovider.PullRequest, error)
-	getPR               func(owner, repo string, index int64) (*gitprovider.PullRequest, error)
-	mergePR             func(owner, repo string, index int64, headSHA string) error
-	createComment       func(owner, repo string, index int64, body string) (*gitprovider.Comment, error)
-	getCombinedStatus   func(owner, repo, ref string) (*gitprovider.CombinedStatus, error)
-	getCIFailureDetails func(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error)
+	createPR          func(owner, repo, head, base, title, body string) (*gitprovider.PullRequest, error)
+	findPRByState     func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error)
+	editPR            func(owner, repo string, index int64, title, body string) (*gitprovider.PullRequest, error)
+	getPR             func(owner, repo string, index int64) (*gitprovider.PullRequest, error)
+	mergePR           func(owner, repo string, index int64, headSHA string) error
+	createComment     func(owner, repo string, index int64, body string) (*gitprovider.Comment, error)
+	getCombinedStatus func(owner, repo, ref string) (*gitprovider.CombinedStatus, error)
 }
 
 func (p fakeProvider) Name() string { return "fake" }
@@ -941,13 +765,6 @@ func (p fakeProvider) ListComments(owner, repo string, index int64) ([]*gitprovi
 func (p fakeProvider) GetCombinedStatus(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
 	if p.getCombinedStatus != nil {
 		return p.getCombinedStatus(owner, repo, ref)
-	}
-	panic("not implemented")
-}
-
-func (p fakeProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*gitprovider.JobFailure, error) {
-	if p.getCIFailureDetails != nil {
-		return p.getCIFailureDetails(owner, repo, sha, tailLines)
 	}
 	panic("not implemented")
 }

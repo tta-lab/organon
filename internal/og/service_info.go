@@ -20,9 +20,6 @@ const (
 var requiredGitHubPermissions = []requiredGitHubPermission{
 	{name: "contents", access: permissionWrite},
 	{name: "pull_requests", access: permissionWrite},
-	{name: "checks", access: permissionRead},
-	{name: "actions", access: permissionRead},
-	{name: "workflows", access: permissionWrite},
 	{name: "issues", access: permissionWrite},
 }
 
@@ -63,11 +60,17 @@ func (s Service) AuthStatus(req Request) (Response, error) {
 
 func (s Service) githubAuthStatus(ctx *repoContext) (Response, error) {
 	if s.githubBroker == nil {
-		return Response{}, fmt.Errorf("GitHub App authentication is not configured")
+		return Response{}, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
 	}
 	status, err := s.githubBroker.Status(operationContext(ctx), ctx.Owner, ctx.Repo)
 	if err != nil {
 		return Response{}, err
+	}
+	if _, ok := s.githubBroker.(*patBroker); ok {
+		return success(Response{Auth: &AuthStatus{Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
+			Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "github-pat", Ready: false},
+			Message: "provider: github\nauth: github-pat\ntoken file: readable; " +
+				"GitHub authorization and permissions not verified"}), nil
 	}
 	lines := []string{
 		"provider: github",

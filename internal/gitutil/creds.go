@@ -70,21 +70,27 @@ func ForgejoGitEnv(baseEnv []string, token string) []string {
 	return env
 }
 
-// GitHubAppGitEnv returns a complete child-process environment that routes a
-// GitHub origin through canonical HTTPS and uses only the supplied App token.
-func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
+// GitHubGitEnv returns a complete child-process environment that routes a
+// GitHub origin through canonical HTTPS and uses only the supplied token.
+func GitHubGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
 	configs := []gitConfigPair{
 		{key: credentialHelperConfig, value: ""},
 		{key: askPassConfig, value: ""},
 		{key: sslVerifyConfig, value: trueConfigValue},
+		{key: "http.followRedirects", value: "false"},
+		{key: "credential.useHttpPath", value: "true"},
 	}
 	if proxy := gitProxyFromEnvironment(baseEnv); proxy != "" {
 		configs = append(configs, gitConfigPair{key: "http.proxy", value: proxy})
 	}
 	if token != "" {
 		configs = append(configs, gitConfigPair{
-			key:   credentialHelperConfig,
-			value: "!f(){ echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; }; f",
+			key: credentialHelperConfig,
+			value: `!f(){ while IFS= read -r line; do ` +
+				`case "$line" in protocol=*) protocol=${line#protocol=};; host=*) host=${line#host=};; ` +
+				`path=*) path=${line#path=};; esac; done; ` +
+				`if [ "$protocol" = https ] && [ "$host" = github.com ] && [ "$path" = "$GIT_GITHUB_PATH" ]; ` +
+				`then echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; fi; }; f`,
 		})
 	}
 	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
@@ -93,7 +99,7 @@ func GitHubAppGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []s
 	}
 	env := controlledGitEnv(baseEnv, configs)
 	if token != "" {
-		env = append(env, "GIT_TOKEN_INJECT="+token)
+		env = append(env, "GIT_TOKEN_INJECT="+token, "GIT_GITHUB_PATH="+owner+"/"+repo+".git")
 	}
 	return env
 }

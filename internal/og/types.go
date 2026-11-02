@@ -20,7 +20,6 @@ type Request struct {
 	Body      *string         `json:"body,omitempty"`
 	Index     int64           `json:"index,omitempty"`
 	State     string          `json:"state,omitempty"`
-	Tail      int             `json:"tail,omitempty"`
 	DryRun    bool            `json:"dry_run,omitempty"`
 	Wait      bool            `json:"wait,omitempty"`
 	Timeout   time.Duration   `json:"timeout,omitempty"`

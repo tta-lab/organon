@@ -57,9 +57,15 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	if err != nil {
 		return Response{}, err
 	}
+	if s.config.Merge.Policy() == ogconfig.MergeApprovalDeny {
+		return Response{}, fmt.Errorf("pull request merge denied by configured merge.approval=deny")
+	}
 	ctxInfo, err := s.resolvePRContextForRequest(req)
 	if err != nil {
 		return Response{}, err
+	}
+	if ctxInfo.Provider == gitprovider.ProviderGitHub {
+		return Response{}, fmt.Errorf("GitHub pull request merge is not supported by og")
 	}
 	if err := requireRemoteWrite(ctxInfo, "merge pull request"); err != nil {
 		return Response{}, err

@@ -38,6 +38,9 @@ func NewServiceWithConfig(
 
 // GitHubAppConfigured reports whether this service has GitHub App credentials.
 func (s Service) GitHubAppConfigured() bool {
+	if _, ok := s.githubBroker.(*patBroker); ok {
+		return false
+	}
 	return s.githubBroker != nil
 }
 

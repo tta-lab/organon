@@ -61,7 +61,8 @@ func WithHTTPTransport(transport http.RoundTripper) BrokerOption {
 }
 
 type installationRecord struct {
-	id int64
+	id        int64
+	workflows bool
 }
 
 type tokenRecord struct {
@@ -141,6 +142,9 @@ func (b *broker) Token(ctx context.Context, owner, repo string, purpose Purpose)
 	if err != nil {
 		return "", err
 	}
+	if purpose == PurposeGitWrite && installation.workflows {
+		permissions.Workflows = github.Ptr("write")
+	}
 	token, _, err := b.client.Apps.CreateInstallationToken(ctx, installation.id, &github.InstallationTokenOptions{
 		Repositories: []string{repo},
 		Permissions:  permissions,
@@ -166,7 +170,9 @@ func (b *broker) Status(ctx context.Context, owner, repo string) (InstallationSt
 	if err != nil {
 		return InstallationStatus{}, err
 	}
-	b.installations[repositoryCacheKey(owner, repo)] = installationRecord{id: installation.GetID()}
+	b.installations[repositoryCacheKey(owner, repo)] = installationRecord{
+		id: installation.GetID(), workflows: installation.GetPermissions().GetWorkflows() == "write",
+	}
 	return InstallationStatus{
 		AppID:          b.cfg.AppID,
 		InstallationID: installation.GetID(),
@@ -200,7 +206,9 @@ func (b *broker) installationLocked(ctx context.Context, owner, repo string) (in
 	if err != nil {
 		return installationRecord{}, err
 	}
-	record := installationRecord{id: installation.GetID()}
+	record := installationRecord{
+		id: installation.GetID(), workflows: installation.GetPermissions().GetWorkflows() == "write",
+	}
 	b.installations[cacheKey] = record
 	return record, nil
 }
@@ -220,8 +228,6 @@ func permissionsForPurpose(purpose Purpose) (*github.InstallationPermissions, er
 	switch purpose {
 	case PurposeAPI:
 		return &github.InstallationPermissions{
-			Actions:      github.Ptr("read"),
-			Checks:       github.Ptr("read"),
 			Contents:     github.Ptr("write"),
 			PullRequests: github.Ptr("write"),
 		}, nil
@@ -232,10 +238,7 @@ func permissionsForPurpose(purpose Purpose) (*github.InstallationPermissions, er
 	case PurposeGitRead:
 		return &github.InstallationPermissions{Contents: github.Ptr("read")}, nil
 	case PurposeGitWrite:
-		return &github.InstallationPermissions{
-			Contents:  github.Ptr("write"),
-			Workflows: github.Ptr("write"),
-		}, nil
+		return &github.InstallationPermissions{Contents: github.Ptr("write")}, nil
 	default:
 		return nil, fmt.Errorf("unknown GitHub App token purpose %q", purpose)
 	}

@@ -17,9 +17,11 @@ The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy
 approval = "none" # direct execution; omitted or "impri" requires web approval
 ```
 
-Only `impri` and `none` are valid; this is global with no per-project overrides.
-Direct policy needs no Impri configuration, makes no Impri requests, and sends
-no notifications. A configured Impri section still receives whole-file validation.
+`impri`, `none`, and `deny` govern Forgejo, with no per-project
+overrides. `deny` rejects all merge requests, including dry-run, before contacting
+Impri or a forge. Neither `deny` nor direct policy needs Impri configuration.
+Direct policy makes no Impri requests and sends no notifications. A configured
+Impri section still receives whole-file validation.
 Both transports share eligibility checks and expected-head squash execution.
 CI `success` or `not_configured` permits real execution; pending or unverifiable
 CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
@@ -30,8 +32,8 @@ checkout guards remain enforced.
 
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
-wait only for Impri approval. Dry-run uses the existing non-destructive mock
-semantics without forge mutation or checkout switch/pull/deletion. Real mode
+wait only for Impri approval. Under `impri` and `none`, dry-run uses the
+non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
 pulls the registered default branch and removes matching local/origin head refs.
 An `executed` result with `cleanup_error` repeats the same project, **explicit PR
 ID**, and mode to finish cleanup; an observed merged PR never merges again,
@@ -68,10 +70,9 @@ For registered projects, the registry remote is the repository identity. Before
 each Git network operation, og requires the effective origin fetch URL—and every
 push URL for writes—to match it. Repository-local hooks run normally.
 
-GitHub commands authenticate with repository-scoped GitHub App installation
-tokens. Worker environments and request payloads do not provide GitHub
-credentials. Run `og auth status` inside a registered repository to check the
-App installation, repository scope, and required permissions.
+GitHub uses either an owner-scoped PAT or a GitHub App configured in og.toml;
+see the README for setup and permissions. GitHub merge and CI are unsupported;
+Forgejo retains merge and CI status. Logs and failure details are outside og.
 
 `og mcp` serves typed forge workflows over stdio. MCP callers
 select a repository only through a project reference; filesystem paths, URLs,

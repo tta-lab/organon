@@ -3,7 +3,6 @@ package og
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
@@ -44,7 +43,9 @@ func (s Service) PRView(req Request) (Response, error) {
 	if err == nil {
 		pr = full
 	}
-	attachCIStatus(ctx, pr)
+	if ctx.Provider != gitprovider.ProviderGitHub {
+		attachCIStatus(ctx, pr)
+	}
 	return success(Response{PR: pr}), nil
 }
 
@@ -186,6 +187,9 @@ func (s Service) PRChecks(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	if ctx.Provider == gitprovider.ProviderGitHub {
+		return Response{}, fmt.Errorf("GitHub CI checks are not supported by og")
+	}
 	pr, err := getRequestedPR(ctx, req.Index)
 	if err != nil {
 		return Response{}, err
@@ -211,64 +215,6 @@ func attachCIStatus(ctx *repoContext, pr *PullRequest) {
 		return
 	}
 	pr.CI = ci
-}
-
-func (s Service) PRFailures(req Request) (Response, error) {
-	if req.Index < 0 {
-		return Response{}, fmt.Errorf("PR ID must not be negative")
-	}
-	if err := ValidatePRLogTail(req.Tail); err != nil {
-		return Response{}, err
-	}
-	ctx, err := s.resolvePRContextForRequest(req)
-	if err != nil {
-		return Response{}, err
-	}
-	pr, err := getRequestedPR(ctx, req.Index)
-	if err != nil {
-		return Response{}, err
-	}
-	lines, err := getCIFailures(ctx, pr, req.Tail)
-	if err != nil {
-		return Response{}, err
-	}
-	if len(lines) == 0 {
-		lines = []string{"No failing checks found."}
-	}
-	return success(Response{PR: pr, Lines: lines}), nil
-}
-
-func (s Service) PRLog(req Request) (Response, error) {
-	if req.Index < 0 {
-		return Response{}, fmt.Errorf("PR ID must not be negative")
-	}
-	if err := ValidatePRLogTail(req.Tail); err != nil {
-		return Response{}, err
-	}
-	ctx, err := s.resolvePRContextForRequest(req)
-	if err != nil {
-		return Response{}, err
-	}
-	pr, err := getRequestedPR(ctx, req.Index)
-	if err != nil {
-		return Response{}, err
-	}
-	ci, err := getCIStatus(ctx, pr)
-	if err != nil {
-		return Response{}, err
-	}
-	lines := formatCIStatusLines(pr.SHA, ci)
-	if !hasCIFailures(ci) {
-		return success(Response{PR: pr, Lines: lines}), nil
-	}
-	failures, err := getCIFailureDetails(ctx, pr, req.Tail)
-	if err != nil {
-		lines = append(lines, "warning: could not fetch failure logs: "+err.Error())
-		return success(Response{PR: pr, Lines: lines}), nil
-	}
-	lines = append(lines, "")
-	lines = append(lines, formatPRLogFailureDetails(failures)...)
-	return success(Response{PR: pr, Lines: lines}), nil
 }
 
 func (s Service) resolvePRContextForRequest(req Request) (*repoContext, error) {
@@ -297,75 +243,3 @@ func stringValue(value *string) string {
 }
 
 const ciNotConfiguredMessage = "CI is not configured for this commit; merge policy allows proceeding without checks"
-
-func formatCIStatusLines(sha string, ci *CIStatusResponse) []string {
-	shortSHA := sha
-	if len(shortSHA) > 8 {
-		shortSHA = shortSHA[:8]
-	}
-	lines := []string{"CI Status for " + shortSHA + ": " + formatCIState(ci.State)}
-	if ci.State == gitprovider.StateNotConfigured {
-		lines = append(lines, "  "+ciNotConfiguredMessage)
-	}
-	if len(ci.Statuses) == 0 {
-		return append(lines, "  No checks found.")
-	}
-	for _, status := range ci.Statuses {
-		line := "  " + ciStateIcon(status.State) + " " + status.Context
-		if status.Description != "" && status.Description != status.State {
-			line += " - " + status.Description
-		}
-		lines = append(lines, line)
-	}
-	return lines
-}
-
-func formatPRLogFailureDetails(failures []*gitprovider.JobFailure) []string {
-	if len(failures) == 0 {
-		return []string{"No failure details available."}
-	}
-	lines := []string{"Failure Details:"}
-	for _, failure := range failures {
-		lines = append(lines, "")
-		lines = append(lines, "  Workflow: "+failure.WorkflowName)
-		lines = append(lines, "  Job: "+failure.JobName)
-		if failure.HTMLURL != "" {
-			lines = append(lines, "  URL: "+failure.HTMLURL)
-		}
-		if failure.LogTail != "" {
-			lines = append(lines, "  Log tail:")
-			for _, line := range strings.Split(failure.LogTail, "\n") {
-				lines = append(lines, "    "+line)
-			}
-		}
-	}
-	return lines
-}
-
-func hasCIFailures(ci *CIStatusResponse) bool {
-	return ci.State == gitprovider.StateFailure || ci.State == gitprovider.StateError
-}
-
-func formatCIState(state string) string {
-	switch state {
-	case gitprovider.StateSuccess:
-		return "passed"
-	case gitprovider.StateFailure:
-		return "failed"
-	default:
-		return state
-	}
-}
-
-func ciStateIcon(state string) string {
-	switch state {
-	case gitprovider.StateSuccess:
-		return "ok"
-	case gitprovider.StateFailure, gitprovider.StateError:
-		return "x"
-	case gitprovider.StatePending:
-		return "."
-	default:
-		return "?"
-	}
-}

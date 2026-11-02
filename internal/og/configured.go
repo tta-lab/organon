@@ -22,7 +22,9 @@ func LoadService(configPath, configDir string) (Service, error) {
 	}
 
 	var broker githubapp.CredentialBroker
-	if cfg.GitHubApp != nil {
+	if cfg.GitHubPAT != nil {
+		broker = &patBroker{owner: cfg.GitHubPAT.Owner, file: cfg.GitHubPAT.TokenFile, configDir: configDir}
+	} else if cfg.GitHubApp != nil {
 		keySource, err := githubapp.NewKeySource(*cfg.GitHubApp, configDir)
 		if err != nil {
 			return Service{}, err

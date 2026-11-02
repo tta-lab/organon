@@ -18,8 +18,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tiktoken-go/tokenizer v0.8.1
 	github.com/yuin/goldmark v1.8.5
-	go.woodpecker-ci.org/woodpecker/v3 v3.17.0
-	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -55,7 +53,9 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 )

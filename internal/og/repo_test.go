@@ -254,6 +254,10 @@ func TestGitPushAllowsMainAndMasterToReachRemote(t *testing.T) {
 			t.Setenv("GITHUB_TOKEN", "")
 			t.Setenv("GH_TOKEN", "")
 			repo := testRegisteredHTTPRepo(t, home, branch)
+			restore := stubRunGitWithCreds(t, func(*repoContext, ...string) error {
+				return errors.New("fixture remote rejected push")
+			})
+			defer restore()
 
 			_, err := NewService(&recordingBroker{}).GitPush(Request{WorkDir: repo})
 			if err == nil {

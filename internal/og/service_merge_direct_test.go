@@ -41,7 +41,8 @@ func TestDirectMergeGuardsAndRecovery(t *testing.T) { //nolint:gocyclo
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			repo := testRegisteredRepo(t, home, "feature/merge", "https://github.com/tta-lab/example.git", false)
+			t.Setenv("FORGEJO_TOKEN", "fixture-token")
+			repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 			gitRun(t, repo, "branch", branchMain)
 			sha := gitOut(t, repo, "rev-parse", "HEAD")
 			gitRun(t, repo, "update-ref", "refs/remotes/origin/main", sha)
@@ -79,7 +80,7 @@ func TestDirectMergeGuardsAndRecovery(t *testing.T) { //nolint:gocyclo
 						}
 						return &gitprovider.PullRequest{Index: index, Head: "feature/merge", HeadSHA: headSHA, Base: branchMain,
 							State: state, Merged: merged, Mergeable: tc.name != "nonmergeable",
-							HTMLURL: "https://github.com/tta-lab/example/pull/7"}, nil
+							HTMLURL: "https://forge.example/tta-lab/example/pull/7"}, nil
 					},
 					getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
 						if ref != sha {
@@ -121,7 +122,10 @@ func TestDirectMergeGuardsAndRecovery(t *testing.T) { //nolint:gocyclo
 				return nil
 			})
 			t.Cleanup(restoreGit)
-			cfg := ogconfig.Config{Merge: ogconfig.MergeConfig{Approval: "none"}}
+			cfg := ogconfig.Config{
+				Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+				Merge:   ogconfig.MergeConfig{Approval: "none"},
+			}
 			// Both omission and a configured but unused Impri endpoint must work.
 			if tc.name == "success" {
 				cfg.Impri = &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "fixture"}
@@ -140,7 +144,7 @@ func TestDirectMergeGuardsAndRecovery(t *testing.T) { //nolint:gocyclo
 			}
 			checkDirectResult(t, response)
 			if tc.initialOutage {
-				known := PRMergeSnapshot{PRNumber: 7, PRURL: "https://github.com/tta-lab/example/pull/7",
+				known := PRMergeSnapshot{PRNumber: 7, PRURL: "https://forge.example/tta-lab/example/pulls/7",
 					ExecutionMode: PRMergeModeReal}
 				if response.Merge.Snapshot != known || gets != 1 || gitCalls != 0 {
 					t.Fatalf("initial outage result %+v, fetches %d, Git calls %d", response.Merge, gets, gitCalls)

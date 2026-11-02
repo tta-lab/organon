@@ -61,7 +61,8 @@ func TestNewProviderRequiresGitHubAppBroker(t *testing.T) {
 		TokenEnv: "GITHUB_TOKEN",
 		Token:    "ambient-pat",
 	})
-	if err == nil || !strings.Contains(err.Error(), "GitHub App authentication is not configured") {
+	if err == nil || !strings.Contains(err.Error(),
+		"GitHub authentication is not configured; configure a PAT or GitHub App") {
 		t.Fatalf("newProvider error = %v", err)
 	}
 }

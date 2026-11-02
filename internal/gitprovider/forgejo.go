@@ -317,20 +317,6 @@ func (t forgejoCombinedStatusTransport) RoundTrip(req *http.Request) (*http.Resp
 	return response, nil
 }
 
-// GetCIFailureDetails fetches CI failure details via Woodpecker CI API.
-// Forgejo's native Actions API does not provide useful error info,
-// so we use Woodpecker's API directly for failure details and step logs.
-//
-// Note: this method requires WOODPECKER_URL and WOODPECKER_TOKEN to be set
-// independently of the Forgejo credentials; Woodpecker is a separate service.
-func (p *ForgejoProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error) {
-	wc, err := NewWoodpeckerClient(p.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("woodpecker client: %w (set WOODPECKER_URL and WOODPECKER_TOKEN)", err)
-	}
-	return wc.GetFailureDetails(owner, repo, sha, tailLines)
-}
-
 func toPullRequest(pr *forgejo_sdk.PullRequest) *PullRequest {
 	head := ""
 	headSHA := ""

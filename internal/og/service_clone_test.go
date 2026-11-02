@@ -643,7 +643,10 @@ func TestGitCloneCancellationCleansTemporaryCheckout(t *testing.T) {
 func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 	bin := t.TempDir()
 	capture := filepath.Join(t.TempDir(), "environment")
-	script := "#!/bin/sh\nenv > \"$CLONE_ENV_CAPTURE\"\n"
+	script := "#!/bin/sh\n" +
+		"printf 'GIT_CONFIG_COUNT=%s\\nGIT_CONFIG_KEY_1=%s\\nGIT_TOKEN_INJECT=%s\\nFORGEJO_TOKEN=%s\\n' " +
+		"\"$GIT_CONFIG_COUNT\" \"$GIT_CONFIG_KEY_1\" \"$GIT_TOKEN_INJECT\" \"$FORGEJO_TOKEN\" " +
+		"> \"$CLONE_ENV_CAPTURE\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +669,7 @@ func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 		t.Fatal(err)
 	}
 	environment := string(data)
-	if strings.Contains(environment, "ambient-token") || strings.Contains(environment, "GIT_TOKEN_INJECT=") {
+	if strings.Contains(environment, "ambient-token") || !strings.Contains(environment, "GIT_TOKEN_INJECT=\n") {
 		t.Fatal("public Forgejo clone retained credentials")
 	}
 	if !strings.Contains(environment, "GIT_CONFIG_COUNT=3") ||

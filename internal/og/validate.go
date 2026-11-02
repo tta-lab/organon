@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -18,10 +19,6 @@ const (
 	// PRStateAll selects pull requests in every state.
 	PRStateAll = "all"
 
-	// DefaultPRLogTail is the default number of CI log lines to request.
-	DefaultPRLogTail = 50
-	// MaxPRLogTail is the largest accepted CI log tail window.
-	MaxPRLogTail        = 1000
 	DefaultIssuePerPage = 30
 	MaxIssuePerPage     = 100
 )
@@ -177,14 +174,6 @@ func ValidatePRModifyInput(title, body *string) error {
 func ValidatePRCommentBody(body *string) error {
 	if body == nil || strings.TrimSpace(*body) == "" {
 		return fmt.Errorf("comment body must not be blank")
-	}
-	return nil
-}
-
-// ValidatePRLogTail requires the shared bounded log window.
-func ValidatePRLogTail(tail int) error {
-	if tail < 0 || tail > MaxPRLogTail {
-		return fmt.Errorf("tail must be between 0 and %d", MaxPRLogTail)
 	}
 	return nil
 }
@@ -412,7 +401,7 @@ func ValidateCloneResponse(resp Response) error {
 		return fmt.Errorf("og returned an invalid clone result")
 	}
 	switch result.Provider {
-	case "github", "forgejo", "generic":
+	case string(gitprovider.ProviderGitHub), string(gitprovider.ProviderForgejo), string(gitprovider.ProviderGeneric):
 	default:
 		return fmt.Errorf("og returned invalid clone provider %q", result.Provider)
 	}
@@ -434,7 +423,8 @@ func validateCloneRemote(result *CloneResult) error {
 		(u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, result.Host) {
 		return fmt.Errorf("og returned an invalid clone remote")
 	}
-	if (result.Provider == "github" || result.Provider == "generic") && u.Scheme != "https" {
+	if (result.Provider == string(gitprovider.ProviderGitHub) ||
+		result.Provider == string(gitprovider.ProviderGeneric)) && u.Scheme != "https" {
 		return fmt.Errorf("og returned an insecure clone remote")
 	}
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")

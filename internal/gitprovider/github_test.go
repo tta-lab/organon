@@ -157,82 +157,6 @@ func TestGitHubIssueFieldUpdatesAndCommentPayloads(t *testing.T) {
 	}
 }
 
-func TestGitHubProviderMergePRUsesSquashAndExpectedSHA(t *testing.T) {
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/repos/o/r/pulls/7/merge" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write([]byte(`{"merged":true,"sha":"merge-sha"}`))
-	}))
-	t.Cleanup(server.Close)
-	baseURL := server.URL + "/"
-	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &GitHubProvider{client: client}
-	if err := provider.MergePullRequest("o", "r", 7, "head-sha"); err != nil {
-		t.Fatalf("MergePullRequest: %v", err)
-	}
-	if got["merge_method"] != "squash" || got["sha"] != "head-sha" {
-		t.Fatalf("merge request = %#v", got)
-	}
-}
-
-func TestGitHubProviderGetCombinedStatusNotConfiguredWhenNoChecks(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/repos/o/r/commits/abc123/check-runs" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{"total_count":0,"check_runs":[]}`))
-	}))
-	t.Cleanup(server.Close)
-	baseURL := server.URL + "/"
-	client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
-	if err != nil {
-		t.Fatalf("new GitHub client: %v", err)
-	}
-	provider := &GitHubProvider{client: client}
-	status, err := provider.GetCombinedStatus("o", "r", "abc123")
-	if err != nil || status == nil || status.State != StateNotConfigured ||
-		status.Statuses == nil || len(status.Statuses) != 0 {
-		t.Fatalf("status = %+v, err = %v, want not_configured with empty statuses", status, err)
-	}
-}
-
-func TestGitHubProviderGetCombinedStatusRejectsMalformedOrFailedResponses(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		body string
-		code int
-	}{
-		{name: "malformed", body: `{}`, code: http.StatusOK},
-		{name: "api error", body: `{"message":"temporary"}`, code: http.StatusBadGateway},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.code)
-				_, _ = w.Write([]byte(tt.body))
-			}))
-			t.Cleanup(server.Close)
-			baseURL := server.URL + "/"
-			client, err := github.NewClient(github.WithHTTPClient(server.Client()), github.WithURLs(&baseURL, &baseURL))
-			if err != nil {
-				t.Fatalf("new GitHub client: %v", err)
-			}
-			provider := &GitHubProvider{client: client}
-			status, err := provider.GetCombinedStatus("o", "r", "abc123")
-			if err == nil || status != nil {
-				t.Fatalf("status = %+v, err = %v, want fail-closed error", status, err)
-			}
-		})
-	}
-}
-
 const testGitHubBaseBranch = "main"
 
 func TestNewGitHubProviderWithTokenDoesNotUseAmbientToken(t *testing.T) {
@@ -340,16 +264,26 @@ func TestGitHubProviderFindPRByCommit(t *testing.T) {
 	}
 }
 
-func TestFetchLogTailReadsPastFirst64KiB(t *testing.T) {
-	body := strings.Repeat("setup success\n", 6000) + "actual failure\nexit status 1\n"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-
-	got := fetchLogTail(context.Background(), server.URL, 2)
-	want := "actual failure\nexit status 1"
-	if got != want {
-		t.Fatalf("fetchLogTail() = %q, want %q", got, want)
+func TestGitHubTokenTransportRejectsOtherHosts(t *testing.T) {
+	calls := 0
+	transport := &githubTokenTransport{
+		token: "fixture-token", base: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, nil
+		}),
+	}
+	for _, target := range []string{
+		"https://other.example/repos/o/r", "http://api.github.com/repos/o/r", "https://api.github.com:443/repos/o/r",
+	} {
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = transport.RoundTrip(req); err == nil {
+			t.Fatalf("accepted target %s", target)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("sent %d requests", calls)
 	}
 }

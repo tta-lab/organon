@@ -142,9 +142,11 @@ title and comments. An uncertain write is not automatically retried; a
 provider error after writing does not guarantee rollback.
 
 `og` runs GitHub PR and Git network operations directly inside the calling CLI or MCP
-process. GitHub authentication uses repository-scoped installation tokens minted by a GitHub
-App; `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used. Forgejo
-continues to use its existing token environment variables.
+process. Configure exactly one GitHub mode: an owner-scoped fine-grained PAT or
+a GitHub App. `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used.
+Forgejo continues to use its token environment variables. GitHub merge and CI
+queries are unsupported in both modes; GitHub PR view omits CI. Forgejo keeps
+merge and CI status, while CI logs and failure details are outside og.
 
 Controlled `og` Git transport honors only a supported user-global `http.version`
 value (`HTTP/1.1` or `HTTP/2`); all other global and system Git configuration
@@ -162,7 +164,19 @@ exception.
 
 Pull-request merging honors the global operator-owned `merge.approval` policy
 in `~/.config/ttal/og.toml` through both CLI and typed MCP. Omitted policy defaults
-to `impri`; only `impri` and `none` are accepted. There are no per-project overrides.
+to `impri`; `impri`, `none`, and `deny` apply to Forgejo, with no per-project
+overrides. GitHub merge is always rejected, including dry-run. To reject merge requests, including dry-run,
+before contacting Impri or a forge, configure:
+
+```toml
+[merge]
+approval = "deny"
+```
+
+The rejection is non-retryable while `deny` remains configured. No Impri section
+is required; if present, it is still validated. This policy governs merges
+requested through `og`; forge permissions remain separate.
+
 For direct execution, configure:
 
 ```toml
@@ -221,9 +235,7 @@ uses the same gate, then refetches the PR and CI and requires an open,
 mergeable PR at the approved head SHA with CI state `success` or
 `not_configured` before a squash merge. `pr_checks` exposes that machine state;
 for `not_configured` it also explains that merge policy allows proceeding
-without checks. For GitHub, `not_configured` specifically means the Checks API
-returned zero Check Runs; legacy commit-status integrations are outside this
-gate. Pending, rejected,
+without checks. Pending, rejected,
 expired, timed-out, malformed, stale, and failed actions do not merge.
 Provider/network/API availability failures leave an approved action retryable;
 repeat the same request without new approval. Deterministic guard or executor
@@ -257,150 +269,106 @@ provisioning or rotation are outside this version. The final operator PoC uses
 the configured deployed Impri instance, a web-approved dry-run card, and no
 real merge.
 
-Create the real App only after both implementation PRs are merged, green, and
-the merged binary is ready to install. Register one App under a stable GitHub
-account and allow it to be installed by the other managed accounts. It needs no
-Marketplace listing, OAuth flow, callback, webhook, or organization permission.
-Grant only these repository permissions:
+### GitHub authentication setup
 
-- Contents: read and write
-- Pull requests: read and write
-- Checks: read-only
-- Actions: read-only
-- Workflows: read and write
-- Issues: read and write
+Choose **one** section in `~/.config/ttal/og.toml`: `[github_pat]` or
+`[github_app]`. Configuring both is an error. PAT mode uses exactly one resource
+owner, checked before reading credentials. Out-of-owner Git clone and pull may
+proceed anonymously for public repositories; writes and API operations are
+rejected. In-scope authentication failures never fall back to anonymous access
+or an App. App mode
+retains its allowed-owner and repository-scoped installation token behavior.
 
-Install it on selected repositories only in `tta-lab`, `GuionAI`, and
-`LamplitIsles`. Each installation owner must approve the permissions. Do not
-grant Administration, Members, Secrets, Deployments, or other organization
-access.
+To create a fine-grained PAT, open GitHub **Settings → Developer settings →
+Personal access tokens → Fine-grained tokens → Generate new token**. Choose a
+name and expiration, select the organization or user as **Resource owner**,
+and select only the repositories og needs. Request the repository permissions
+below. The token cannot exceed the creator's own repository access. An
+organization may block PATs, restrict expiration, or require owner approval; a
+pending token can only read public resources until approved. See GitHub's
+[token instructions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+and [organization policy](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization).
 
-Before testing writes, configure every managed default-branch ruleset to require
-a PR and required checks, restrict updates, and disallow force pushes and
-deletion. Keep the App out of every bypass list. `og` can reach `main` and its
-App token has Contents write permission, so GitHub rulesets are the hard merge
-and default-branch boundary.
+| Repository permission | Read-only use | Write use |
+| --- | --- | --- |
+| Contents | Read for clone and pull | Read and write for push and tags |
+| Pull requests | Read for PR lookup and details, and for private active non-default-branch pulls | Read and write for PR creation and edits |
+| Issues | Read for issue lookup and comments | Read and write for issue writes and comments; PR comments use the issues API |
+| Workflows | Not needed | Read and write only when pushing changes to `.github/workflows` |
+| Metadata | Read (automatically included) | Read (automatically included) |
 
-After downloading a private key, keep it outside the repository and configure
-OG:
+For a private repository, pulling the default branch requires Contents read.
+Pulling an active non-default branch also requires Pull requests read: og looks
+up the branch's PR to detect a closed PR before pulling or cleaning up. GitHub's
+[PR list](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests) and
+[PRs associated with a commit](https://docs.github.com/en/rest/commits/commits#list-pull-requests-associated-with-a-commit)
+endpoints both require that permission for private resources.
+GitHub's [fine-grained REST permission table](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)
+documents the endpoint requirements. Checks and Actions permissions are not
+needed by og. If an operation is unused, omit its permission. Branch rules and
+organization policy still govern writes.
+
+Store the token in a private file outside the checkout; do not put it in shell
+history, command arguments, environment variables, URLs, Git config, logs, or
+agent messages. Create a `0700` directory and a current-user-owned regular
+`0600` file, then paste the token into that file using a private editor. The
+file must not be a symlink and contains only the token, optionally followed by
+one newline. One way to create it without placing the token in a command is:
 
 ```bash
+umask 077
 install -d -m 700 ~/.config/ttal/og
-install -m 600 ~/Downloads/your-app.private-key.pem \
-  ~/.config/ttal/og/github-app.pem
-cat <<'EOF' > ~/.config/ttal/og.toml
+${EDITOR:-vi} ~/.config/ttal/og/github-pat # paste and save the token privately
+chmod 600 ~/.config/ttal/og/github-pat
+```
+
+For example, with the token privately placed in
+`~/.config/ttal/og/github-pat`, configure:
+
+```toml
+[github_pat]
+owner = "example-org"
+token_file = "og/github-pat"
+
+[forgejo]
+allowed_base_urls = ["https://forge.example.com"]
+```
+
+Relative token paths are resolved against the directory containing `og.toml`.
+Restart a running MCP server after changing the config. `og auth status --project
+<alias>` checks owner and file accessibility but does not validate the token
+with GitHub or prove permissions; its PAT `ready` field is false. Verify access
+with a permitted read such as `og pr get <number> --project <alias>`. A 401 or
+403, or a private repository appearing absent, can mean expiry, revocation,
+missing selected repository/permission, or organization approval/policy. Check
+those settings without printing the token. For rotation, create and approve a
+replacement with the same intended scope, replace the protected file, verify a
+read, then revoke the old token. og reads the file for each operation.
+
+For multiple owners, configure a GitHub App instead (not alongside PAT):
+
+```toml
 [github_app]
 app_id = 123456
 key_source = "file"
 key_ref = "og/github-app.pem"
-allowed_owners = ["tta-lab", "GuionAI", "LamplitIsles"]
-
-[forgejo]
-allowed_base_urls = ["http://forgejo.localhost:17480"]
-EOF
-chmod 600 ~/.config/ttal/og.toml
-
+allowed_owners = ["example-org", "another-org"]
 ```
 
-Before replacing a pre-direct-execution installation, stop and remove its user service
-with the old installed binary. On macOS:
+Install the App on selected repositories and obtain owner approval. For the
+full retained feature set grant Contents, Pull requests, and Issues read/write;
+Workflows read/write is optional for workflow-file pushes. App private keys use
+the same private directory and file protections. `og auth status` checks App
+installation permissions; it does not require Checks, Actions, or optional
+Workflows. Installation tokens are repository and purpose scoped and are
+kept in memory. GitHub's own rulesets remain the default-branch boundary.
 
-```bash
-OLD_OG="$HOME/.local/bin/og"
-SERVICE="gui/$(id -u)/io.guion.og.daemon"
-"$OLD_OG" daemon stop || true
-"$OLD_OG" daemon uninstall || true
-launchctl bootout "$SERVICE" 2>/dev/null || true
-if launchctl print "$SERVICE" >/dev/null 2>&1; then
-  echo "old og service is still running; stop it before upgrading" >&2
-  exit 1
-fi
-rm -f "$HOME/Library/LaunchAgents/io.guion.og.daemon.plist"
-```
-
-On Linux:
-
-```bash
-OLD_OG="$HOME/.local/bin/og"
-"$OLD_OG" daemon stop || true
-"$OLD_OG" daemon uninstall || true
-systemctl --user stop og.service 2>/dev/null || true
-if systemctl --user is-active --quiet og.service; then
-  echo "old og service is still running; stop it before upgrading" >&2
-  exit 1
-fi
-rm -f "$HOME/.config/systemd/user/og.service"
-systemctl --user daemon-reload
-```
-
-The direct-execution release has no daemon lifecycle commands; run this cleanup
-before replacing the old binary.
-
-```bash
-make install
-og auth status --project organon
-```
-
-
-Clone URLs through OG so destination, authentication, and registration
-stay on one boundary:
-
-```bash
-og clone organon
-og clone https://github.com/tta-lab/organon.git
-og clone --alias forgejo https://codeberg.org/forgejo/forgejo.git
-og clone --reference https://github.com/modelcontextprotocol/go-sdk.git
-```
-
-Alias clones use the registered path and canonical remote. URL project clones
-derive `~/code/projects/<owner>/<repo>` with lowercase owner and repository
-directory components and register an alias plus remote. Reference clones
-derive `~/code/references/<host>/<owner>/<repo>` with the same lowercase owner
-and repository directory components and remain unregistered. The local path is
-distinct from provider-specific repository identity, whose remote spelling is
-preserved. Only GitHub, configured Forgejo roots, and anonymous generic HTTPS
-are supported; callers cannot provide a destination or credentials.
-
-For registered operations, `projects.toml` is the repository identity SSOT.
-Immediately before a Git network operation, og checks the effective fetch URL
-and, for writes, every push URL against that remote before resolving a token.
-Normal repository hooks such as Lefthook run without bypasses.
-
-Archived project entries remain useful context. They may read PR/CI state and
-fast-forward the known default branch with `og pull`, but cannot push, tag,
-create/modify/comment on PRs, or run pull's branch-cleanup path.
-
-Keep the migration PAT active during rollout. In one selected repository from
-each owner, run `og auth status` and require every permission to report ready.
-Then use a disposable feature branch to verify `og push`, `og pr view`,
-`og pr checks`, and `og pr comment`. Verify pull-request creation and
-modification through the typed MCP `pr_create`/`pr_modify` tools. Confirm GitHub attributes the push and PR
-activity to the App bot. Also verify that an SSH-configured origin is unchanged
-on disk, an uninstalled managed write fails without fallback, and a third-party
-public repository can pull anonymously but cannot write. Inspect command errors
-and local Git configuration for credential material without printing any secret
-values. Remove the downloaded key copy after this passes; GitHub can issue a
-replacement, so no private-key backup is required.
-
-Only after all three owners pass, remove local `github_token_env` keys and
-GitHub PAT variables from `~/.config/ttal/.env` and shell startup files. Run
-the command again, repeat a representative App-only push and PR check, and then
-revoke the migration PAT.
-
-Installation tokens are automatic, memory-only, repository-scoped, and expire
-after about one hour. The App private key is long-lived: it must never enter an
-agent environment or Git child process. Direct `git`, `gh`, and arbitrary API
-calls are outside OG's credential boundary and may still use personal
-credentials; mandatory GitHub rulesets protect the default branch in those
-paths.
-
-For key rotation, create a replacement App key, install it with mode `0600`,
-run `og auth status` again, verify all owners, and then revoke and
-remove the old key. Before PAT revocation, rollback means reinstalling the
-previous `og` binary and stopping and uninstalling the old service with the existing
-migration PAT.
-After revocation, emergency rollback requires a new narrow temporary PAT; never
-reactivate or reuse the exposed migration PAT.
+Clone URLs through og so destination, authentication, and registration share one
+boundary: `og clone <registered-alias>` or `og clone --reference
+https://github.com/owner/repo.git`. Registered project remotes are verified
+against Git's effective fetch and push URLs before credentials are resolved.
+Archived projects can read and fast-forward their known default branch but cannot
+push, tag, mutate PRs, or perform branch cleanup.
 
 ## MCP servers
 

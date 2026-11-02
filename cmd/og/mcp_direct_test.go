@@ -84,7 +84,7 @@ func TestOGMCPUsesDirectExecutorAndPreservesToolContracts(t *testing.T) {
 		"auth_status", "clone", "issue_comment", "issue_comments", "issue_create",
 		"issue_edit_body", "issue_get", "issue_list", "issue_replace_body",
 		"issue_search", "issue_update_title", "pr_checks", "pr_comment", "pr_create",
-		"pr_edit_body", "pr_failures", "pr_find", "pr_get", "pr_log", "pr_merge", "pr_modify",
+		"pr_edit_body", "pr_find", "pr_get", "pr_merge", "pr_modify",
 		"project_find", "project_get", "project_list", "pull", "push",
 		"repo_commits", "repo_compare", "repo_diff", "repo_status",
 		"source_list", "source_read", "source_search", "source_symbols",
@@ -758,29 +758,6 @@ func TestOGMCPUsesLoadedServiceDirectly(t *testing.T) {
 	}
 }
 
-func TestOGMCPDefaultsOmittedLogTailWithoutChangingExplicitZero(t *testing.T) {
-	var tails []int
-	executor := &directExecutor{prLog: func(req og.Request) (og.Response, error) {
-		tails = append(tails, req.Tail)
-		return og.Response{PR: &og.PullRequest{Index: 17, Title: "logs", State: "open"}, Lines: []string{"line"}}, nil
-	}}
-	session := connectDirectMCP(t, executor, testProjectStore(t))
-	for _, args := range []map[string]any{
-		{"project": "ko", "pr_id": 17},
-		{"project": "ko", "pr_id": 17, "tail": 0},
-	} {
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: "pr_log", Arguments: args,
-		})
-		if err != nil || result.IsError {
-			t.Fatalf("args = %#v, result = %#v, err = %v", args, result, err)
-		}
-	}
-	if fmt.Sprint(tails) != "[50 0]" {
-		t.Fatalf("tails = %v, want [50 0]", tails)
-	}
-}
-
 func TestOGMCPMissingForgejoTokenIsSecretFree(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -916,8 +893,7 @@ func TestOGProjectTargetingSeamNormalizesEveryRegisteredOperation(t *testing.T) 
 	executor := &directExecutor{
 		gitPush: record, gitPull: record, gitTag: record,
 		prCreate: record, prView: record, prFind: record, prGet: record,
-		prModify: record, prComment: record, prChecks: record, prLog: record,
-		prFailures: record, authStatus: record,
+		prModify: record, prComment: record, prChecks: record, authStatus: record,
 	}
 	operations := []struct {
 		name string
@@ -928,7 +904,6 @@ func TestOGProjectTargetingSeamNormalizesEveryRegisteredOperation(t *testing.T) 
 		{name: "pr view", op: executor.PRView}, {name: "pr find", op: executor.PRFind},
 		{name: "pr get", op: executor.PRGet}, {name: "pr modify", op: executor.PRModify},
 		{name: "pr comment", op: executor.PRComment}, {name: "pr checks", op: executor.PRChecks},
-		{name: "pr log", op: executor.PRLog}, {name: "pr failures", op: executor.PRFailures},
 		{name: "auth status", op: executor.AuthStatus},
 	}
 	for _, operation := range operations {
@@ -980,5 +955,33 @@ func TestOGMCPDirectMergeOutcomes(t *testing.T) {
 				t.Fatalf("result %s", data)
 			}
 		})
+	}
+}
+
+func TestGitHubMergeAndChecksRejectedInBothTransports(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := writeConfiguredProject(t, home, "https://github.com/owner/repo.git")
+	runConfiguredGit(t, repo, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	service := og.NewService(nil)
+	projects := service.ProjectStore()
+	for _, command := range [][]string{{"pr", "checks", "--pr-id", "7"}, {"pr", "merge", "--pr-id", "7", "--dry-run"}} {
+		_, _, err := runDirectCLI(t, service, projects, "", append([]string{"--project", "ko"}, command...)...)
+		if err == nil || !strings.Contains(err.Error(), "not supported") {
+			t.Fatalf("CLI %v: %v", command, err)
+		}
+	}
+	session := connectDirectMCP(t, service, projects)
+	for _, tool := range []string{"pr_checks", "pr_merge"} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: tool, Arguments: map[string]any{"project": "ko", "pr_id": 7},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(result.Content)
+		if !result.IsError || !strings.Contains(string(encoded), "not supported") {
+			t.Fatalf("MCP %s: %s", tool, encoded)
+		}
 	}
 }

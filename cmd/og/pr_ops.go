@@ -83,36 +83,6 @@ func runPRChecks(cmd *cobra.Command, args []string) error {
 	)
 }
 
-func runPRLog(cmd *cobra.Command, args []string) error {
-	tail, _ := cmd.Flags().GetInt("tail")
-	index, err := optionalPRID(cmd)
-	if err != nil {
-		return err
-	}
-	if err := og.ValidatePRLogTail(tail); err != nil {
-		return err
-	}
-	return runLines(
-		cmd, og.Request{Index: index, State: og.PRStateAll, Tail: tail},
-		og.Executor.PRLog,
-	)
-}
-
-func runPRFailures(cmd *cobra.Command, args []string) error {
-	tail, _ := cmd.Flags().GetInt("tail")
-	index, err := optionalPRID(cmd)
-	if err != nil {
-		return err
-	}
-	if err := og.ValidatePRLogTail(tail); err != nil {
-		return err
-	}
-	return runLines(
-		cmd, og.Request{Index: index, State: og.PRStateAll, Tail: tail},
-		og.Executor.PRFailures,
-	)
-}
-
 func runPRMerge(cmd *cobra.Command, args []string) error {
 	index, err := optionalPRID(cmd)
 	if err != nil {

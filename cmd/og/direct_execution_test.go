@@ -22,7 +22,7 @@ type directOperation func(og.Request) (og.Response, error)
 type directExecutor struct {
 	gitPush, gitPull, gitTag, gitClone                               directOperation
 	prCreate, prView, prFind, prGet, prModify, prEditBody, prComment directOperation
-	prChecks, prLog, prFailures, prMerge, authStatus                 directOperation
+	prChecks, prMerge, authStatus                                    directOperation
 	issueList, issueSearch, issueGet, issueComments, issueCreate     directOperation
 	issueUpdateTitle, issueReplaceBody, issueEditBody, issueComment  directOperation
 }
@@ -97,12 +97,6 @@ func (e *directExecutor) PRComment(req og.Request) (og.Response, error) {
 }
 func (e *directExecutor) PRChecks(req og.Request) (og.Response, error) {
 	return e.call("pr checks", e.prChecks, req)
-}
-func (e *directExecutor) PRLog(req og.Request) (og.Response, error) {
-	return e.call("pr log", e.prLog, req)
-}
-func (e *directExecutor) PRFailures(req og.Request) (og.Response, error) {
-	return e.call("pr failures", e.prFailures, req)
 }
 func (e *directExecutor) PRMerge(req og.Request) (og.Response, error) {
 	return e.call("pr merge", e.prMerge, req)
@@ -760,4 +754,13 @@ func TestCLIDirectMergeOutcomes(t *testing.T) {
 
 func (e *directExecutor) PREditBody(req og.Request) (og.Response, error) {
 	return e.call("pr edit body", e.prEditBody, req)
+}
+
+func TestRemovedCILogCommandsAreUnavailable(t *testing.T) {
+	for _, command := range []string{"log", "failures"} {
+		_, _, err := runDirectCLI(t, &directExecutor{}, testProjectStore(t), "", "pr", command)
+		if err == nil {
+			t.Fatalf("pr %s unexpectedly accepted", command)
+		}
+	}
 }

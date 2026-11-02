@@ -558,6 +558,10 @@ func TestGitPullFeatureBranchReturnsPRLookupError(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("GITHUB_TOKEN", "token")
 	repo := testRegisteredHTTPRepo(t, home, "feature/x")
+	gitRun(t, repo, "branch", branchMain)
+	gitRun(t, repo, "update-ref", "refs/remotes/origin/feature/x", "HEAD")
+	refsBefore := gitOut(t, repo, "for-each-ref", "--format=%(refname):%(objectname)")
+	headBefore := gitOut(t, repo, "rev-parse", "HEAD")
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
 		t.Fatalf("git should not run after PR lookup auth failure: %v", args)
 		return nil
@@ -566,7 +570,7 @@ func TestGitPullFeatureBranchReturnsPRLookupError(t *testing.T) {
 	restoreProvider := stubNewProvider(t, func(_ *repoContext) (gitprovider.Provider, error) {
 		return fakeProvider{
 			findPRByState: func(owner, repo, head, base, state string) (*gitprovider.PullRequest, error) {
-				return nil, fmt.Errorf("401 unauthorized")
+				return nil, fmt.Errorf("403 PR read permission denied")
 			},
 		}, nil
 	})
@@ -576,8 +580,17 @@ func TestGitPullFeatureBranchReturnsPRLookupError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected PR lookup error")
 	}
-	if !strings.Contains(err.Error(), "401 unauthorized") {
+	if !strings.Contains(err.Error(), "403 PR read permission denied") {
 		t.Fatalf("error = %v, want provider error", err)
+	}
+	if branch := gitOut(t, repo, "branch", "--show-current"); branch != "feature/x" {
+		t.Fatalf("current branch = %q, want feature/x", branch)
+	}
+	if head := gitOut(t, repo, "rev-parse", "HEAD"); head != headBefore {
+		t.Fatalf("HEAD changed from %q to %q", headBefore, head)
+	}
+	if refs := gitOut(t, repo, "for-each-ref", "--format=%(refname):%(objectname)"); refs != refsBefore {
+		t.Fatalf("refs changed from %q to %q", refsBefore, refs)
 	}
 }
 

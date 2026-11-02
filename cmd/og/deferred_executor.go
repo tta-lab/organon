@@ -58,12 +58,6 @@ func (e deferredExecutor) PRComment(request og.Request) (og.Response, error) {
 func (e deferredExecutor) PRChecks(request og.Request) (og.Response, error) {
 	return e.call(func(executor og.Executor) (og.Response, error) { return executor.PRChecks(request) })
 }
-func (e deferredExecutor) PRLog(request og.Request) (og.Response, error) {
-	return e.call(func(executor og.Executor) (og.Response, error) { return executor.PRLog(request) })
-}
-func (e deferredExecutor) PRFailures(request og.Request) (og.Response, error) {
-	return e.call(func(executor og.Executor) (og.Response, error) { return executor.PRFailures(request) })
-}
 func (e deferredExecutor) PRMerge(request og.Request) (og.Response, error) {
 	return e.call(func(executor og.Executor) (og.Response, error) { return executor.PRMerge(request) })
 }

@@ -2,7 +2,7 @@
 
 Pull request operations.
 
-The CLI supports view/list, find, get, comment, checks/status, failure logs,
+The CLI supports view/list, find, get, comment, checks/status,
 and policy-controlled squash merge. Pull-request creation and modification are typed-only:
 use the MCP `pr_create`/`pr_modify` tools.
 Their multiline free-text bodies stay out of shell arguments; merge remains a
@@ -11,15 +11,14 @@ default to typed MCP. Both merge adapters honor the same global policy.
 
 Behavior:
 
-- `og pr view --json` and `og pr list --json` show PR details and CI summary.
+- `og pr view --json` and `og pr list --json` show PR details; Forgejo also includes CI status.
 - `og pr find --state <open|closed|all>` resolves a PR for the current branch.
 - `og pr get <index> --json` fetches a PR by index.
-- `og pr comment`, `checks`, `status`, `log`, and `failures` accept an optional
+- `og pr comment`, `checks`, and `status` accept an optional
   positive `--pr-id`; when omitted they use the pull request for the current
   branch.
 - `og pr checks` and `og pr status` report CI status without exposing arbitrary
-  provider API paths. `og pr failures --tail <lines>` and
-  `og pr log --tail <lines>` show CI failure detail. The structured state is in
+  provider API paths for Forgejo; GitHub CI checks are unsupported. The structured state is in
   `pr.ci.state`; `not_configured` is an explicit no-check state whose policy
   message says a merge may proceed without checks.
 - Under the default `impri` policy, `og pr merge [--pr-id <number>]` creates or repeats an idempotent Impri approval action.
@@ -53,9 +52,11 @@ The global `[merge]` setting in `~/.config/ttal/og.toml` selects approval policy
 approval = "none" # direct execution; omitted or "impri" requires web approval
 ```
 
-Only `impri` and `none` are valid; this is global with no per-project overrides.
-Direct policy needs no Impri configuration, makes no Impri requests, and sends
-no notifications. A configured Impri section still receives whole-file validation.
+`impri`, `none`, and `deny` govern Forgejo, with no per-project
+overrides. `deny` rejects all merge requests, including dry-run, before contacting
+Impri or a forge. Neither `deny` nor direct policy needs Impri configuration.
+Direct policy makes no Impri requests and sends no notifications. A configured
+Impri section still receives whole-file validation.
 Both transports share eligibility checks and expected-head squash execution.
 CI `success` or `not_configured` permits real execution; pending or unverifiable
 CI returns `blocked`, `retryable=true`, and `next_action=retry_same_request`
@@ -66,8 +67,8 @@ checkout guards remain enforced.
 
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
-wait only for Impri approval. Dry-run uses the existing non-destructive mock
-semantics without forge mutation or checkout switch/pull/deletion. Real mode
+wait only for Impri approval. Under `impri` and `none`, dry-run uses the
+non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
 pulls the registered default branch and removes matching local/origin head refs.
 An `executed` result with `cleanup_error` repeats the same project, **explicit PR
 ID**, and mode to finish cleanup; an observed merged PR never merges again,
@@ -90,6 +91,5 @@ rotation, and worktree coordination are outside this version. `og pull` remains
 available for its existing guarded closed-PR workflow, but is not a second step
 after a successful real merge.
 
-GitHub API calls use a repository-scoped App installation token minted in the
-OG process. GitHub tokens supplied through the environment or request payload
-are ignored or rejected.
+GitHub uses an owner-scoped PAT or a repository-scoped App installation token.
+GitHub merge (including dry-run) and CI are unsupported. See README for setup.

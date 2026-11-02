@@ -331,7 +331,7 @@ func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitA
 		return gitAuthentication{token: ctxInfo.Token}, nil
 	}
 	if ctxInfo.githubBroker == nil {
-		return gitAuthentication{}, fmt.Errorf("GitHub App authentication is not configured")
+		return gitAuthentication{}, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
 	}
 	token, err := ctxInfo.githubBroker.Token(operationContext(ctxInfo), ctxInfo.Owner, ctxInfo.Repo, purpose)
 	if err != nil {
@@ -366,7 +366,7 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	switch ctxInfo.Provider {
 	case gitprovider.ProviderGitHub:
-		cmd.Env = gitutil.GitHubAppGitEnv(
+		cmd.Env = gitutil.GitHubGitEnv(
 			os.Environ(), ctxInfo.RemoteURL, ctxInfo.Owner, ctxInfo.Repo, auth.token,
 		)
 	case gitprovider.ProviderGeneric:

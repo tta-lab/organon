@@ -52,7 +52,7 @@ func TestBrokerDiscoversInstallationAndMintsPurposeScopedTokens(t *testing.T) {
 		purpose Purpose
 		want    map[string]string
 	}{
-		{PurposeAPI, map[string]string{"actions": "read", "checks": "read", "contents": "write", "pull_requests": "write"}},
+		{PurposeAPI, map[string]string{"contents": "write", "pull_requests": "write"}},
 		{PurposeGitRead, map[string]string{"contents": "read"}},
 		{PurposeGitWrite, map[string]string{"contents": "write", "workflows": "write"}},
 		{PurposeIssueRead, map[string]string{"issues": "read"}},
@@ -460,4 +460,43 @@ func equalPermissions(got map[string]any, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func TestBrokerUsesAppWithoutChecksActionsOrWorkflows(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/tta-lab/organon/installation":
+			writeJSON(t, w, map[string]any{
+				"id": 41, "permissions": map[string]string{
+					"contents": "write", "pull_requests": "write", "issues": "write",
+				},
+			})
+		case "/app/installations/41/access_tokens":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			perms := body["permissions"].(map[string]any)
+			for _, key := range []string{"checks", "actions", "workflows"} {
+				if _, ok := perms[key]; ok {
+					t.Errorf("unexpected permission %s", key)
+				}
+			}
+			calls++
+			writeJSON(t, w, installationTokenResponse("fixture"))
+		default:
+			t.Fatalf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	broker := newTestBroker(t, server, Config{AppID: 7, AllowedOwners: []string{"tta-lab"}})
+	for _, purpose := range []Purpose{PurposeAPI, PurposeGitWrite, PurposeIssueWrite} {
+		if _, err := broker.Token(context.Background(), "tta-lab", "organon", purpose); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("token calls = %d", calls)
+	}
 }

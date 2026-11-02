@@ -3,6 +3,7 @@ package gitutil
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,7 +26,7 @@ func TestControlledGitEnvironmentsRespectSupportedGlobalHTTPVersion(t *testing.T
 			}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -59,7 +60,7 @@ func TestControlledGitEnvironmentsIgnoreMissingAndUnsupportedGlobalHTTPVersion(t
 			base := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -95,7 +96,7 @@ func TestControlledGitEnvironmentsIgnoreUnavailableGitForGlobalHTTPVersion(t *te
 			base := []string{"PATH=" + gitDir, "HOME=" + t.TempDir()}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -120,7 +121,7 @@ func writeGlobalGitConfig(t *testing.T, home, contents string) {
 	}
 }
 
-func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
+func TestGitHubGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	tests := []struct {
 		name   string
 		remote string
@@ -131,7 +132,7 @@ func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := GitHubAppGitEnv([]string{"PATH=/bin"}, tt.remote, "tta-lab", "organon", "test-token-secret")
+			env := GitHubGitEnv([]string{"PATH=/bin"}, tt.remote, "tta-lab", "organon", "test-token-secret")
 			configs := gitConfigPairs(t, env)
 			canonical := "https://github.com/tta-lab/organon.git"
 			if tt.remote != canonical && configs["url."+canonical+".insteadOf"] != tt.remote {
@@ -149,8 +150,8 @@ func TestGitHubAppGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
 	}
 }
 
-func TestGitHubAppGitEnvInjectsHTTPSProxy(t *testing.T) {
-	env := GitHubAppGitEnv(
+func TestGitHubGitEnvInjectsHTTPSProxy(t *testing.T) {
+	env := GitHubGitEnv(
 		[]string{"PATH=/bin", "HTTPS_PROXY=http://proxy.invalid:7890"},
 		"https://github.com/tta-lab/organon.git",
 		"tta-lab",
@@ -163,7 +164,7 @@ func TestGitHubAppGitEnvInjectsHTTPSProxy(t *testing.T) {
 	}
 }
 
-func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
+func TestGitHubGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 	base := []string{
 		"PATH=/bin",
 		"GITHUB_TOKEN=ambient-github",
@@ -180,7 +181,7 @@ func TestGitHubAppGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 		"SSH_ASKPASS=/tmp/leaky-ssh-helper",
 		"GCM_INTERACTIVE=always",
 	}
-	env := GitHubAppGitEnv(base, "git@github.com:tta-lab/organon.git", "tta-lab", "organon", "")
+	env := GitHubGitEnv(base, "git@github.com:tta-lab/organon.git", "tta-lab", "organon", "")
 	if envValue(env, "PATH") != "/bin" || envValue(env, "GIT_TERMINAL_PROMPT") != "0" {
 		t.Fatalf("environment = %v", env)
 	}
@@ -335,7 +336,7 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 	}
 	environments := map[string][]string{
 		"anonymous": AnonymousGitEnv(base),
-		"github":    GitHubAppGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", "secret"),
+		"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", "secret"),
 		"forgejo":   ForgejoGitEnv(base, "secret"),
 	}
 	for name, env := range environments {
@@ -371,5 +372,30 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGitHubCredentialHelperRestrictsRepository(t *testing.T) {
+	home := t.TempDir()
+	env := GitHubGitEnv(
+		[]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home},
+		"https://github.com/owner/repo.git", "owner", "repo", "fixture-secret",
+	)
+	for _, tc := range []struct {
+		protocol, host, path string
+		allowed              bool
+	}{
+		{"https", "github.com", "owner/repo.git", true},
+		{"https", "github.com", "other/repo.git", false},
+		{"https", "evil.example", "owner/repo.git", false},
+		{"http", "github.com", "owner/repo.git", false},
+	} {
+		cmd := exec.Command("git", "credential", "fill")
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader("protocol=" + tc.protocol + "\nhost=" + tc.host + "\npath=" + tc.path + "\n\n")
+		output, _ := cmd.Output()
+		if got := strings.Contains(string(output), "password=fixture-secret"); got != tc.allowed {
+			t.Fatalf("target %s %s %s allowed=%v", tc.protocol, tc.host, tc.path, got)
+		}
 	}
 }

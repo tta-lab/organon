@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
@@ -34,11 +33,9 @@ func NewGitHubProviderWithTokenAndAuthFailure(
 	}
 
 	client, err := github.NewClient(
-		github.WithTransport(&githubTokenTransport{
-			base:          http.DefaultTransport,
-			token:         token,
-			onAuthFailure: onAuthFailure,
-		}),
+		github.WithHTTPClient(&http.Client{Transport: &githubTokenTransport{
+			base: http.DefaultTransport, token: token, onAuthFailure: onAuthFailure,
+		}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub client: %w", err)
@@ -57,14 +54,31 @@ type githubTokenTransport struct {
 }
 
 func (t *githubTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != httpsScheme || !strings.EqualFold(req.URL.Host, "api.github.com") {
+		return nil, fmt.Errorf("GitHub API request target is not allowed")
+	}
 	request := req.Clone(req.Context())
 	request.Header = req.Header.Clone()
 	request.Header.Set("Authorization", "Bearer "+t.token)
 	response, err := t.base.RoundTrip(request)
-	if err == nil && confirmedGitHubAPIAuthFailure(response) && t.onAuthFailure != nil {
+	if err != nil {
+		if req.Context().Err() != nil {
+			return nil, req.Context().Err()
+		}
+		return nil, fmt.Errorf("GitHub API transport failed")
+	}
+	if confirmedGitHubAPIAuthFailure(response) && t.onAuthFailure != nil {
 		t.onAuthFailure()
 	}
-	return response, err
+	// Do not relay provider error bodies, which may echo credentials or request content.
+	if response.StatusCode >= 400 && response.Body != nil {
+		_ = response.Body.Close()
+		response.Body = io.NopCloser(strings.NewReader(
+			`{"message":"GitHub rejected the request; check authorization, repository access, and permissions"}`,
+		))
+		response.ContentLength = -1
+	}
+	return response, nil
 }
 
 func confirmedGitHubAPIAuthFailure(response *http.Response) bool {
@@ -170,26 +184,6 @@ func (p *GitHubProvider) GetPR(owner, repo string, index int64) (*PullRequest, e
 	}
 
 	return toGitHubPullRequest(pr), nil
-}
-
-// MergePullRequest performs a squash merge guarded by the expected head SHA.
-func (p *GitHubProvider) MergePullRequest(owner, repo string, index int64, headSHA string) error {
-	result, _, err := p.client.PullRequests.Merge(
-		p.operationContext(), owner, repo, int(index), "", &github.PullRequestOptions{
-			MergeMethod: "squash",
-			SHA:         headSHA,
-		})
-	if err != nil {
-		return fmt.Errorf("failed to squash merge PR #%d: %w", index, err)
-	}
-	if result == nil || !result.GetMerged() {
-		message := "provider did not merge pull request"
-		if result != nil && result.GetMessage() != "" {
-			message += ": " + result.GetMessage()
-		}
-		return fmt.Errorf("failed to squash merge PR #%d: %s", index, message)
-	}
-	return nil
 }
 
 func (p *GitHubProvider) CreateComment(owner, repo string, index int64, body string) (*Comment, error) {
@@ -327,129 +321,9 @@ func toGitHubIssue(issue *github.Issue) *Issue {
 		State: issue.GetState(), HTMLURL: issue.GetHTMLURL(), IsPullRequest: issue.IsPullRequest()}
 }
 
-// GetCombinedStatus queries GitHub's Checks API only. A successful response with
-// zero Check Runs is StateNotConfigured; legacy commit-status integrations are
-// intentionally outside this merge gate.
-func (p *GitHubProvider) GetCombinedStatus(owner, repo, ref string) (*CombinedStatus, error) {
-	ctx := p.operationContext()
-	result, _, err := p.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref,
-		&github.ListCheckRunsOptions{ListOptions: github.ListOptions{PerPage: 100}})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list check runs: %w", err)
-	}
-	if result == nil || result.Total == nil {
-		return nil, fmt.Errorf("failed to list check runs: malformed empty response")
-	}
-
-	total := result.GetTotal()
-	if total < 0 {
-		return nil, fmt.Errorf("failed to list check runs: invalid total count %d", total)
-	}
-	if total == 0 {
-		if len(result.CheckRuns) != 0 {
-			return nil, fmt.Errorf("failed to list check runs: total count is zero but check runs were returned")
-		}
-		return notConfiguredCombinedStatus(), nil
-	}
-	if len(result.CheckRuns) == 0 {
-		return nil, fmt.Errorf("failed to list check runs: total count is %d but no check runs were returned", total)
-	}
-
-	if total > len(result.CheckRuns) {
-		log.Printf("[github] warning: %d check runs for %s but only fetched %d (first page)",
-			total, ref[:8], len(result.CheckRuns))
-	}
-
-	statuses := make([]*CommitStatus, 0, total)
-	hasFailure := false
-	hasPending := false
-
-	for _, cr := range result.CheckRuns {
-		if cr == nil {
-			return nil, fmt.Errorf("failed to list check runs: response contains a nil check run")
-		}
-		state := checkRunToState(cr.GetStatus(), cr.GetConclusion())
-		statuses = append(statuses, &CommitStatus{
-			Context:     cr.GetName(),
-			State:       state,
-			Description: cr.GetConclusion(),
-			TargetURL:   cr.GetHTMLURL(),
-		})
-		switch state {
-		case StateFailure, StateError:
-			hasFailure = true
-		case StatePending:
-			hasPending = true
-		}
-	}
-
-	overall := StateSuccess
-	if hasFailure {
-		overall = StateFailure
-	} else if hasPending {
-		overall = StatePending
-	}
-
-	return &CombinedStatus{State: overall, Statuses: statuses}, nil
-}
-
-func checkRunToState(status, conclusion string) string {
-	if status != "completed" {
-		return StatePending
-	}
-	switch conclusion {
-	case "success", "skipped", "neutral":
-		return StateSuccess
-	case "failure", "timed_out", "cancelled":
-		return StateFailure
-	case "action_required", "stale":
-		return StateError
-	default:
-		return StatePending
-	}
-}
-
-func (p *GitHubProvider) GetCIFailureDetails(owner, repo, sha string, tailLines int) ([]*JobFailure, error) {
-	ctx := p.operationContext()
-
-	runs, _, err := p.client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo,
-		&github.ListWorkflowRunsOptions{HeadSHA: sha})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list workflow runs: %w", err)
-	}
-
-	var failures []*JobFailure
-	for _, run := range runs.WorkflowRuns {
-		if !isFailedStatus(run.GetConclusion()) {
-			continue
-		}
-
-		jobs, _, err := p.client.Actions.ListWorkflowJobs(ctx, owner, repo,
-			run.GetID(), &github.ListWorkflowJobsOptions{Filter: "latest"})
-		if err != nil {
-			continue
-		}
-
-		for _, job := range jobs.Jobs {
-			if !isFailedStatus(job.GetConclusion()) {
-				continue
-			}
-
-			jf := &JobFailure{
-				WorkflowName: run.GetName(),
-				JobName:      job.GetName(),
-				HTMLURL:      job.GetHTMLURL(),
-			}
-
-			logURL, _, logErr := p.client.Actions.GetWorkflowJobLogs(ctx, owner, repo, job.GetID(), 3)
-			if logErr == nil && logURL != nil {
-				jf.LogTail = fetchLogTail(ctx, logURL.String(), tailLines)
-			}
-
-			failures = append(failures, jf)
-		}
-	}
-	return failures, nil
+// GetCombinedStatus is unavailable for GitHub.
+func (p *GitHubProvider) GetCombinedStatus(_, _, _ string) (*CombinedStatus, error) {
+	return nil, fmt.Errorf("GitHub CI checks are not supported by og")
 }
 
 func toGitHubPullRequest(pr *github.PullRequest) *PullRequest {

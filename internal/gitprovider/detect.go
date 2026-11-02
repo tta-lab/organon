@@ -202,7 +202,7 @@ func parseURL(raw string) (*RepoInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
-	if (u.Scheme == "http" || u.Scheme == "https") &&
+	if (u.Scheme == httpScheme || u.Scheme == httpsScheme) &&
 		(u.User != nil || u.RawQuery != "" || u.Fragment != "") {
 		return nil, fmt.Errorf("HTTP(S) repository URL must not contain credentials, query, or fragment")
 	}

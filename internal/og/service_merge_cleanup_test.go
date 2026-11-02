@@ -70,7 +70,8 @@ func TestPRMergeRealMergeRejectsUnsafeCleanupTargetsBeforeForge(t *testing.T) { 
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			repo := testRegisteredRepo(t, home, "feature/merge", "https://github.com/tta-lab/example.git", false)
+			t.Setenv("FORGEJO_TOKEN", "fixture-token")
+			repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 			gitRun(t, repo, "branch", branchMain)
 			mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
 			gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
@@ -93,7 +94,7 @@ func TestPRMergeRealMergeRejectsUnsafeCleanupTargetsBeforeForge(t *testing.T) { 
 						return &gitprovider.PullRequest{
 							Index: index, State: "open", Mergeable: true, Head: "feature/merge",
 							HeadSHA: featureSHA, Base: branchMain,
-							HTMLURL: "https://github.com/tta-lab/example/pull/7",
+							HTMLURL: "https://forge.example/tta-lab/example/pull/7",
 						}, nil
 					},
 					getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
@@ -110,7 +111,8 @@ func TestPRMergeRealMergeRejectsUnsafeCleanupTargetsBeforeForge(t *testing.T) { 
 			t.Cleanup(restoreGit)
 
 			service := NewServiceWithConfig(&recordingBroker{}, nil, ogconfig.Config{
-				Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+				Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+				Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 			})
 			if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
 				t.Fatalf("create merge action: %v", err)
@@ -135,7 +137,8 @@ func TestPRMergeRealMergeRejectsUnsafeCleanupTargetsBeforeForge(t *testing.T) { 
 func TestPRMergeRealMergeRetriesPostMergeCleanupWithoutSecondForgeCall(t *testing.T) { //nolint:dupl,gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredRepo(t, home, "feature/merge", "https://github.com/tta-lab/example.git", false)
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	gitRun(t, repo, "branch", branchMain)
 	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
@@ -189,7 +192,7 @@ func TestPRMergeRealMergeRetriesPostMergeCleanupWithoutSecondForgeCall(t *testin
 				return &gitprovider.PullRequest{
 					Index: index, State: state, Merged: merged.Load(), Mergeable: true,
 					Head: "feature/merge", HeadSHA: featureSHA, Base: branchMain,
-					HTMLURL: "https://github.com/tta-lab/example/pull/7",
+					HTMLURL: "https://forge.example/tta-lab/example/pull/7",
 				}, nil
 			},
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
@@ -215,7 +218,8 @@ func TestPRMergeRealMergeRetriesPostMergeCleanupWithoutSecondForgeCall(t *testin
 	t.Cleanup(restoreGit)
 
 	service := NewServiceWithConfig(&recordingBroker{}, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
 		t.Fatalf("create merge action: %v", err)
@@ -245,7 +249,8 @@ func TestPRMergeRealMergeRetriesPostMergeCleanupWithoutSecondForgeCall(t *testin
 func TestPRMergeRealMergeCleansApprovedCheckout(t *testing.T) { //nolint:dupl,gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredRepo(t, home, "feature/merge", "https://github.com/tta-lab/example.git", false)
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	gitRun(t, repo, "branch", branchMain)
 	mainSHA := gitOut(t, repo, "rev-parse", "refs/heads/"+branchMain)
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/"+branchMain, mainSHA)
@@ -278,7 +283,7 @@ func TestPRMergeRealMergeCleansApprovedCheckout(t *testing.T) { //nolint:dupl,go
 				return &gitprovider.PullRequest{
 					Index: index, State: state, Merged: merged.Load(), Mergeable: true,
 					Head: "feature/merge", HeadSHA: featureSHA, Base: branchMain,
-					HTMLURL: "https://github.com/tta-lab/example/pull/7",
+					HTMLURL: "https://forge.example/tta-lab/example/pull/7",
 				}, nil
 			},
 			getCombinedStatus: func(owner, repo, ref string) (*gitprovider.CombinedStatus, error) {
@@ -313,7 +318,8 @@ func TestPRMergeRealMergeCleansApprovedCheckout(t *testing.T) { //nolint:dupl,go
 	t.Cleanup(restoreGit)
 
 	service := NewServiceWithConfig(&recordingBroker{}, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
 		t.Fatalf("create merge action: %v", err)

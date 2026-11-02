@@ -18,7 +18,8 @@ import (
 func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	checkoutBranch := gitOut(t, repo, "branch", "--show-current")
 	var credentialedGitCalls [][]string
 	restoreGit := stubRunGitWithCreds(t, func(_ *repoContext, args ...string) error {
@@ -74,7 +75,8 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 
 	var dryRuns int32
 	service := NewServiceWithConfigAndDryRunExecutor(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	}, func(_ context.Context, snapshot PRMergeSnapshot) error {
 		if snapshot.ExecutionMode != PRMergeModeDryRun {
 			t.Fatalf("snapshot mode = %q", snapshot.ExecutionMode)
@@ -146,7 +148,8 @@ func TestPRMergeDryRunCreatesPollsAndReportsApproval(t *testing.T) { //nolint:go
 func TestPRMergeCreatesNewApprovalAfterRejectionWithoutPRChange(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 
 	var payload any
 	keys := make([]string, 0, 2)
@@ -192,7 +195,8 @@ func TestPRMergeCreatesNewApprovalAfterRejectionWithoutPRChange(t *testing.T) { 
 	})
 	t.Cleanup(restoreProvider)
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 
 	pending, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
@@ -242,7 +246,8 @@ func TestPRMergeCreateIncludesNormalizedTitleAndSafePreview(t *testing.T) { //no
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+			t.Setenv("FORGEJO_TOKEN", "fixture-token")
+			repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 			var posted map[string]any
 			var payload any
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -265,13 +270,14 @@ func TestPRMergeCreateIncludesNormalizedTitleAndSafePreview(t *testing.T) { //no
 					return &gitprovider.PullRequest{
 						Index: index, Title: tt.prTitle, State: "open", Mergeable: true,
 						Head: "feature/merge", HeadSHA: "abc123", Base: "main",
-						HTMLURL: "https://github.com/tta-lab/example/pull/7",
+						HTMLURL: "https://forge.example/tta-lab/example/pull/7",
 					}, nil
 				}}, nil
 			})
 			t.Cleanup(restoreProvider)
 			service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-				Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+				Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+				Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 			})
 			response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
 			if err != nil || response.Merge == nil {
@@ -310,7 +316,8 @@ func TestPRMergeCreateIncludesNormalizedTitleAndSafePreview(t *testing.T) { //no
 func TestPRMergeRepeatingRequestPreservesApprovalTitleInResult(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	prTitle := "Keep\n**approval** `title` in the audit trail"
 	var payload map[string]any
 	var resultPayload map[string]any
@@ -350,13 +357,14 @@ func TestPRMergeRepeatingRequestPreservesApprovalTitleInResult(t *testing.T) { /
 			return &gitprovider.PullRequest{
 				Index: index, Title: prTitle, State: "open", Mergeable: true,
 				Head: "feature/merge", HeadSHA: "abc123", Base: "main",
-				HTMLURL: "https://github.com/tta-lab/example/pull/7",
+				HTMLURL: "https://forge.example/tta-lab/example/pull/7",
 			}, nil
 		}}, nil
 	})
 	t.Cleanup(restoreProvider)
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	created, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
 	if err != nil || created.Merge == nil || created.Merge.Snapshot.Title != prTitle {
@@ -375,7 +383,8 @@ func TestPRMergeRepeatingRequestPreservesApprovalTitleInResult(t *testing.T) { /
 func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	featureSHA := setupMergeCleanupRepo(t, repo)
 	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
 		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
@@ -452,7 +461,8 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 
 	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	pending, err := service.PRMerge(Request{WorkDir: repo, Index: 7})
 	if err != nil || pending.Merge == nil || pending.Merge.Status != PRMergeStatusPending {
@@ -484,7 +494,8 @@ func TestPRMergeRealMergeUsesGuardsAndRepairsReceiptWithoutMergingTwice(t *testi
 func TestPRMergeRejectsWrongTargetOnCreate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	var payload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -510,7 +521,8 @@ func TestPRMergeRejectsWrongTargetOnCreate(t *testing.T) {
 	t.Cleanup(restoreProvider)
 
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	_, err := service.PRMerge(Request{WorkDir: repo, Index: 7})
 	if err == nil || !strings.Contains(err.Error(), "target_url") {
@@ -521,7 +533,8 @@ func TestPRMergeRejectsWrongTargetOnCreate(t *testing.T) {
 func TestPRMergeCreateReceiptFollowupOutagePreservesRecoveryIdentity(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	var posts, gets atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -546,7 +559,8 @@ func TestPRMergeCreateReceiptFollowupOutagePreservesRecoveryIdentity(t *testing.
 	})
 	t.Cleanup(restoreProvider)
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	response, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
 	var retryErr *PRMergeRetryableError
@@ -571,7 +585,8 @@ func TestPRMergeCreateReceiptFollowupOutagePreservesRecoveryIdentity(t *testing.
 func TestPRMergeCreateIdempotentResponseUsesCanonicalGETOnRepeatedRequest(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	var payload any
 	var posts, gets atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -597,7 +612,8 @@ func TestPRMergeCreateIdempotentResponseUsesCanonicalGETOnRepeatedRequest(t *tes
 	})
 	t.Cleanup(restoreProvider)
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	created, err := service.PRMerge(Request{WorkDir: repo, Index: 7, DryRun: true})
 	if err != nil || created.Merge == nil || created.Merge.Status != PRMergeStatusPending {
@@ -619,7 +635,8 @@ func TestPRMergeCreateIdempotentResponseUsesCanonicalGETOnRepeatedRequest(t *tes
 func TestPRMergeReportsUnavailableWhenWaitPollFails(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	var payload any
 	var gets atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -649,7 +666,8 @@ func TestPRMergeReportsUnavailableWhenWaitPollFails(t *testing.T) { //nolint:goc
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 	var dryRuns atomic.Int32
 	service := NewServiceWithConfigAndDryRunExecutor(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	}, func(context.Context, PRMergeSnapshot) error {
 		dryRuns.Add(1)
 		return nil
@@ -678,7 +696,8 @@ func TestPRMergeReportsUnavailableWhenWaitPollFails(t *testing.T) { //nolint:goc
 func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *testing.T) { //nolint:gocyclo
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	var actionPayload any
 	var actionGets int
 	var receiptAttempts atomic.Int32
@@ -727,7 +746,8 @@ func TestPRMergeKeepsApprovedStateWhenExecuteFailedReceiptCannotBeRecorded(t *te
 	}
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 	service := NewServiceWithConfig(nil, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
 		t.Fatalf("create action: %v", err)
@@ -967,7 +987,8 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	setupMergeCleanupRepo(t, repo)
 	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
 		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
@@ -1021,7 +1042,8 @@ func newRetryMergeFixture(t *testing.T, actionID string) (
 	}
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	return service, repo, func() int { return resultReports }, func() { mergeCalls++ },
 		func() int { return mergeCalls }
@@ -1036,7 +1058,8 @@ func runApprovedRealMergeScenario( //nolint:gocyclo
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	repo := testRegisteredHTTPRepo(t, home, "feature/merge")
+	t.Setenv("FORGEJO_TOKEN", "fixture-token")
+	repo := testRegisteredRepo(t, home, "feature/merge", "https://forge.example/tta-lab/example.git", false)
 	featureSHA := setupMergeCleanupRepo(t, repo)
 	restoreGit := stubRunGitWithCreds(t, func(ctxInfo *repoContext, args ...string) error {
 		if len(args) >= 3 && args[0] == "push" && args[1] == remoteOrigin && args[2] == "--delete" {
@@ -1100,7 +1123,8 @@ func runApprovedRealMergeScenario( //nolint:gocyclo
 	t.Cleanup(func() { newProviderFunc = oldProvider })
 
 	service := NewServiceWithConfig(&recordingBroker{token: "test-token"}, nil, ogconfig.Config{
-		Impri: &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
+		Forgejo: ogconfig.ForgejoConfig{AllowedBaseURLs: []string{"https://forge.example"}},
+		Impri:   &ogconfig.ImpriConfig{BaseURL: server.URL, APIKey: "im_test"},
 	})
 	if _, err := service.PRMerge(Request{WorkDir: repo, Index: 7}); err != nil {
 		t.Fatalf("create action: %v", err)

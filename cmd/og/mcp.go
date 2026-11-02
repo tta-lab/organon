@@ -69,12 +69,6 @@ type ogPRCommentInput struct {
 	Body    string `json:"body" jsonschema:"non-blank pull request comment body"`
 }
 
-type ogPRTailInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
-	Tail    *int   `json:"tail,omitempty" jsonschema:"optional number of log tail lines; defaults to 50"`
-}
-
 type ogPRMergeInput struct {
 	Project        string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 	PRID           *int64 `json:"pr_id,omitempty" jsonschema:"optional positive PR ID; omitted uses current branch"`
@@ -202,7 +196,7 @@ func ogTool(name, title, description string, readOnly, destructive, idempotent b
 	}
 }
 
-func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
+func inputSchemaFor[T any]() *jsonschema.Schema {
 	schema, err := jsonschema.For[T](nil)
 	if err != nil {
 		panic(fmt.Sprintf("infer MCP input schema for %s: %v", reflect.TypeFor[T](), err))
@@ -221,12 +215,6 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 		per.Minimum = jsonschema.Ptr(1.0)
 		per.Maximum = jsonschema.Ptr(float64(og.MaxIssuePerPage))
 		per.Default = json.RawMessage(fmt.Sprint(og.DefaultIssuePerPage))
-	}
-	if tail {
-		tailSchema := schema.Properties["tail"]
-		tailSchema.Minimum = jsonschema.Ptr(0.0)
-		tailSchema.Maximum = jsonschema.Ptr(float64(og.MaxPRLogTail))
-		tailSchema.Default = json.RawMessage(fmt.Sprint(og.DefaultPRLogTail))
 	}
 	if force := schema.Properties["force"]; force != nil {
 		force.Default = json.RawMessage("false")
@@ -252,8 +240,8 @@ func inputSchemaFor[T any](tail bool) *jsonschema.Schema {
 	return schema
 }
 
-func setInputSchema[T any](tool *mcp.Tool, tail bool) *mcp.Tool {
-	tool.InputSchema = inputSchemaFor[T](tail)
+func setInputSchema[T any](tool *mcp.Tool) *mcp.Tool {
+	tool.InputSchema = inputSchemaFor[T]()
 	return tool
 }
 
@@ -283,13 +271,13 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		"Apply exact oldText/newText edits matched uniquely against the original PR body. "+
 			"Reject empty, no-op, duplicate or overlapping edits before one update; omitted pr_id uses the current branch.",
 		false, true, false,
-	), false), prEditBodyHandler(projects, executor))
+	)), prEditBodyHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogCloneInput](ogTool(
 		"clone", "Clone repository",
 		"Clone an HTTP(S) repository to its controlled project or reference path.",
 		false, false, true,
-	), false), func(
+	)), func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input ogCloneInput,
@@ -313,19 +301,19 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
 		"auth_status", "Inspect forge authentication",
 		"Inspect secret-free forge authentication status for one registered project.", true, false, true,
-	), false), authStatusHandler(projects, executor))
+	)), authStatusHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPushInput](ogTool(
 		"push", "Push current branch",
 		"Push the registered checkout's current branch; force uses force-with-lease and is rejected on the default branch.",
 		false, true, true,
-	), false), pushHandler(projects, executor))
+	)), pushHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
 		"pull", "Pull current branch",
 		"Run the CLI-equivalent pull workflow, including fast-forward-only pulls and guarded closed-PR branch cleanup.",
 		false, true, true,
-	), false), func(
+	)), func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input ogProjectInput,
@@ -336,19 +324,20 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 	mcp.AddTool(server, setInputSchema[ogPRCreateInput](ogTool(
 		"pr_create", "Create pull request",
 		"Push the registered checkout's current branch and create its pull request.", false, false, false,
-	), false), prCreateHandler(projects, executor))
+	)), prCreateHandler(projects, executor))
 	addIssueTools(server, projects, executor)
 
 	mcp.AddTool(server, setInputSchema[ogPRFindInput](ogTool(
 		"pr_find", "Find current branch pull request",
 		"Find a pull request for the registered checkout's current branch by state.", true, false, true,
-	), false), prFindHandler(projects, executor))
+	)), prFindHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(
 		"pr_get", "Get pull request",
-		"Get by positive PR ID, or view the registered checkout's current branch pull request and CI when omitted.",
+		"Get by positive PR ID, or view the registered checkout's current branch pull request when omitted; "+
+			"CI is included only for Forgejo.",
 		true, false, true,
-	), false), func(
+	)), func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input ogPRInput,
@@ -363,21 +352,21 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		"pr_modify", "Modify pull request",
 		"Modify title and/or body by positive PR ID or for the registered checkout's current branch when omitted.",
 		false, true, true,
-	), false), prModifyHandler(projects, executor))
+	)), prModifyHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRCommentInput](ogTool(
 		"pr_comment", "Comment on pull request",
 		"Comment by positive PR ID or on the registered checkout's current branch when omitted.", false, false, false,
-	), false), prCommentHandler(projects, executor))
+	)), prCommentHandler(projects, executor))
 
-	addPRLinesTool(server, projects, "pr_checks", "Inspect pull request checks", executor.PRChecks, false)
-	addPRLinesTool(server, projects, "pr_log", "Inspect pull request CI log", executor.PRLog, true)
-	addPRLinesTool(server, projects, "pr_failures", "Inspect pull request failures", executor.PRFailures, true)
+	addPRLinesTool(server, projects, "pr_checks", "Inspect pull request checks", executor.PRChecks)
 
 	mcp.AddTool(server, setInputSchema[ogPRMergeInput](ogTool(
 		"pr_merge", "Policy-controlled squash merge",
-		"Honor global merge.approval: impri (default) submits an immutable snapshot to Impri; "+
-			"none executes immediately without Impri or notifications. Direct results identify approval_policy=none, "+
+		"Forgejo only; GitHub merge is unsupported. "+
+			"Honor global merge.approval: impri (default) submits an immutable snapshot to Impri; "+
+			"none executes immediately without Impri or notifications; deny rejects all merges, including dry-run. "+
+			"Direct results identify approval_policy=none, "+
 			"omit action/inbox/receipt, and use blocked (retry_same_request), failed (none), or executed. "+
 			"Pending/unverifiable CI returns retryable immediately. Wait/timeout wait only under impri. "+
 			"Repeat the same project, explicit PR ID, and mode for uncertain outcomes or cleanup-only recovery; "+
@@ -395,7 +384,7 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 			"If an execute_failed receipt cannot be recorded, the result stays approved and "+
 			"the same request must be repeated to revalidate and report it.",
 		false, true, true,
-	), false), prMergeHandler(projects, executor))
+	)), prMergeHandler(projects, executor))
 
 	return server
 }
@@ -629,67 +618,25 @@ func callPRTool(
 }
 
 func addPRLinesTool(
-	server *mcp.Server,
-	projects *project.Store,
-	name, title string,
+	server *mcp.Server, projects *project.Store, name, title string,
 	operation func(og.Request) (og.Response, error),
-	withTail bool,
 ) {
-	if !withTail {
-		mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(
-			name, title,
-			"Inspect pull request state by positive PR ID or for the registered checkout's current branch when omitted.",
-			true, false, true,
-		), false), func(
-			ctx context.Context,
-			_ *mcp.CallToolRequest,
-			input ogPRInput,
-		) (*mcp.CallToolResult, ogPRLinesOutput, error) {
-			return callPRLinesTool(ctx, projects, input.Project, input.PRID, 0, operation)
+	mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(name, title,
+		"Inspect Forgejo pull request CI status by ID or current branch.", true, false, true)),
+		func(ctx context.Context, _ *mcp.CallToolRequest, input ogPRInput) (*mcp.CallToolResult, ogPRLinesOutput, error) {
+			id, err := optionalMCPPRID(input.PRID)
+			if err != nil {
+				return nil, ogPRLinesOutput{}, err
+			}
+			resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{Index: id}, operation)
+			if err != nil {
+				return nil, ogPRLinesOutput{}, err
+			}
+			if err := og.ValidatePRResponse(resp, id); err != nil {
+				return nil, ogPRLinesOutput{}, err
+			}
+			return nil, ogPRLinesOutput{Project: canonical, PR: *resp.PR, Lines: resp.Lines}, nil
 		})
-		return
-	}
-	mcp.AddTool(server, setInputSchema[ogPRTailInput](ogTool(
-		name, title,
-		"Inspect pull request CI state and logs by positive PR ID or for the registered checkout's "+
-			"current branch when omitted.",
-		true, false, true,
-	), true), func(
-		ctx context.Context,
-		_ *mcp.CallToolRequest,
-		input ogPRTailInput,
-	) (*mcp.CallToolResult, ogPRLinesOutput, error) {
-		tail := og.DefaultPRLogTail
-		if input.Tail != nil {
-			tail = *input.Tail
-		}
-		return callPRLinesTool(ctx, projects, input.Project, input.PRID, tail, operation)
-	})
-}
-
-func callPRLinesTool(
-	ctx context.Context,
-	projects *project.Store,
-	alias string,
-	idInput *int64,
-	tail int,
-	operation func(og.Request) (og.Response, error),
-) (*mcp.CallToolResult, ogPRLinesOutput, error) {
-	id, err := optionalMCPPRID(idInput)
-	if err != nil {
-		return nil, ogPRLinesOutput{}, err
-	}
-	if err := og.ValidatePRLogTail(tail); err != nil {
-		return nil, ogPRLinesOutput{}, err
-	}
-	resp, canonical, err := callProject(ctx, projects, alias, og.Request{Index: id, Tail: tail}, operation)
-	if err != nil {
-		return nil, ogPRLinesOutput{}, err
-	}
-	if err := og.ValidatePRResponse(resp, id); err != nil {
-		return nil, ogPRLinesOutput{}, err
-	}
-	return nil, ogPRLinesOutput{Project: canonical, PR: *resp.PR, Lines: resp.Lines}, nil
 }
 
 func optionalMCPPRID(id *int64) (int64, error) {

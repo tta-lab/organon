@@ -178,14 +178,14 @@ func writeConfig(t *testing.T, body string) string {
 }
 
 func TestLoadMergeApprovalPolicy(t *testing.T) {
-	for _, policy := range []string{"omitted", "", "impri", "none", "invalid", "NONE", " none "} {
+	for _, policy := range []string{"omitted", "", "impri", "none", "deny", "invalid", "NONE", " none "} {
 		t.Run(policy, func(t *testing.T) {
 			content := ""
 			if policy != "omitted" {
 				content = "[merge]\napproval = " + strconv.Quote(policy) + "\n"
 			}
 			cfg, err := Load(writeConfig(t, content))
-			valid := policy == "omitted" || policy == "impri" || policy == "none"
+			valid := policy == "omitted" || policy == "impri" || policy == "none" || policy == "deny"
 			if valid {
 				if err != nil {
 					t.Fatal(err)
@@ -205,5 +205,32 @@ func TestLoadMergeApprovalPolicy(t *testing.T) {
 	if _, err := Load(writeConfig(t,
 		"[merge]\napproval = \"none\"\n[impri]\nbase_url = \"http://fixture\"\n")); err == nil {
 		t.Fatal("explicit malformed Impri ignored")
+	}
+	if _, err := Load(writeConfig(t,
+		"[merge]\napproval = \"deny\"\n[impri]\nbase_url = \"http://fixture\"\n")); err == nil {
+		t.Fatal("explicit malformed Impri ignored under deny")
+	}
+}
+
+func TestGitHubPATConfigurationModes(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		valid      bool
+	}{
+		{"pat", "[github_pat]\nowner = \"Example\"\ntoken_file = \"og/token\"\n", true},
+		{"missing owner", "[github_pat]\ntoken_file = \"og/token\"\n", false},
+		{"missing file", "[github_pat]\nowner = \"Example\"\n", false},
+		{"both", "[github_pat]\nowner = \"Example\"\ntoken_file = \"og/token\"\n[github_app]\napp_id = 1\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "og.toml")
+			if err := os.WriteFile(path, []byte(tc.text), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if (err == nil) != tc.valid {
+				t.Fatalf("Load: %v", err)
+			}
+		})
 	}
 }

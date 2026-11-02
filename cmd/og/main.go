@@ -109,18 +109,18 @@ func newPRCmd() *cobra.Command {
 	cmd.AddCommand(newPRFindCmd())
 	cmd.AddCommand(newPRGetCmd())
 	cmd.AddCommand(newPRCommentCmd())
-	cmd.AddCommand(newPRChecksCmd("checks", "Show pull request checks"))
-	cmd.AddCommand(newPRChecksCmd(cmdStatus, "Show pull request status"))
-	cmd.AddCommand(newPRFailuresCmd("failures"))
-	cmd.AddCommand(newPRLogCmd())
+	cmd.AddCommand(newPRChecksCmd("checks", "Show Forgejo pull request checks"))
+	cmd.AddCommand(newPRChecksCmd(cmdStatus, "Show Forgejo pull request status"))
 	cmd.AddCommand(newPRMergeCmd())
 	return cmd
 }
 
 func newPRMergeCmd() *cobra.Command {
 	cmd := newRunnableCmd("merge", "Policy-controlled squash merge", runPRMerge)
-	cmd.Long = "Honor global merge.approval in og.toml: impri (default) requires web approval; " +
-		"none executes immediately without Impri or notifications. Pending/unverifiable CI returns retryable. " +
+	cmd.Long = "Forgejo only; GitHub merge is unsupported. " +
+		"Honor global merge.approval in og.toml: impri (default) requires web approval; " +
+		"none executes immediately without Impri or notifications; deny rejects all merges, including dry-run. " +
+		"Pending/unverifiable CI returns retryable. " +
 		"Use --dry-run for a non-destructive mock; --wait/timeout wait only for Impri approval. " +
 		"Real merges revalidate identity and CI, squash at the expected head, pull the registered " +
 		"default branch, and remove matching head refs. Repeat the same project, explicit PR ID, " +
@@ -171,22 +171,6 @@ EOF`
 
 func newPRChecksCmd(use, short string) *cobra.Command {
 	cmd := newRunnableCmd(use, short, runPRChecks)
-	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
-	addOptionalPRIDFlag(cmd)
-	return cmd
-}
-
-func newPRLogCmd() *cobra.Command {
-	cmd := newRunnableCmd("log", "Show CI status and failure logs for the current PR", runPRLog)
-	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
-	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
-	addOptionalPRIDFlag(cmd)
-	return cmd
-}
-
-func newPRFailuresCmd(use string) *cobra.Command {
-	cmd := newRunnableCmd(use, "Show CI failure logs for the current PR", runPRFailures)
-	cmd.Flags().Int("tail", og.DefaultPRLogTail, "Number of log tail lines to fetch")
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	addOptionalPRIDFlag(cmd)
 	return cmd

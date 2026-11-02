@@ -68,11 +68,17 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
-The shared merge domain operation honors global operator-owned `merge.approval`
-in og.toml: omitted or `impri` uses Impri web approval; `none` directly executes
-an eligible merge. Typed MCP is the agent default; structured-flag CLI calls the
-same service. Tools never accept an Impri API key. Use this domain operation for
-both policies rather than invoking forge merge tooling directly.
+GitHub authentication uses either an owner-scoped PAT or a GitHub App per
+instance; see README for configuration and permissions. og does not merge
+GitHub PRs or query GitHub CI. Forgejo CI status remains available through og;
+CI logs belong to Woodpecker.
+
+The shared Forgejo merge domain operation honors global operator-owned
+`merge.approval` in og.toml: omitted or `impri` uses Impri web approval; `none`
+directly executes an eligible merge; `deny` rejects merge requests, including
+dry-run. Typed MCP is the agent default; structured-flag CLI calls the same
+service. Tools never accept an Impri API key. Use this domain operation rather
+than invoking forge merge tooling directly.
 
 Read `approval_policy` independently of `snapshot.execution_mode`. Under `none`,
 there is no Impri action, inbox, approval decision, receipt, or notification.

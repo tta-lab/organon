@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -129,4 +130,33 @@ func parseRSAKey(data []byte, path string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("GitHub App private key %s must contain an RSA key", path)
 	}
 	return rsaKey, nil
+}
+
+// ReadPrivateToken reads an operator-owned token using the App key file protections.
+func ReadPrivateToken(configDir, ref string) (string, error) {
+	source := newFileKeySource(configDir, ref)
+	if err := validateKeyDirectory(filepath.Dir(source.path)); err != nil {
+		return "", fmt.Errorf("invalid GitHub PAT directory: %s",
+			strings.ReplaceAll(err.Error(), "GitHub App key directory", "directory"))
+	}
+	info, err := validateKeyFile(source.path, source.currentUID)
+	if err != nil {
+		return "", fmt.Errorf("invalid GitHub PAT file: %s", patFileError(err))
+	}
+	data, err := readUnchangedFile(source.path, info)
+	if err != nil {
+		return "", fmt.Errorf("cannot read GitHub PAT file: %s", patFileError(err))
+	}
+	token := strings.TrimSuffix(string(data), "\n")
+	token = strings.TrimSuffix(token, "\r")
+	if token == "" || strings.TrimSpace(token) != token || strings.ContainsAny(token, "\r\n") {
+		return "", fmt.Errorf("GitHub PAT file must contain one non-empty token")
+	}
+	return token, nil
+}
+
+func patFileError(err error) string {
+	return strings.NewReplacer(
+		"GitHub App private key", "token file", "GitHub App key path", "token file",
+	).Replace(err.Error())
 }
