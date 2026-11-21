@@ -59,6 +59,17 @@ func resolveOGProject(store *project.Store, reference string) (project.Entry, er
 }
 
 func resolveWorkDir(cmd *cobra.Command, runtime commandRuntime) (workDir, alias string, err error) {
+	if cmd.Flags().Changed(worktreeFlag) {
+		if cmd.Flags().Changed("project") {
+			return "", "", fmt.Errorf("use only one of --project and --worktree")
+		}
+		path, _ := cmd.Flags().GetString(worktreeFlag)
+		root, entry, err := og.ResolveWorktree(cmd.Context(), path, runtime.projects)
+		if err != nil {
+			return "", "", err
+		}
+		return root, entry.Alias, nil
+	}
 	reference, _ := cmd.Flags().GetString("project")
 	if reference == "" {
 		if cmd.Flags().Changed("project") {

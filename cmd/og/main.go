@@ -96,6 +96,11 @@ func newIssueCommentsCmd() *cobra.Command {
 	return cmd
 }
 
+const (
+	worktreeFlag     = "worktree"
+	worktreeFlagHelp = "Absolute linked worktree root (infers the project)"
+)
+
 func newPRCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pr",
@@ -104,6 +109,7 @@ func newPRCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  showHelp,
 	}
+	cmd.PersistentFlags().String(worktreeFlag, "", worktreeFlagHelp)
 	cmd.AddCommand(newPRViewCmd("view"))
 	cmd.AddCommand(newPRViewCmd("list"))
 	cmd.AddCommand(newPRFindCmd())
@@ -122,8 +128,9 @@ func newPRMergeCmd() *cobra.Command {
 		"none executes immediately without Impri or notifications; deny rejects all merges, including dry-run. " +
 		"Pending/unverifiable CI returns retryable. " +
 		"Use --dry-run for a non-destructive mock; --wait/timeout wait only for Impri approval. " +
-		"Real merges revalidate identity and CI, squash at the expected head, pull the registered " +
-		"default branch, and remove matching head refs. Repeat the same project, explicit PR ID, " +
+		"Real merges revalidate identity and CI, squash at the expected head, and remove matching head refs. " +
+		"For a linked worktree, cleanup removes its directory, including ignored files. " +
+		"For the registered checkout, cleanup pulls the default branch. Repeat the same selector, explicit PR ID, " +
 		"and mode after partial cleanup without merging again."
 	cmd.Flags().String("pr-id", "", "PR number override")
 	cmd.Flags().Bool("dry-run", false, "record a mock merge without changing forge or checkout")
@@ -182,6 +189,7 @@ func addOptionalPRIDFlag(cmd *cobra.Command) {
 
 func newGitPushCmd() *cobra.Command {
 	cmd := newRunnableCmd("push", "Push the current branch", runGitPush)
+	cmd.Flags().String(worktreeFlag, "", worktreeFlagHelp)
 	cmd.Flags().Bool("force", false, "Force push with --force-with-lease")
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	return cmd
@@ -189,15 +197,16 @@ func newGitPushCmd() *cobra.Command {
 
 func newGitPullCmd() *cobra.Command {
 	cmd := newRunnableCmd("pull", "Pull the current branch or clean up a closed PR branch", runGitPull)
+	cmd.Flags().String(worktreeFlag, "", worktreeFlagHelp)
 	cmd.Flags().Bool("json", false, "Output the structured result as JSON")
 	cmd.Long = `Pull the current branch with fast-forward only.
 
-When the current feature branch has a closed PR, og returns to the default
-branch and deletes the feature branch locally and remotely. Cleanup refuses a
-dirty worktree, unpushed local commits, or a closed-unmerged branch whose remote
-ref is already missing. A successful real og pr merge performs the same
-single-checkout cleanup automatically; repeat that exact merge request when the
-result reports incomplete cleanup.`
+In a linked worktree, pull updates the current branch and preserves the directory.
+In the registered checkout, a closed PR can trigger a switch to the default
+branch and deletion of its feature branch. Cleanup refuses a dirty checkout,
+unpushed local commits, or a closed-unmerged branch whose remote ref is missing.
+Real og pr merge performs its own cleanup. To retry incomplete merge cleanup,
+repeat the merge request with the same selector, explicit PR ID, and mode.`
 	return cmd
 }
 

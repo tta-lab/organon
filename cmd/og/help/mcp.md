@@ -5,10 +5,11 @@ case-insensitive project reference: canonical alias, checkout basename, or
 remote repository basename. Exact alias matches take priority; ambiguous and
 unknown references fail safely and point to `og project find` or `og project list`.
 `clone` accepts exactly one of a registered project reference or an HTTP(S) URL.
-URL mode may use an optional new `alias` or the `reference` flag. Repository
-and forge tools do not accept a destination path, working directory, MCP root,
-token, or file URI as a project reference. Source tools additionally
-accept an absolute path only when it exactly matches a registered checkout.
+URL mode may use an optional new `alias` or the `reference` flag. Push, pull,
+and PR tools take one of `project` or `worktree`. The worktree is an exact,
+absolute linked checkout root on the server. Git verifies that it belongs to
+a registered repository. For example, `push({"worktree":"/absolute/feature"})`
+infers the project and pushes the branch in that directory.
 
 Source tools are strictly read-only and closed-world. Their `project` selector
 accepts a registered reference or the exact absolute path of a registered
@@ -29,10 +30,9 @@ optional `limit`, with `next_offset` for continuation; returned content is cappe
 
 The MCP server loads the local project registry at startup. It initializes forge
 configuration and service state on the first forge tool call, then retains that
-result (including an initialization error) for its lifetime. All pull request tools
-require a project reference. Get, modify, comment, and checks
-accept an optional positive PR ID and use the registered checkout's current
-branch when it is omitted. Structured results return the canonical alias.
+result (including an initialization error) for its lifetime. Get, modify,
+comment, checks, and merge accept an optional positive PR ID. An omitted ID
+uses the selected checkout's current branch. Structured results return the canonical alias.
 Unlike the shell `og pr` command, this typed interface also exposes
 `pr_create` and `pr_modify` for pull-request mutations.
 
@@ -74,12 +74,11 @@ Tools:
   issue_edit_body         # exact oldText/newText body edits
   issue_comment           # add an issue comment
 
-Push, pull, create, find, and `pr_get` without an ID intentionally mirror their
-CLI behavior and operate on the current named branch at the path registered for
-the resolved canonical alias. Force push is rejected on the default branch and
-otherwise uses `--force-with-lease`. Pull may switch to the default branch and
-delete a closed PR branch locally and remotely after the same safety checks as
-the CLI.
+Push, pull, create, find, and `pr_get` without an ID operate on the selected
+checkout's current named branch. Force push is rejected on the default branch
+and otherwise uses `--force-with-lease`. Pull fast-forwards the branch in a
+linked worktree. The registered checkout also supports guarded closed-PR branch
+cleanup.
 
 Archived aliases remain readable. Their pull is restricted to fast-forwarding
 the known default branch; push, tag, PR mutation/comment, and branch cleanup are
@@ -112,16 +111,18 @@ checkout guards remain enforced.
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
 wait only for Impri approval. Under `impri` and `none`, dry-run uses the
-non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
-pulls the registered default branch and removes matching local/origin head refs.
-An `executed` result with `cleanup_error` repeats the same project, **explicit PR
-ID**, and mode to finish cleanup; an observed merged PR never merges again,
-including after an uncertain provider response. Completion requires executed
+non-destructive mock without forge mutation or checkout changes. Real merge
+removes matching local and origin head refs. It pulls the default branch in the
+registered checkout. From a linked feature worktree, it removes the worktree
+directory, including ignored files, and leaves the registered checkout alone.
+For an `executed` result with `cleanup_error`, repeat the request with the same
+checkout selector, **explicit PR ID**, and mode to finish cleanup. An observed
+merged PR resumes cleanup, including after an uncertain provider response. Completion requires executed
 with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
 
 Under default `impri`, `pr_merge` requires an Impri web decision. Its input
-contains only the project, optional PR ID, dry-run flag,
-and wait/timeout controls; it never accepts an API key. The structured result
+takes a checkout selector, optional PR ID, dry-run flag,
+and wait/timeout controls. The structured result
 contains the immutable approved snapshot, action ID, status, and inbox URL; the
 action ID is informational for audit/web identification, not an input.
 Agents must show that URL and wait for approval rather than invoking forge
@@ -143,9 +144,8 @@ its flags are short scalars; create/modify remain typed MCP-only to avoid
 multiline shell quoting ambiguity, and both merge adapters share this gate.
 
 Tag and raw provider access are not exposed. Telegram, webhooks, a daemon,
-API-key provisioning/rotation, and worktree coordination are outside this
-version. Real merge performs guarded single-checkout cleanup automatically;
-`og pull` remains available for its existing closed-PR workflow.
+and API-key provisioning/rotation are outside this version. Real merge
+performs its cleanup automatically.
 
 Issue operations support GitHub and Forgejo only; generic remotes fail before a
 provider request. Every explicit issue ID rejects pull requests. Issue writes

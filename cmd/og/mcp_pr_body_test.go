@@ -85,7 +85,9 @@ func TestMCPPREditBodyRejectsInvalidIdentity(t *testing.T) {
 		executor := &directExecutor{prEditBody: func(og.Request) (og.Response, error) { return og.Response{PR: pr}, nil }}
 		id := int64(7)
 		_, _, err := prEditBodyHandler(testProjectStore(t), executor)(context.Background(), nil, ogPREditsInput{
-			Project: "ko", PRID: &id, Edits: []og.BodyEdit{{OldText: "a", NewText: "b"}},
+			ogCheckoutInput: ogCheckoutInput{Project: "ko"},
+			PRID:            &id,
+			Edits:           []og.BodyEdit{{OldText: "a", NewText: "b"}},
 		})
 		if err == nil {
 			t.Fatalf("accepted PR %+v", pr)

@@ -22,9 +22,14 @@ type ogProjectInput struct {
 	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
 }
 
+type ogCheckoutInput struct {
+	Project  string `json:"project,omitempty" jsonschema:"registered project reference; use one of project and worktree"`
+	Worktree string `json:"worktree,omitempty" jsonschema:"absolute linked worktree root on the server"`
+}
+
 type ogPushInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	Force   bool   `json:"force,omitempty" jsonschema:"use force-with-lease; rejected on the default branch"`
+	ogCheckoutInput
+	Force bool `json:"force,omitempty" jsonschema:"use force-with-lease; rejected on the default branch"`
 }
 
 type ogCloneInput struct {
@@ -35,42 +40,42 @@ type ogCloneInput struct {
 }
 
 type ogPRCreateInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	Title   string `json:"title" jsonschema:"non-blank pull request title"`
-	Body    string `json:"body,omitempty" jsonschema:"optional pull request body"`
+	ogCheckoutInput
+	Title string `json:"title" jsonschema:"non-blank pull request title"`
+	Body  string `json:"body,omitempty" jsonschema:"optional pull request body"`
 }
 
 type ogPRFindInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	State   string `json:"state,omitempty" jsonschema:"pull request state: open, closed, or all"`
+	ogCheckoutInput
+	State string `json:"state,omitempty" jsonschema:"pull request state: open, closed, or all"`
 }
 
 type ogPRInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
+	ogCheckoutInput
+	PRID *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
 }
 
 type ogPRModifyInput struct {
-	Project string  `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	PRID    *int64  `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
-	Title   *string `json:"title,omitempty" jsonschema:"optional replacement pull request title"`
-	Body    *string `json:"body,omitempty" jsonschema:"optional replacement pull request body; an empty string clears it"`
+	ogCheckoutInput
+	PRID  *int64  `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
+	Title *string `json:"title,omitempty" jsonschema:"optional replacement pull request title"`
+	Body  *string `json:"body,omitempty" jsonschema:"optional replacement pull request body; an empty string clears it"`
 }
 
 type ogPREditsInput struct {
-	Project string        `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	PRID    *int64        `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
-	Edits   []og.BodyEdit `json:"edits" jsonschema:"exact unique body matches; empty newText deletes"`
+	ogCheckoutInput
+	PRID  *int64        `json:"pr_id,omitempty" jsonschema:"positive PR ID; omitted uses the current branch"`
+	Edits []og.BodyEdit `json:"edits" jsonschema:"exact unique body matches; empty newText deletes"`
 }
 
 type ogPRCommentInput struct {
-	Project string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
-	PRID    *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
-	Body    string `json:"body" jsonschema:"non-blank pull request comment body"`
+	ogCheckoutInput
+	PRID *int64 `json:"pr_id,omitempty" jsonschema:"optional positive pull request ID; omitted uses the current branch"`
+	Body string `json:"body" jsonschema:"non-blank pull request comment body"`
 }
 
 type ogPRMergeInput struct {
-	Project        string `json:"project" jsonschema:"project reference: alias, checkout, or repository basename"`
+	ogCheckoutInput
 	PRID           *int64 `json:"pr_id,omitempty" jsonschema:"optional positive PR ID; omitted uses current branch"`
 	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"record a mock merge without changing the forge"`
 	Wait           bool   `json:"wait,omitempty" jsonschema:"wait for Impri only; none returns immediately"`
@@ -233,6 +238,14 @@ func inputSchemaFor[T any]() *jsonschema.Schema {
 			{Required: []string{"url"}},
 		}
 	}
+	if worktree := schema.Properties["worktree"]; worktree != nil {
+		worktree.MinLength = jsonschema.Ptr(1)
+		schema.Properties[sourceProjectField].MinLength = jsonschema.Ptr(1)
+		schema.OneOf = []*jsonschema.Schema{
+			{Required: []string{sourceProjectField}},
+			{Required: []string{"worktree"}},
+		}
+	}
 	if state := schema.Properties["state"]; state != nil {
 		state.Default = json.RawMessage(`"` + og.PRStateOpen + `"`)
 		state.Enum = []any{og.PRStateOpen, og.PRStateClosed, og.PRStateAll}
@@ -305,36 +318,36 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 
 	mcp.AddTool(server, setInputSchema[ogPushInput](ogTool(
 		"push", "Push current branch",
-		"Push the registered checkout's current branch; force uses force-with-lease and is rejected on the default branch.",
+		"Push the selected checkout's current branch; force uses force-with-lease and is rejected on the default branch.",
 		false, true, true,
 	)), pushHandler(projects, executor))
 
-	mcp.AddTool(server, setInputSchema[ogProjectInput](ogTool(
+	mcp.AddTool(server, setInputSchema[ogCheckoutInput](ogTool(
 		"pull", "Pull current branch",
-		"Run the CLI-equivalent pull workflow, including fast-forward-only pulls and guarded closed-PR branch cleanup.",
+		"Fast-forward the selected branch. Guarded closed-PR branch cleanup is available in the registered checkout.",
 		false, true, true,
 	)), func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
-		input ogProjectInput,
+		input ogCheckoutInput,
 	) (*mcp.CallToolResult, ogMessageOutput, error) {
-		return callMessageTool(ctx, projects, input.Project, og.Request{}, executor.GitPull)
+		return callMessageTool(ctx, projects, input, og.Request{}, executor.GitPull)
 	})
 
 	mcp.AddTool(server, setInputSchema[ogPRCreateInput](ogTool(
 		"pr_create", "Create pull request",
-		"Push the registered checkout's current branch and create its pull request.", false, false, false,
+		"Push the selected checkout's current branch and create its pull request.", false, false, false,
 	)), prCreateHandler(projects, executor))
 	addIssueTools(server, projects, executor)
 
 	mcp.AddTool(server, setInputSchema[ogPRFindInput](ogTool(
 		"pr_find", "Find current branch pull request",
-		"Find a pull request for the registered checkout's current branch by state.", true, false, true,
+		"Find a pull request for the selected checkout's current branch by state.", true, false, true,
 	)), prFindHandler(projects, executor))
 
 	mcp.AddTool(server, setInputSchema[ogPRInput](ogTool(
 		"pr_get", "Get pull request",
-		"Get by positive PR ID, or view the registered checkout's current branch pull request when omitted; "+
+		"Get by positive PR ID, or view the selected checkout's current branch pull request when omitted; "+
 			"CI is included only for Forgejo.",
 		true, false, true,
 	)), func(
@@ -343,9 +356,9 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 		input ogPRInput,
 	) (*mcp.CallToolResult, ogPROutput, error) {
 		if input.PRID == nil {
-			return callPRProjectTool(ctx, projects, input.Project, og.Request{State: og.PRStateAll}, executor.PRView)
+			return callPRCheckoutTool(ctx, projects, input.ogCheckoutInput, og.Request{State: og.PRStateAll}, executor.PRView)
 		}
-		return callPRTool(ctx, projects, input.Project, *input.PRID, executor.PRGet)
+		return callPRTool(ctx, projects, input.ogCheckoutInput, *input.PRID, executor.PRGet)
 	})
 
 	mcp.AddTool(server, setInputSchema[ogPRModifyInput](ogTool(
@@ -369,12 +382,12 @@ func newOGMCPServer(projects *project.Store, executor og.Executor) *mcp.Server {
 			"Direct results identify approval_policy=none, "+
 			"omit action/inbox/receipt, and use blocked (retry_same_request), failed (none), or executed. "+
 			"Pending/unverifiable CI returns retryable immediately. Wait/timeout wait only under impri. "+
-			"Repeat the same project, explicit PR ID, and mode for uncertain outcomes or cleanup-only recovery; "+
+			"Repeat the same selector, explicit PR ID, and mode for uncertain outcomes or cleanup-only recovery; "+
 			"observed merged PRs never merge again. Under impri, surface the inbox link "+
 			"and execute only after web approval; dry-run records a mock merge and "+
-			"real mode performs a squash merge followed by guarded single-checkout "+
-			"default-branch pull and approved-head cleanup. Dry-run performs no Git "+
-			"cleanup. Structured outcomes route pending or "+
+			"real mode performs a squash merge and removes matching head refs. It also removes a "+
+			"selected linked worktree, including ignored files, or pulls the default branch in the registered checkout. "+
+			"Dry-run performs no Git cleanup. Structured outcomes route pending or "+
 			"wait-timeout to the inbox, approved temporary failures to repeating the same "+
 			"request, temporarily unavailable Impri approval state to the same retry "+
 			"without a forge call, executed to completion, terminal rejection/expiry to a "+
@@ -395,7 +408,7 @@ func pushHandler(projects *project.Store, executor og.Executor) mcp.ToolHandlerF
 		_ *mcp.CallToolRequest,
 		input ogPushInput,
 	) (*mcp.CallToolResult, ogMessageOutput, error) {
-		return callMessageTool(ctx, projects, input.Project, og.Request{Force: input.Force}, executor.GitPush)
+		return callMessageTool(ctx, projects, input.ogCheckoutInput, og.Request{Force: input.Force}, executor.GitPush)
 	}
 }
 
@@ -408,7 +421,7 @@ func prCreateHandler(projects *project.Store, executor og.Executor) mcp.ToolHand
 		if err := og.ValidatePRTitle(input.Title); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		return callPRProjectTool(ctx, projects, input.Project, og.Request{
+		return callPRCheckoutTool(ctx, projects, input.ogCheckoutInput, og.Request{
 			Title: &input.Title,
 			Body:  &input.Body,
 		}, executor.PRCreate)
@@ -425,18 +438,18 @@ func prFindHandler(projects *project.Store, executor og.Executor) mcp.ToolHandle
 		if err != nil {
 			return nil, ogPROutput{}, err
 		}
-		return callPRProjectTool(ctx, projects, input.Project, og.Request{State: state}, executor.PRFind)
+		return callPRCheckoutTool(ctx, projects, input.ogCheckoutInput, og.Request{State: state}, executor.PRFind)
 	}
 }
 
 func callMessageTool(
 	ctx context.Context,
 	projects *project.Store,
-	alias string,
+	selector ogCheckoutInput,
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogMessageOutput, error) {
-	resp, canonical, err := callProject(ctx, projects, alias, req, operation)
+	resp, canonical, err := callCheckout(ctx, projects, selector, req, operation)
 	if err != nil {
 		return nil, ogMessageOutput{}, err
 	}
@@ -446,14 +459,14 @@ func callMessageTool(
 	return nil, ogMessageOutput{Project: canonical, Message: resp.Message}, nil
 }
 
-func callPRProjectTool(
+func callPRCheckoutTool(
 	ctx context.Context,
 	projects *project.Store,
-	alias string,
+	selector ogCheckoutInput,
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPROutput, error) {
-	resp, canonical, err := callProject(ctx, projects, alias, req, operation)
+	resp, canonical, err := callCheckout(ctx, projects, selector, req, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
@@ -470,11 +483,27 @@ func callProject(
 	req og.Request,
 	operation func(og.Request) (og.Response, error),
 ) (og.Response, string, error) {
-	entry, err := resolveOGProject(projects, reference)
+	return callCheckout(ctx, projects, ogCheckoutInput{Project: reference}, req, operation)
+}
+
+func callCheckout(
+	ctx context.Context,
+	projects *project.Store,
+	selector ogCheckoutInput,
+	req og.Request,
+	operation func(og.Request) (og.Response, error),
+) (og.Response, string, error) {
+	var entry project.Entry
+	var err error
+	if selector.Worktree != "" {
+		req.WorkDir, entry, err = og.ResolveWorktree(ctx, selector.Worktree, projects)
+	} else {
+		entry, err = resolveOGProject(projects, selector.Project)
+		req.WorkDir = entry.Path
+	}
 	if err != nil {
 		return og.Response{}, "", err
 	}
-	req.WorkDir = entry.Path
 	req.Context = ctx
 	resp, err := operation(req)
 	if err != nil {
@@ -513,7 +542,7 @@ func prModifyHandler(projects *project.Store, executor og.Executor) mcp.ToolHand
 		if err := og.ValidatePRModifyInput(input.Title, input.Body); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
+		resp, canonical, err := callCheckout(ctx, projects, input.ogCheckoutInput, og.Request{
 			Index: prID, Title: input.Title, Body: input.Body,
 		}, executor.PRModify)
 		if err != nil {
@@ -541,7 +570,7 @@ func prCommentHandler(
 		if err := og.ValidatePRCommentBody(&input.Body); err != nil {
 			return nil, ogCommentOutput{}, err
 		}
-		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
+		resp, canonical, err := callCheckout(ctx, projects, input.ogCheckoutInput, og.Request{
 			Index: prID, Body: &input.Body,
 		}, executor.PRComment)
 		if err != nil {
@@ -577,7 +606,7 @@ func prMergeHandler(
 		if req, err = og.NormalizePRMergeRequest(req); err != nil {
 			return nil, ogPRMergeOutput{}, err
 		}
-		resp, canonical, err := callProject(ctx, projects, input.Project, req, executor.PRMerge)
+		resp, canonical, err := callCheckout(ctx, projects, input.ogCheckoutInput, req, executor.PRMerge)
 		if err != nil {
 			var retryErr *og.PRMergeRetryableError
 			if errors.As(err, &retryErr) && resp.Merge != nil {
@@ -600,14 +629,14 @@ func prMergeHandler(
 func callPRTool(
 	ctx context.Context,
 	projects *project.Store,
-	alias string,
+	selector ogCheckoutInput,
 	id int64,
 	operation func(og.Request) (og.Response, error),
 ) (*mcp.CallToolResult, ogPROutput, error) {
 	if err := og.ValidatePositivePRID(id); err != nil {
 		return nil, ogPROutput{}, err
 	}
-	resp, canonical, err := callProject(ctx, projects, alias, og.Request{Index: id}, operation)
+	resp, canonical, err := callCheckout(ctx, projects, selector, og.Request{Index: id}, operation)
 	if err != nil {
 		return nil, ogPROutput{}, err
 	}
@@ -628,7 +657,7 @@ func addPRLinesTool(
 			if err != nil {
 				return nil, ogPRLinesOutput{}, err
 			}
-			resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{Index: id}, operation)
+			resp, canonical, err := callCheckout(ctx, projects, input.ogCheckoutInput, og.Request{Index: id}, operation)
 			if err != nil {
 				return nil, ogPRLinesOutput{}, err
 			}
@@ -652,7 +681,7 @@ func optionalMCPPRID(id *int64) (int64, error) {
 func newOGMCPCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Serve project-reference forge tools over stdio MCP",
+		Short: "Serve typed forge tools over stdio MCP",
 		Long:  helpMCP,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -682,7 +711,7 @@ func prEditBodyHandler(projects *project.Store, executor og.Executor) mcp.ToolHa
 		if err := og.ValidateBodyEdits(input.Edits); err != nil {
 			return nil, ogPROutput{}, err
 		}
-		resp, canonical, err := callProject(ctx, projects, input.Project, og.Request{
+		resp, canonical, err := callCheckout(ctx, projects, input.ogCheckoutInput, og.Request{
 			Index: prID, Edits: input.Edits,
 		}, executor.PREditBody)
 		if err != nil {

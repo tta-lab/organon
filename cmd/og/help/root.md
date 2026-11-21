@@ -33,11 +33,12 @@ checkout guards remain enforced.
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
 wait only for Impri approval. Under `impri` and `none`, dry-run uses the
-non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
-pulls the registered default branch and removes matching local/origin head refs.
-An `executed` result with `cleanup_error` repeats the same project, **explicit PR
-ID**, and mode to finish cleanup; an observed merged PR never merges again,
-including after an uncertain provider response. Completion requires executed
+non-destructive mock without forge mutation or checkout changes. Real merge
+cleans up matching local and origin head refs and either pulls the default
+branch in the registered checkout or removes the selected feature worktree.
+For an `executed` result with `cleanup_error`, repeat the request with the same
+checkout selector, **explicit PR ID**, and mode to finish cleanup. An observed
+merged PR resumes cleanup, including after an uncertain provider response. Completion requires executed
 with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
 
 Under default `impri`, configure `[impri]` with `base_url` and `api_key` in
@@ -46,9 +47,8 @@ failures and `unavailable` approval state repeat the same request; terminal
 execution failure requires new approval. Executed `receipt_error` uses
 `repair_receipt` without another forge merge, then continues checkout cleanup.
 The action ID is audit/web identification only. Impri has no environment-variable
-fallback or second config file. Worktree coordination is outside this version.
-`og pull` remains available for guarded closed-PR cleanup; successful merge
-cleanup is automatic.
+fallback or second config file. See `og pr --help` for merge cleanup and retry
+instructions.
 
 `og project` owns local registered-project discovery and navigation. Use
 `og project list`, `find`, `get`, `resolve`, and `jump`; resolve emits JSON
@@ -74,11 +74,16 @@ GitHub uses either an owner-scoped PAT or a GitHub App configured in og.toml;
 see the README for setup and permissions. GitHub merge and CI are unsupported;
 Forgejo retains merge and CI status. Logs and failure details are outside og.
 
-`og mcp` serves typed forge workflows over stdio. MCP callers
-select a repository only through a project reference; filesystem paths, URLs,
-and file URIs are not project selectors. Push, pull, PR creation, and PR
-operations with an omitted ID use the registered checkout's current branch.
-Explicit-ID PR operations remain independent of the checked-out branch.
+Run push, pull, and PR commands inside a linked worktree or its subdirectories.
+Use `og --worktree /absolute/feature push` to select it from another directory.
+The path selects a linked checkout of a registered local repository and infers
+its project. Use `--project <reference>` to select the registered checkout.
+
+`og mcp` serves typed forge workflows over stdio. Push, pull, and PR tools take
+one of `project` and `worktree`. Push, pull, PR creation, and PR lookup with an
+omitted ID use the selected checkout's branch. A worktree pull only fast-forwards
+that branch. Real worktree merge cleanup removes the directory and its ignored
+files after verifying the matching feature head.
 
 Unknown or ambiguous references fail before Git, credentials, or forge work and
 point callers to `og project find` or `og project list`. Archived projects remain

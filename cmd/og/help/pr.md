@@ -9,6 +9,10 @@ Their multiline free-text bodies stay out of shell arguments; merge remains a
 CLI adapter because it accepts only short scalar flags, while agents should
 default to typed MCP. Both merge adapters honor the same global policy.
 
+Run PR commands in the selected worktree or pass `--worktree /absolute/feature`
+to select it from elsewhere. The worktree path infers the registered project.
+Use `--project <reference>` for the registered checkout.
+
 Behavior:
 
 - `og pr view --json` and `og pr list --json` show PR details; Forgejo also includes CI status.
@@ -28,15 +32,12 @@ Behavior:
   Always surface the printed Impri inbox URL for web approval. Only an approved action executes; rejected, expired, pending,
   and timed-out actions do not touch the forge. Real mode revalidates that the
   PR is open, mergeable, has CI state `success` or `not_configured`, and is
-  still at the approved SHA. After the forge merge, real mode automatically
-  pulls the registered checkout's default branch and removes only matching
-  local and `origin` head refs. Dry-run never switches, pulls, or deletes
-  branches. If the result is
-  approved and retryable, repeat the same project, PR, and mode request after the provider recovers;
-  an `executed` result with `cleanup_error` means the forge merge and receipt
-  are complete but checkout cleanup remains; repeat the same request and do not
-  merge again. A fully executed result with no cleanup or receipt error is
-  complete. Repeating the same request after rejection or expiry creates a
+  still at the approved SHA. Real mode automatically cleans up the selected
+  checkout after the forge merge. If the result is approved and retryable,
+  repeat the same checkout selector, explicit PR ID, and mode after the provider recovers.
+  An `executed` result with `cleanup_error` means the forge merge and receipt
+  are complete. Repeat the request to finish cleanup. A fully executed result
+  with no cleanup or receipt error is complete. Repeating the request after rejection or expiry creates a
   replacement approval card, even when the PR snapshot is unchanged.
   `execute_failed` ends only that approved action, not the PR's ability to be
   merged; a later attempt needs new approval. If Impri state is temporarily unavailable, no forge call was made:
@@ -68,11 +69,15 @@ checkout guards remain enforced.
 Read `approval_policy` separately from `snapshot.execution_mode`. Direct results
 have no action ID, inbox URL, or receipt. `--wait`/timeout retain validation but
 wait only for Impri approval. Under `impri` and `none`, dry-run uses the
-non-destructive mock without forge mutation or checkout switch/pull/deletion. Real mode
-pulls the registered default branch and removes matching local/origin head refs.
-An `executed` result with `cleanup_error` repeats the same project, **explicit PR
-ID**, and mode to finish cleanup; an observed merged PR never merges again,
-including after an uncertain provider response. Completion requires executed
+non-destructive mock without forge mutation or checkout changes. Real merge
+removes local and origin head refs that still match the approved SHA. Merge
+from the registered checkout pulls its default branch. Merge from a linked
+feature worktree detaches it at that SHA and removes its directory after branch
+cleanup. Tracked edits and ordinary untracked files block removal. Ignored
+files, including local configuration, can be removed with the directory.
+For an `executed` result with `cleanup_error`, repeat the request with the same
+checkout selector, **explicit PR ID**, and mode to finish cleanup. An observed
+merged PR resumes cleanup, including after an uncertain provider response. Completion requires executed
 with no receipt or cleanup error. Follow `next_action`, `completion`, and `detail`.
 
 For the default `impri` policy, configure Impri in the existing user-owned `~/.config/ttal/og.toml`:
@@ -86,10 +91,8 @@ api_key = "im_..." # actions-scoped operator key; never pass this to a tool
 The section is read only from this existing `og.toml`; `IMPRI_*` environment
 variables and a second Impri config file are not supported.
 
-Telegram notifications, webhooks, a polling daemon, API-key provisioning or
-rotation, and worktree coordination are outside this version. `og pull` remains
-available for its existing guarded closed-PR workflow, but is not a second step
-after a successful real merge.
+Telegram notifications, webhooks, a polling daemon, and API-key provisioning
+and rotation are outside this version.
 
 GitHub uses an owner-scoped PAT or a repository-scoped App installation token.
 GitHub merge (including dry-run) and CI are unsupported. See README for setup.

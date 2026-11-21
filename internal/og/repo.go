@@ -36,6 +36,9 @@ var (
 type repoContext struct {
 	Context          context.Context
 	WorkDir          string
+	RegisteredDir    string
+	LinkedWorktree   bool
+	ExplicitPR       bool
 	ProjectAlias     string
 	Archived         bool
 	Provider         gitprovider.ProviderType
@@ -109,6 +112,8 @@ func resolveRemoteRepoContextWith(
 	return &repoContext{
 		Context:        ctx,
 		WorkDir:        root,
+		RegisteredDir:  entry.Path,
+		LinkedWorktree: !sameRealPath(root, entry.Path),
 		ProjectAlias:   entry.Alias,
 		Archived:       entry.Archived,
 		Provider:       info.Provider,
@@ -220,22 +225,13 @@ func resolveRegisteredRepo(
 		return "", project.Entry{}, inputErr
 	}
 	entry, err := projects.GetByPath(root)
-	if errors.Is(err, project.ErrNotFound) {
-		entries, listErr := projects.List(true)
-		if listErr != nil {
-			return "", project.Entry{}, listErr
-		}
-		for _, candidate := range entries {
-			if sameRealPath(candidate.Path, root) {
-				return candidate.Path, candidate, nil
-			}
-		}
-		return "", project.Entry{}, fmt.Errorf("workdir %q is not inside a registered project", root)
+	if err == nil {
+		return entry.Path, entry, nil
 	}
-	if err != nil {
+	if !errors.Is(err, project.ErrNotFound) {
 		return "", project.Entry{}, err
 	}
-	return entry.Path, entry, nil
+	return resolveWorktreeRoot(ctx, root, projects)
 }
 
 func sameRealPath(left, right string) bool {
@@ -554,7 +550,8 @@ func ensureBranchCleanupTarget(ctxInfo *repoContext, target branchCleanupTarget)
 
 func ensureCleanupWorktreeClean(ctxInfo *repoContext) error {
 	ctx := operationContext(ctxInfo)
-	out, err := gitOutput(ctx, ctxInfo.WorkDir, "status", "--porcelain")
+	out, err := gitOutput(ctx, ctxInfo.WorkDir, "status", "--porcelain",
+		"--untracked-files=normal", "--ignore-submodules=none")
 	if err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot verify worktree is clean: %w", err)
 	}
@@ -644,6 +641,9 @@ func validateBranchCleanupTarget(ctxInfo *repoContext, target branchCleanupTarge
 			"refusing closed PR branch cleanup: approved base branch %q does not match checkout default %q",
 			target.BaseBranch, ctxInfo.DefaultBase,
 		)
+	}
+	if ctxInfo.LinkedWorktree {
+		return nil
 	}
 	if ctxInfo.Branch != target.HeadBranch && ctxInfo.Branch != target.BaseBranch {
 		return fmt.Errorf(
@@ -755,6 +755,9 @@ func cleanupApprovedMergeBranch(ctxInfo *repoContext, approved PRMergeSnapshot) 
 	target, err := approvedMergeCleanupTarget(ctxInfo, approved)
 	if err != nil {
 		return err
+	}
+	if ctxInfo.LinkedWorktree {
+		return cleanupLinkedWorktree(ctxInfo, target)
 	}
 	return cleanupBranch(ctxInfo, target)
 }

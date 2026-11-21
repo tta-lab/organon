@@ -82,9 +82,9 @@ than invoking forge merge tooling directly.
 
 Read `approval_policy` independently of `snapshot.execution_mode`. Under `none`,
 there is no Impri action, inbox, approval decision, receipt, or notification.
-`blocked` with `retry_same_request` means repeat the same project, explicit PR ID,
-and mode after CI or another temporary condition settles. Pending and
-unverifiable CI return immediately; `--wait`/timeout wait only under `impri`.
+`blocked` with `retry_same_request` means repeat the same checkout selector,
+explicit PR ID, and mode after CI or another temporary condition settles.
+Pending and unverifiable CI return immediately; `--wait`/timeout wait only under `impri`.
 `failed` is terminal for that request: resolve the condition before another
 attempt. An `executed` result with `cleanup_error` retries only checkout cleanup;
 an observed merged PR never invokes forge merge again, including recovery from
@@ -93,10 +93,10 @@ Direct dry-run is a non-destructive mock without checkout cleanup.
 
 The following approval lifecycle guidance applies to `approval_policy=impri`.
 Agents must treat `PRMergeResult` as the merge feedback contract. Every retry
-is the same `pr_merge` request with the exact `project`, explicit PR ID, and mode; the
-returned `action_id` is informational for audit and the web inbox, never an
-input. Surface `inbox_url` for `status=pending` and wait. For an approved
-temporary failure or local `status=unavailable` (approval state unknown; no
+uses the same `project` reference or `worktree` path, explicit PR ID, and mode.
+The returned `action_id` is informational for audit and the web inbox. Surface
+`inbox_url` for `status=pending` and wait. For an approved temporary failure or
+local `status=unavailable` (approval state unknown; no
 forge call), use `next_action=retry_same_request` and repeat that request
 without new approval. `status=executed` with no receipt or cleanup error is
 complete; rejected, expired, and
@@ -113,10 +113,10 @@ only when executed has neither receipt nor cleanup error. Impri provider/API
 availability failures remain approved and retryable. For real execution, CI
 state `success` or `not_configured` permits the forge gate; `pending` is
 retryable, `failure`/`error` is terminal, and unknown or unverifiable state
-fails closed. A successful real merge automatically pulls the registered
-single-checkout default branch and removes matching approved local and origin
-head refs; do not run a separate `og pull` afterward. Dry-run remains
-non-destructive, and worktree coordination is outside this version.
+fails closed. Real merge removes matching approved local and origin head refs.
+In the registered checkout it also pulls the default branch. For a linked
+feature worktree it removes the directory, including ignored files. Successful
+cleanup completes the workflow. Dry-run leaves the checkout intact.
 
 For new capabilities, the CLI Design rules below govern the CLI/MCP transport
 boundary; README guidance describes existing adapters. `og pull` remains available for its existing guarded closed-PR

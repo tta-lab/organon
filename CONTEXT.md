@@ -17,6 +17,13 @@ checkout path. A standalone local directory without a canonical remote is not a
 registered project.
 _Avoid_: arbitrary workspace, directory bookmark
 
+**Registered checkout**:
+The local checkout named in a registered project's entry.
+
+**Linked worktree**:
+An additional checkout of a registered project's local Git repository, with its
+own working files, staging area, and HEAD.
+
 **Derived clone path**:
 The controlled local destination computed from a URL clone's host, owner, and
 repository. Its owner and repository directory components are lowercase.

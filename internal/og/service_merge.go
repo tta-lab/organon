@@ -64,6 +64,7 @@ func (s Service) PRMerge(req Request) (Response, error) { //nolint:gocyclo
 	if err != nil {
 		return Response{}, err
 	}
+	ctxInfo.ExplicitPR = req.Index > 0
 	if ctxInfo.Provider == gitprovider.ProviderGitHub {
 		return Response{}, fmt.Errorf("GitHub pull request merge is not supported by og")
 	}
@@ -497,8 +498,12 @@ func (s Service) executeMerge(
 		return s.executionFailure(ctxInfo, client, action, approved, "configured provider does not support squash merge")
 	}
 	if cleanupErr := s.prepareApprovedMergeCleanup(ctxInfo, approved); cleanupErr != nil {
-		return retryableMergeError(action, approved,
-			"checkout is not ready for automatic cleanup: "+cleanupErr.Error())
+		detail := "checkout is not ready for automatic cleanup: " + cleanupErr.Error()
+		if ctxInfo.LinkedWorktree {
+			detail += fmt.Sprintf("; retry using worktree %q and explicit PR ID %d in the same mode",
+				ctxInfo.WorkDir, approved.PRNumber)
+		}
+		return retryableMergeError(action, approved, detail)
 	}
 	if err := merger.MergePullRequest(ctxInfo.Owner, ctxInfo.Repo, approved.PRNumber, approved.HeadSHA); err != nil {
 		return s.recoverMergeAfterProviderError(
@@ -523,6 +528,10 @@ func (s Service) prepareApprovedMergeCleanup(
 	if err := requireGitPushTarget(cleanupCtx, "automatic merge cleanup"); err != nil {
 		return err
 	}
+	if cleanupCtx.LinkedWorktree {
+		_, err := ensureLinkedCleanupTarget(cleanupCtx, target, false)
+		return err
+	}
 	if err := ensureBranchCleanupTarget(cleanupCtx, target); err != nil {
 		return err
 	}
@@ -533,13 +542,25 @@ func (s Service) resolveMergeCleanupContext(ctxInfo *repoContext) (*repoContext,
 	if ctxInfo == nil {
 		return nil, fmt.Errorf("repository context is missing")
 	}
-	cleanupCtx, err := resolveRepoContextWith(
+	cleanupCtx, err := resolveRemoteRepoContextWith(
 		operationContext(ctxInfo), ctxInfo.WorkDir, s.projectStore(), s.config,
 	)
 	if err != nil {
 		return nil, err
 	}
+	if ctxInfo.LinkedWorktree && (!cleanupCtx.LinkedWorktree || !sameRealPath(ctxInfo.WorkDir, cleanupCtx.WorkDir)) {
+		return nil, fmt.Errorf("selected linked worktree %q no longer resolves to the same root", ctxInfo.WorkDir)
+	}
 	cleanupCtx.githubBroker = s.githubBroker
+	cleanupCtx.ExplicitPR = ctxInfo.ExplicitPR
+	cleanupCtx.Branch, err = gitOutput(operationContext(ctxInfo), cleanupCtx.WorkDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	cleanupCtx.DefaultBase, cleanupCtx.DefaultBaseKnown = defaultBranch(operationContext(ctxInfo), cleanupCtx.WorkDir)
+	if !cleanupCtx.LinkedWorktree && cleanupCtx.Branch == headRefName {
+		return nil, fmt.Errorf("not on a named branch")
+	}
 	return cleanupCtx, nil
 }
 
@@ -559,6 +580,10 @@ func (s Service) finishRealMerge(
 	// not move on to cleanup until the receipt can be recorded; the retry then
 	// repairs the receipt and continues through the same cleanup path.
 	if receipt.Merge.ReceiptError != "" {
+		if ctxInfo.LinkedWorktree {
+			receipt.Merge.Completion += fmt.Sprintf("; retry using worktree %q and explicit PR ID %d in the same mode",
+				ctxInfo.WorkDir, approved.PRNumber)
+		}
 		return receipt, nil
 	}
 	cleanupCtx, err := s.resolveMergeCleanupContext(ctxInfo)
@@ -568,7 +593,7 @@ func (s Service) finishRealMerge(
 	if err := cleanupApprovedMergeBranch(cleanupCtx, approved); err != nil {
 		return cleanupRetryableResult(receipt.Merge, cleanupCtx, err)
 	}
-	setCompletedRealMergeResult(receipt.Merge, detail)
+	setCompletedRealMergeResult(receipt.Merge, detail, cleanupCtx)
 	receipt.Message = receipt.Merge.Detail
 	return receipt, nil
 }
@@ -583,6 +608,18 @@ func (s Service) finishExecutedRealMerge(
 		Detail:   "approval was already executed; no forge merge was attempted",
 	}
 	setMergeOutcome(result)
+	if ctxInfo.LinkedWorktree {
+		provider, err := newProvider(ctxInfo)
+		if err != nil {
+			return cleanupRetryableResult(result, ctxInfo, err)
+		}
+		current, err := provider.GetPR(ctxInfo.Owner, ctxInfo.Repo, approved.PRNumber)
+		if err != nil || !validProviderPRIdentity(current, approved.PRNumber) ||
+			(!current.Merged && !strings.EqualFold(current.State, "merged")) ||
+			!mergeIdentityEqual(approved, snapshotFromProvider(ctxInfo, current, approved.ExecutionMode)) {
+			return cleanupRetryableResult(result, ctxInfo, fmt.Errorf("cannot confirm the approved PR was merged"))
+		}
+	}
 	cleanupCtx, err := s.resolveMergeCleanupContext(ctxInfo)
 	if err != nil {
 		return cleanupRetryableResult(result, ctxInfo, err)
@@ -590,16 +627,21 @@ func (s Service) finishExecutedRealMerge(
 	if err := cleanupApprovedMergeBranch(cleanupCtx, approved); err != nil {
 		return cleanupRetryableResult(result, cleanupCtx, err)
 	}
-	setCompletedRealMergeResult(result, "approval was already executed; no forge merge was attempted")
+	setCompletedRealMergeResult(result, "approval was already executed; no forge merge was attempted", cleanupCtx)
 	return success(Response{Message: result.Detail, Merge: result}), nil
 }
 
-func setCompletedRealMergeResult(result *PRMergeResult, detail string) {
+func setCompletedRealMergeResult(result *PRMergeResult, detail string, ctxInfo *repoContext) {
 	result.Status = PRMergeStatusExecuted
 	result.Retryable = false
 	result.NextAction = PRMergeNextNone
 	result.ReceiptError = ""
 	result.CleanupError = ""
+	if ctxInfo.LinkedWorktree {
+		result.Detail = detail + "; linked worktree " + ctxInfo.WorkDir + " removed; matching head refs cleaned up"
+		result.Completion = "merge and linked worktree cleanup are complete; do not merge again"
+		return
+	}
 	if result.ApprovalPolicy == ogconfig.MergeApprovalNone {
 		result.Detail = detail + "; default branch pulled; matching head cleanup completed locally and remotely"
 		result.Completion = "the direct merge, default-branch pull, and matching head cleanup are complete; " +
@@ -635,6 +677,10 @@ func cleanupRetryableResult(
 	if result.ApprovalPolicy == ogconfig.MergeApprovalNone {
 		result.Completion = "the forge merge is complete; repeat the same project, explicit PR ID, and mode request " +
 			"to finish checkout cleanup without merging again"
+	}
+	if ctxInfo != nil && ctxInfo.LinkedWorktree {
+		result.Completion = fmt.Sprintf("forge merge is complete; retry cleanup with worktree %q and "+
+			"explicit PR ID %d in the same mode; do not merge again", ctxInfo.WorkDir, result.Snapshot.PRNumber)
 	}
 	result.Detail = "the forge merge is complete and must not run again; automatic checkout " +
 		"cleanup remains incomplete: " + cleanupErr

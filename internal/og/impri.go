@@ -466,14 +466,18 @@ func markdownMergeTitle(title string) string {
 }
 
 func mergePreview(snapshot PRMergeSnapshot) string {
-	mode := "real squash merge followed by guarded single-checkout cleanup"
+	mode := "real squash merge followed by cleanup of the selected checkout"
+	cleanup := "Cleanup removes matching head branches. It removes a selected linked worktree, including ignored files, " +
+		"or pulls the default branch in the registered checkout."
 	if snapshot.ExecutionMode == PRMergeModeDryRun {
-		mode = "dry-run mock merge (the forge will not be changed)"
+		mode = "dry-run mock merge"
+		cleanup = "Dry-run leaves the forge and checkout intact."
 	}
 	return strings.Join([]string{
 		"## Approval-gated pull-request merge",
 		"",
 		"Approve this action to run a **" + mode + "**.",
+		cleanup,
 		"",
 		"- Provider: `" + snapshot.Provider + "`",
 		"- Forge: `" + snapshot.ForgeBaseURL + "`",

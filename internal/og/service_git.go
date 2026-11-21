@@ -41,6 +41,9 @@ func (s Service) GitPull(req Request) (Response, error) {
 	if ctx.Archived {
 		return pullArchived(ctx)
 	}
+	if ctx.LinkedWorktree {
+		return pullNamedBranch(ctx, ctx.Branch)
+	}
 	if ctx.Provider == gitprovider.ProviderGeneric {
 		return pullNamedBranch(ctx, ctx.Branch)
 	}
@@ -108,6 +111,10 @@ func (s Service) GitTag(req Request) (Response, error) {
 	ctx, err := s.resolveRepoContextForRequest(req)
 	if err != nil {
 		return Response{}, err
+	}
+	if ctx.LinkedWorktree {
+		return Response{}, fmt.Errorf("tagging from a linked worktree is not supported; " +
+			"select the registered checkout with --project")
 	}
 	if err := requireRemoteWrite(ctx, "tag"); err != nil {
 		return Response{}, err

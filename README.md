@@ -99,6 +99,12 @@ is ignored by Git. Navidrome requires an admin account for this global change.
 
 ### `og` — guarded forge operations
 
+Run `og pull`, `og push`, or `og pr find` inside a linked worktree or its
+subdirectories to use that worktree's branch. From elsewhere, use
+`og --worktree /absolute/path/to/feature push`. The worktree must belong to a
+registered local repository. Use `--project <reference>` to select its registered
+checkout. Linked-worktree pulls only fast-forward the selected branch.
+
 `og issue` reads GitHub and Forgejo repository issues without depending on the
 checkout branch:
 
@@ -200,13 +206,12 @@ CI `success` or `not_configured` permits execution. Remote trust, provider
 support, immutable expected head, forge protections, and safe checkout checks
 still apply. A subsequent request snapshots the current PR anew.
 
-An `executed` direct result has no action ID, inbox, or receipt. Real execution
-pulls the registered default branch and removes matching local/origin head refs.
-If cleanup fails, it stays `executed` with `cleanup_error` and
-`next_action=retry_same_request`. Retry with the same project, **explicit PR ID**,
-and mode: observing the PR as merged resumes cleanup without a second forge
-merge, including after an uncertain provider response. Completion requires
-`executed` with no cleanup error. Direct dry-run uses the existing mock executor
+An `executed` direct result has no action ID, inbox, or receipt. If cleanup
+fails, it stays `executed` with `cleanup_error` and
+`next_action=retry_same_request`. Retry with the same checkout selector,
+**explicit PR ID**, and mode. A confirmed merge resumes cleanup without a
+second forge merge, including after an uncertain provider response. Completion
+requires `executed` with no cleanup error. Direct dry-run uses the existing mock executor
 without forge mutation or checkout switch, pull, or deletion; it is not an
 expanded preflight check.
 
@@ -228,8 +233,8 @@ action containing the provider, forge, repository, PR number, head branch, head
 SHA, base branch, squash method, and execution mode. The structured result includes the
 action ID and Impri inbox URL. An operator approves or rejects the card in the
 web inbox; agents may use `--wait --timeout 30s` and repeat the same
-`project`, PR ID, and mode request to recover the action. The returned action ID
-is audit/web identification only, not an input.
+checkout selector, explicit PR ID, and mode to recover the action. The returned
+action ID identifies the action for audit and in the web inbox.
 Dry-run approval records a mock merge without changing the forge. Real mode
 uses the same gate, then refetches the PR and CI and requires an open,
 mergeable PR at the approved head SHA with CI state `success` or
@@ -243,28 +248,30 @@ failures end the approved action as terminal `execute_failed`; this does not
 mean the PR can never merge, only that a later attempt needs new approval. A
 rejected or expired action is automatically replaced when the same request is
 repeated, even if the immutable PR snapshot is unchanged. A successful attempt is reported as
-`executed`; real mode then records the receipt, fast-forwards the registered
-single-checkout default branch, and removes only local and `origin` head refs
-that still match the approved SHA. Dry-run performs no checkout switch, pull,
-or branch deletion. If receipt reporting fails, the response identifies the
-merged outcome and a repeated request repairs the receipt without merging twice.
+`executed`. Real mode records the receipt and runs checkout cleanup. Dry-run
+leaves the forge and checkout intact. If receipt reporting fails, the response
+identifies the merged outcome and a repeated request repairs the receipt.
 If cleanup fails after the receipt, the response remains `executed` with a
 secret-free `cleanup_error`, `retryable=true`, and `next_action=retry_same_request`.
-Repeat the exact same project, PR, and mode request; the forge merge is already
-complete and must not run again. Completion requires the executed receipt,
-successful default-branch pull, and absence of matching approved head refs. If
-Impri approval GET or wait polling is temporarily unavailable, the result is
+Repeat with the same checkout selector, explicit PR ID, and mode to continue
+cleanup. Completion requires the executed receipt and successful checkout
+cleanup. If Impri approval GET or wait polling is temporarily unavailable, the result is
 the local `unavailable` state: no forge call was made, and the same request is
 retryable. If an `execute_failed` receipt cannot be recorded, the result stays
 approved and retryable; repeating the request revalidates and reports the
 deterministic failure rather than pretending Impri accepted it.
 
-Automatic cleanup supports the registered normal single-checkout workflow. It
-refuses dirty or unrelated checkouts and any local/remote head ref that moved
-away from the approved SHA; worktree coordination is outside this version and
-normal Git worktree refusal remains an error. `og pull` remains available for
-its existing guarded closed-PR workflow, but is not a second step after a
-successful real merge. Telegram, webhooks, a daemon, and Impri API-key
+Real cleanup removes only local and `origin` head refs that still match the
+approved SHA. In the registered checkout, it also fast-forwards the default
+branch. From a linked feature worktree, it detaches at the merged PR head,
+cleans up the matching branch refs, then removes the directory. The registered
+checkout stays on its current branch and commit. Git protects tracked edits and
+ordinary untracked files. Ignored files, including local configuration and build
+output, can be removed with the directory. If cleanup fails after the merge, use
+the same worktree path and explicit PR ID to resume. If the directory is
+already gone and the response was lost, inspect the PR by canonical project
+alias and PR ID. `og pull` keeps its guarded closed-PR workflow in the
+registered checkout. Telegram, webhooks, a daemon, and Impri API-key
 provisioning or rotation are outside this version. The final operator PoC uses
 the configured deployed Impri instance, a web-approved dry-run card, and no
 real merge.
@@ -389,9 +396,10 @@ or network availability:
 Use `project_get` or `project_list` to discover the exact five-field project
 record: alias, name, path, canonical remote, and archive state. Active aliases
 are single-layer names and cannot contain dots. Project registry updates are
-visible on the next MCP call. The
-repository-oriented `og` tools accept project references, but not a filesystem
-path, working directory, MCP root, file URI, or credential. Source tools also
+visible on the next MCP call. `push`, `pull`, and PR tools take one of
+`project` (a registered reference) and `worktree` (an absolute linked checkout root
+on the server). For example, `push({"worktree":"/absolute/path/to/feature"})`
+infers the project from Git and returns its canonical alias. Source tools also
 accept an absolute path exactly equal to a registered checkout; their file paths
 must remain within that checkout. `clone` accepts a URL instead. The `og` MCP process initializes configuration on its
 first forge call, then retains Git, registration, policy, credentials, or that
