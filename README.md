@@ -105,6 +105,19 @@ subdirectories to use that worktree's branch. From elsewhere, use
 registered local repository. Use `--project <reference>` to select its registered
 checkout. Linked-worktree pulls only fast-forward the selected branch.
 
+For a local, read-only ownership query, pass an existing absolute directory in
+an active registered project's linked worktree (including inside a nested repo):
+
+```bash
+og project resolve-worktree /absolute/path/to/feature/subdirectory
+# {"project":"canonical-alias","worktree":"/canonical/path/to/feature"}
+```
+
+The JSON contains the canonical project alias and physical worktree root. The
+command exits nonzero for invalid paths, registered checkouts, independent
+clones, stale or unverifiable worktrees, and archived or ambiguous ownership.
+It needs no forge access or credentials.
+
 `og issue` reads GitHub and Forgejo repository issues without depending on the
 checkout branch:
 

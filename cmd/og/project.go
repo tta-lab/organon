@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tta-lab/organon/internal/config"
+	"github.com/tta-lab/organon/internal/og"
 	"github.com/tta-lab/organon/internal/project"
 	"github.com/tta-lab/organon/internal/reporef"
 )
@@ -25,8 +26,29 @@ func newProjectCmd() *cobra.Command {
 	cmd.AddCommand(newProjectFindCmd())
 	cmd.AddCommand(newProjectGetCmd())
 	cmd.AddCommand(newProjectResolveCmd())
+	cmd.AddCommand(newProjectResolveWorktreeCmd())
 	cmd.AddCommand(newProjectJumpCmd())
 	return cmd
+}
+
+func newProjectResolveWorktreeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "resolve-worktree <absolute-directory>",
+		Short:        "Resolve a directory in an active registered linked worktree",
+		Long:         helpProjectResolveWorktree,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, entry, err := og.ResolveEnclosingWorktree(cmd.Context(), args[0], project.NewStore(config.ProjectsPath()))
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+				Project  string `json:"project"`
+				Worktree string `json:"worktree"`
+			}{entry.Alias, root})
+		},
+	}
 }
 
 func discoveryStore() *project.Store {

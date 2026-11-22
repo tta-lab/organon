@@ -3,6 +3,7 @@ package og
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -129,6 +130,48 @@ func ResolveWorktree(ctx context.Context, path string, projects *project.Store) 
 		return "", project.Entry{}, fmt.Errorf("worktree must be an exact linked worktree root")
 	}
 	return root, entry, nil
+}
+
+// ResolveEnclosingWorktree finds the nearest verified active linked worktree
+// containing an existing absolute directory, including through nested repos.
+func ResolveEnclosingWorktree(
+	ctx context.Context, path string, projects *project.Store,
+) (string, project.Entry, error) {
+	if !filepath.IsAbs(path) || strings.TrimSpace(path) == "" {
+		return "", project.Entry{}, fmt.Errorf("directory must be an absolute path")
+	}
+	path, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", project.Entry{}, fmt.Errorf("resolve directory: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return "", project.Entry{}, fmt.Errorf("path must be an existing directory")
+	}
+	if projects == nil {
+		return "", project.Entry{}, fmt.Errorf("project store is not configured")
+	}
+	entries, err := projects.List(true)
+	if err != nil {
+		return "", project.Entry{}, err
+	}
+	for _, entry := range entries {
+		if sameRealPath(path, entry.Path) {
+			return "", project.Entry{}, fmt.Errorf("directory is a registered checkout root")
+		}
+	}
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			_, entry, err := ResolveWorktree(ctx, dir, projects)
+			if err == nil && !entry.Archived {
+				return dir, entry, nil
+			}
+		}
+		if parent := filepath.Dir(dir); parent == dir {
+			break
+		}
+	}
+	return "", project.Entry{}, fmt.Errorf("directory %q is not in a verified active linked worktree", path)
 }
 
 func gitCommonDir(ctx context.Context, dir string) (string, error) {

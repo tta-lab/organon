@@ -26,5 +26,8 @@ var helpProjectGet string
 //go:embed help/project-resolve.md
 var helpProjectResolve string
 
+//go:embed help/project-resolve-worktree.md
+var helpProjectResolveWorktree string
+
 //go:embed help/project-jump.md
 var helpProjectJump string

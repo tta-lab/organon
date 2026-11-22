@@ -4,6 +4,7 @@ Manage registered projects and discover local reference repositories.
   og project find <query>...
   og project get <project-reference>
   og project resolve <project-reference-or-path>
+  og project resolve-worktree <absolute-directory>
   og project jump <project-reference|org/repo>
 
 Successful registered-project results use the canonical configured alias.

@@ -51,7 +51,7 @@ fallback or second config file. See `og pr --help` for merge cleanup and retry
 instructions.
 
 `og project` owns local registered-project discovery and navigation. Use
-`og project list`, `find`, `get`, `resolve`, and `jump`; resolve emits JSON
+`og project list`, `find`, `get`, `resolve`, `resolve-worktree`, and `jump`; resolve emits JSON
 identity/path data and jump emits a path only. These operations use local
 catalog/reference state and do not need forge credentials or network access.
 
