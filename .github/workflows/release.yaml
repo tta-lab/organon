@@ -10,24 +10,7 @@ permissions:
 
 jobs:
   windows-smoke:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install ripgrep
-        run: choco install ripgrep -y --no-progress
-      - name: Verify native executable and registry
-        env:
-          CGO_ENABLED: 0
-        run: |
-          $env:Path += ";C:\ProgramData\chocolatey\bin"
-          go test -v -run TestWindowsRegistry ./internal/project
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test -v ./internal/windowssmoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    uses: ./.github/workflows/windows-smoke.yaml
 
   preflight:
     runs-on: ubuntu-latest

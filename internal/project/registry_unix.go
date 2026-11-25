@@ -18,6 +18,8 @@ func tryLockRegistry(file *os.File) (bool, error) {
 
 func unlockRegistry(file *os.File) { _ = unix.Flock(int(file.Fd()), unix.LOCK_UN) }
 
+func readCatalogFile(path string) ([]byte, error) { return os.ReadFile(path) }
+
 func replaceRegistryFile(_ context.Context, tempPath, path string) error {
 	return os.Rename(tempPath, path)
 }

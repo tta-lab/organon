@@ -32,7 +32,7 @@ type Catalog struct {
 
 // OpenCatalog reads and validates one projects.toml snapshot.
 func OpenCatalog(path string) (*Catalog, error) {
-	data, err := os.ReadFile(path)
+	data, err := readCatalogFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return newCatalog(nil, nil), nil

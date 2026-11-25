@@ -6,6 +6,9 @@ on:
       - main
 
 jobs:
+  windows-smoke:
+    uses: ./.github/workflows/windows-smoke.yaml
+
   build:
     runs-on: ubuntu-latest
     steps:
