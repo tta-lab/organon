@@ -66,19 +66,33 @@ builds:
       - amd64
       - arm64
 
+  - id: og-windows
+    binary: og
+    main: ./cmd/og
+    env:
+      - CGO_ENABLED=0
+    goos: [windows]
+    goarch: [amd64]
+
 archives:
-  - formats: [tar.gz]
+  - id: organon
+    formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
-    builds:
+    ids:
       - src
       - skill
       - goal
       - token
       - og
+
+  - id: og-windows
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_Windows_x86_64_og"
+    ids: [og-windows]
 
 checksum:
   name_template: checksums.txt

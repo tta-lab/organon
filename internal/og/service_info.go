@@ -2,26 +2,9 @@ package og
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
-
-type requiredGitHubPermission struct {
-	name   string
-	access string
-}
-
-const (
-	permissionRead  = "read"
-	permissionWrite = "write"
-)
-
-var requiredGitHubPermissions = []requiredGitHubPermission{
-	{name: "contents", access: permissionWrite},
-	{name: "pull_requests", access: permissionWrite},
-	{name: "issues", access: permissionWrite},
-}
 
 func (s Service) AuthStatus(req Request) (Response, error) {
 	ctx, err := s.resolveRemoteRepoContextForRequest(req)
@@ -59,63 +42,8 @@ func (s Service) AuthStatus(req Request) (Response, error) {
 }
 
 func (s Service) githubAuthStatus(ctx *repoContext) (Response, error) {
-	if s.githubBroker == nil {
-		return Response{}, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
-	}
-	status, err := s.githubBroker.Status(operationContext(ctx), ctx.Owner, ctx.Repo)
-	if err != nil {
-		return Response{}, err
-	}
-	if _, ok := s.githubBroker.(*patBroker); ok {
-		return success(Response{Auth: &AuthStatus{Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
-			Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "github-pat", Ready: false},
-			Message: "provider: github\nauth: github-pat\ntoken file: readable; " +
-				"GitHub authorization and permissions not verified"}), nil
-	}
-	lines := []string{
-		"provider: github",
-		"host: " + ctx.Host,
-		"repo: " + ctx.Owner + "/" + ctx.Repo,
-		"project: " + ctx.ProjectAlias,
-		"auth: github-app",
-		fmt.Sprintf("app_id: %d", status.AppID),
-		"installation: ready",
-		"repository_scope: " + status.Repository,
-		"key_source: file",
-	}
-	missing := false
-	permissions := make([]PermissionStatus, 0, len(requiredGitHubPermissions))
-	for _, required := range requiredGitHubPermissions {
-		actual := status.Permissions[required.name]
-		ready := permissionSatisfies(actual, required.access)
-		permissions = append(permissions, PermissionStatus{
-			Name: required.name, Required: required.access, Actual: actual, Ready: ready,
-		})
-		state := "missing"
-		if ready {
-			state = "ready"
-		} else {
-			missing = true
-		}
-		lines = append(lines, required.name+":"+required.access+": "+state)
-	}
-	message := strings.Join(lines, "\n")
-	if missing {
-		return Response{}, fmt.Errorf(
-			"%s\ninstallation owner must approve the updated GitHub App permissions",
-			message,
-		)
-	}
-	return success(Response{
-		Message: message,
-		Auth: &AuthStatus{
-			Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
-			Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "github-app", Ready: true,
-			Permissions: permissions,
-		},
-	}), nil
-}
-
-func permissionSatisfies(actual, required string) bool {
-	return actual == required || (required == permissionRead && actual == permissionWrite)
+	return success(Response{Auth: &AuthStatus{Project: ctx.ProjectAlias, Provider: string(ctx.Provider), Host: ctx.Host,
+		Owner: ctx.Owner, Repo: ctx.Repo, AuthMode: "git-credential"},
+		Message: fmt.Sprintf("provider: github\nhost: %s\nrepo: %s/%s\nproject: %s\nauth: git-credential",
+			ctx.Host, ctx.Owner, ctx.Repo, ctx.ProjectAlias)}), nil
 }

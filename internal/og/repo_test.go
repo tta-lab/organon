@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
@@ -276,7 +276,7 @@ func TestRunGitWithCredsFailsFastWithoutToken(t *testing.T) {
 		WorkDir:   t.TempDir(),
 		TokenEnv:  "GITHUB_TOKEN",
 		RemoteURL: "https://github.com/tta-lab/example.git",
-	}, githubapp.PurposeGitRead, "ls-remote", remoteOrigin)
+	}, gitcredential.PurposeGitRead, "ls-remote", remoteOrigin)
 	if err == nil {
 		t.Fatal("expected missing token error")
 	}
@@ -286,7 +286,7 @@ func TestRunGitWithCredsFailsFastWithoutToken(t *testing.T) {
 }
 
 func TestGitHubReadFallsBackToAnonymousOnlyForScopeErrors(t *testing.T) {
-	for _, tokenErr := range []error{githubapp.ErrOwnerNotAllowed, githubapp.ErrInstallationNotFound} {
+	for _, tokenErr := range []error{gitcredential.ErrMissing} {
 		t.Run(tokenErr.Error(), func(t *testing.T) {
 			broker := &recordingBroker{tokenErr: tokenErr}
 			ctx := &repoContext{
@@ -300,7 +300,7 @@ func TestGitHubReadFallsBackToAnonymousOnlyForScopeErrors(t *testing.T) {
 			})
 			defer restore()
 
-			if err := runGitWithCreds(ctx, githubapp.PurposeGitRead, "fetch", "origin"); err != nil {
+			if err := runGitWithCreds(ctx, gitcredential.PurposeGitRead, "fetch", "origin"); err != nil {
 				t.Fatalf("anonymous read: %v", err)
 			}
 			if gotToken != "" {
@@ -311,10 +311,10 @@ func TestGitHubReadFallsBackToAnonymousOnlyForScopeErrors(t *testing.T) {
 }
 
 func TestGitHubWriteFailsClosedWhenInstallationIsMissing(t *testing.T) {
-	broker := &recordingBroker{tokenErr: githubapp.ErrInstallationNotFound}
+	broker := &recordingBroker{tokenErr: gitcredential.ErrMissing}
 	ctx := &repoContext{
 		Provider: gitprovider.ProviderGitHub, Owner: "tta-lab", Repo: "organon",
-		githubBroker: broker,
+		githubBroker: broker, RemoteURL: "https://github.com/tta-lab/organon.git",
 	}
 	runs := 0
 	restore := stubRunGitWithAuthentication(t, func(_ *repoContext, _ gitAuthentication, _ ...string) error {
@@ -323,17 +323,17 @@ func TestGitHubWriteFailsClosedWhenInstallationIsMissing(t *testing.T) {
 	})
 	defer restore()
 
-	err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "origin")
-	if !errors.Is(err, githubapp.ErrInstallationNotFound) || runs != 0 {
+	err := runGitWithCreds(ctx, gitcredential.PurposeGitWrite, "push", "origin")
+	if !errors.Is(err, gitcredential.ErrMissing) || runs != 0 {
 		t.Fatalf("error = %v, git runs = %d", err, runs)
 	}
 }
 
-func TestGitHubAuthFailureInvalidatesWithoutRetry(t *testing.T) {
+func TestGitHubAuthFailureDoesNotRetry(t *testing.T) {
 	broker := &recordingBroker{token: "rejected-token"}
 	ctx := &repoContext{
 		Provider: gitprovider.ProviderGitHub, Owner: "tta-lab", Repo: "organon",
-		githubBroker: broker,
+		githubBroker: broker, RemoteURL: "https://github.com/tta-lab/organon.git",
 	}
 	runs := 0
 	restore := stubRunGitWithAuthentication(t, func(_ *repoContext, _ gitAuthentication, _ ...string) error {
@@ -342,22 +342,9 @@ func TestGitHubAuthFailureInvalidatesWithoutRetry(t *testing.T) {
 	})
 	defer restore()
 
-	err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "origin")
+	err := runGitWithCreds(ctx, gitcredential.PurposeGitWrite, "push", "origin")
 	if err == nil || runs != 1 {
 		t.Fatalf("error = %v, git runs = %d; want error and one run", err, runs)
-	}
-	want := brokerInvalidation{
-		owner: "tta-lab", repo: "organon", purpose: githubapp.PurposeGitWrite, token: "rejected-token",
-	}
-	if len(broker.invalidations) != 1 || broker.invalidations[0] != want {
-		t.Fatalf("invalidations = %+v, want [%+v]", broker.invalidations, want)
-	}
-}
-
-func TestConfirmedGitAuthenticationFailureRecognizesGitHub403(t *testing.T) {
-	err := errors.New("fatal: unable to access repository: The requested URL returned error: 403")
-	if !confirmedGitAuthenticationFailure(err) {
-		t.Fatalf("confirmedGitAuthenticationFailure(%v) = false", err)
 	}
 }
 

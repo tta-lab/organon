@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
@@ -20,7 +20,7 @@ type DryRunMergeExecutor func(context.Context, PRMergeSnapshot) error
 // NewServiceWithConfigAndDryRunExecutor is the test/operator seam for the
 // approval-gated dry-run executor. A nil executor records a successful mock.
 func NewServiceWithConfigAndDryRunExecutor(
-	githubBroker githubapp.CredentialBroker,
+	githubBroker gitcredential.Broker,
 	projects *project.Store,
 	cfg ogconfig.Config,
 	executor DryRunMergeExecutor,
@@ -31,7 +31,7 @@ func NewServiceWithConfigAndDryRunExecutor(
 // NewServiceWithDryRunExecutor is a convenience constructor using the default
 // project registry and trust configuration.
 func NewServiceWithDryRunExecutor(
-	githubBroker githubapp.CredentialBroker, executor DryRunMergeExecutor,
+	githubBroker gitcredential.Broker, executor DryRunMergeExecutor,
 ) Service {
 	return newServiceWithDryRunExecutor(githubBroker, nil, ogconfig.Config{}, executor)
 }
@@ -39,7 +39,7 @@ func NewServiceWithDryRunExecutor(
 const defaultImpriExpirySeconds = 259200
 
 func newServiceWithDryRunExecutor(
-	githubBroker githubapp.CredentialBroker,
+	githubBroker gitcredential.Broker,
 	projects *project.Store,
 	cfg ogconfig.Config,
 	executor DryRunMergeExecutor,

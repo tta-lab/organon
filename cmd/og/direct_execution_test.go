@@ -630,11 +630,8 @@ func TestCLIConfigurationFailureIsSecretFree(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	writeConfiguredProject(t, home, "https://github.com/owner/repo.git")
-	writeOGConfig(t, home, `[github_app]
-app_id = 12345
-key_source = "file"
-key_ref = "og/private.pem"
-allowed_owners = ["owner"]
+	writeOGConfig(t, home, `[merge]
+approval = "invalid"
 `)
 	configDir := filepath.Join(home, ".config", "ttal", "og")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {

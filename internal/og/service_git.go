@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -27,7 +27,7 @@ func (s Service) GitPush(req Request) (Response, error) {
 	if req.Force {
 		gitArgs = append(gitArgs, "--force-with-lease")
 	}
-	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, gitArgs...); err != nil {
+	if err := runGitWithCreds(ctx, gitcredential.PurposeGitWrite, gitArgs...); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Pushed %s -> origin/%s", ctx.Branch, ctx.Branch)}), nil
@@ -64,7 +64,7 @@ func pullArchived(ctx *repoContext) (Response, error) {
 
 func pullNamedBranch(ctx *repoContext, branch string) (Response, error) {
 	if err := runGitWithCreds(
-		ctx, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, branch,
+		ctx, gitcredential.PurposeGitRead, "pull", "--ff-only", remoteOrigin, branch,
 	); err != nil {
 		return Response{}, err
 	}
@@ -104,7 +104,7 @@ func pullActive(ctx *repoContext) (Response, error) {
 
 func isAnonymousGitHubReadScopeError(ctx *repoContext, err error) bool {
 	return ctx.Provider == gitprovider.ProviderGitHub &&
-		(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound))
+		errors.Is(err, gitcredential.ErrMissing)
 }
 
 func (s Service) GitTag(req Request) (Response, error) {
@@ -143,7 +143,7 @@ func (s Service) GitTag(req Request) (Response, error) {
 			return Response{}, err
 		}
 	}
-	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", remoteOrigin, "--", tag); err != nil {
+	if err := runGitWithCreds(ctx, gitcredential.PurposeGitWrite, "push", remoteOrigin, "--", tag); err != nil {
 		return Response{}, err
 	}
 	return success(Response{Message: fmt.Sprintf("Tagged %s -> pushed to origin", tag)}), nil

@@ -68,10 +68,9 @@ parsing human-readable output. Extract shared adapter helpers only after the
 same protocol boilerplate repeats across multiple tools without erasing their
 different schemas, safety annotations, or targeting rules.
 
-GitHub authentication uses either an owner-scoped PAT or a GitHub App per
-instance; see README for configuration and permissions. og does not merge
-GitHub PRs or query GitHub CI. Forgejo CI status remains available through og;
-CI logs belong to Woodpecker.
+Use the execution user's Git credential helper for GitHub authentication. See
+the README for setup and permissions. Forgejo is the provider for og merge and
+CI status. Use Woodpecker for CI logs.
 
 The shared Forgejo merge domain operation honors global operator-owned
 `merge.approval` in og.toml: omitted or `impri` uses Impri web approval; `none`

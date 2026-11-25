@@ -36,7 +36,7 @@ func runtimeFor(cmd *cobra.Command) (commandRuntime, error) {
 	if err := config.InjectDotEnvFallback(); err != nil {
 		cmd.PrintErrf("warning: could not load .env: %v\n", err)
 	}
-	service, err := og.LoadService(config.OGConfigPath(), config.DefaultConfigDir())
+	service, err := og.LoadService(config.OGConfigPath())
 	if err != nil {
 		return commandRuntime{}, err
 	}

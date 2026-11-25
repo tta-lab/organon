@@ -11,8 +11,9 @@ import (
 	"testing"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
+	"github.com/tta-lab/organon/internal/gitutil"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
@@ -28,7 +29,7 @@ func TestGitPushRequestsWritePurpose(t *testing.T) {
 	if _, err := NewService(broker).GitPush(Request{WorkDir: repo}); err != nil {
 		t.Fatalf("GitPush: %v", err)
 	}
-	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitWrite}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: gitcredential.PurposeGitWrite}
 	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
 		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
 	}
@@ -129,7 +130,7 @@ func TestGitPushRunsRepositoryPrePushHook(t *testing.T) {
 
 func TestRunGitWithCredsDoesNotExposeInjectedTokenInError(t *testing.T) {
 	bin := t.TempDir()
-	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT\" >&2\nexit 1\n"
+	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT_0\" >&2\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,9 @@ func TestRunGitWithCredsDoesNotExposeInjectedTokenInError(t *testing.T) {
 			Owner:     "tta-lab",
 			Repo:      "example",
 		},
-		gitAuthentication{token: token}, "push", remoteOrigin, "feature/x",
+		gitAuthentication{token: token, targets: []gitutil.GitHubCredential{
+			{Host: "github.com", Path: "tta-lab/example.git", Token: token},
+		}}, "push", remoteOrigin, "feature/x",
 	)
 	if err == nil {
 		t.Fatal("runGitWithCredsImpl succeeded, want failure")
@@ -165,7 +168,7 @@ func TestGitPullRequestsReadPurpose(t *testing.T) {
 	if _, err := NewService(broker).GitPull(Request{WorkDir: repo}); err != nil {
 		t.Fatalf("GitPull: %v", err)
 	}
-	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitRead}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: gitcredential.PurposeGitRead}
 	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
 		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
 	}
@@ -218,7 +221,7 @@ func TestGitPullRejectsCredentialBearingOriginBeforeSideEffects(t *testing.T) {
 }
 
 func TestGitPullFeatureBranchFallsBackToAnonymousForUnmanagedRepository(t *testing.T) {
-	for _, tokenErr := range []error{githubapp.ErrOwnerNotAllowed, githubapp.ErrInstallationNotFound} {
+	for _, tokenErr := range []error{gitcredential.ErrMissing} {
 		t.Run(tokenErr.Error(), func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
@@ -243,8 +246,8 @@ func TestGitPullFeatureBranchFallsBackToAnonymousForUnmanagedRepository(t *testi
 			if !reflect.DeepEqual(calls, wantCalls) {
 				t.Fatalf("git calls = %v, want %v", calls, wantCalls)
 			}
-			wantPurposes := []githubapp.Purpose{githubapp.PurposeAPI, githubapp.PurposeGitRead}
-			gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+			wantPurposes := []gitcredential.Purpose{gitcredential.PurposeAPI, gitcredential.PurposeGitRead}
+			gotPurposes := make([]gitcredential.Purpose, 0, len(broker.tokenCalls))
 			for _, call := range broker.tokenCalls {
 				gotPurposes = append(gotPurposes, call.purpose)
 			}
@@ -303,7 +306,7 @@ func TestGitTagRequestsWritePurpose(t *testing.T) {
 	if _, err := NewService(broker).GitTag(Request{WorkDir: repo, Tag: "v1.2.3"}); err != nil {
 		t.Fatalf("GitTag: %v", err)
 	}
-	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: githubapp.PurposeGitWrite}
+	want := brokerTokenCall{owner: "tta-lab", repo: "example", purpose: gitcredential.PurposeGitWrite}
 	if len(broker.tokenCalls) != 1 || broker.tokenCalls[0] != want {
 		t.Fatalf("broker calls = %+v, want [%+v]", broker.tokenCalls, want)
 	}
@@ -637,10 +640,10 @@ func TestGitPullMergedBranchCleanup(t *testing.T) {
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("git calls = %v, want %v", calls, want)
 	}
-	wantPurposes := []githubapp.Purpose{
-		githubapp.PurposeGitRead, githubapp.PurposeGitRead, githubapp.PurposeGitWrite,
+	wantPurposes := []gitcredential.Purpose{
+		gitcredential.PurposeGitRead, gitcredential.PurposeGitRead, gitcredential.PurposeGitWrite,
 	}
-	gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+	gotPurposes := make([]gitcredential.Purpose, 0, len(broker.tokenCalls))
 	for _, call := range broker.tokenCalls {
 		gotPurposes = append(gotPurposes, call.purpose)
 	}

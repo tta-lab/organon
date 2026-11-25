@@ -8,7 +8,6 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/adrg/frontmatter v0.2.0
 	github.com/aymanbagabas/go-udiff v0.4.1
-	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/joho/godotenv v1.5.1
@@ -37,7 +36,6 @@ require (
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.1 // indirect
 	github.com/go-fed/httpsig v1.1.0 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

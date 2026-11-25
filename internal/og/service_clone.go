@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/gitutil"
 	"github.com/tta-lab/organon/internal/ogconfig"
@@ -19,6 +19,7 @@ import (
 type cloneSource struct {
 	info        *gitprovider.RepoInfo
 	remote      string
+	inputRemote string
 	host        string
 	provider    gitprovider.ProviderType
 	destination string
@@ -176,8 +177,12 @@ func (s Service) cloneNew(
 	if err != nil {
 		return Response{}, err
 	}
+	cloneRemote := source.remote
+	if source.provider == gitprovider.ProviderGitHub {
+		cloneRemote = source.inputRemote
+	}
 	if err := runGitCloneFunc(ctx, cloneInvocation{
-		Destination: temp, Remote: source.remote,
+		Destination: temp, Remote: cloneRemote,
 		Provider: string(source.provider), Owner: source.info.Owner, Repo: source.info.Repo,
 		Token: auth.token,
 	}); err != nil {
@@ -249,7 +254,8 @@ func (s Service) resolveCloneSource(raw string, reference bool) (cloneSource, er
 	localOwner := strings.ToLower(info.Owner)
 	localRepo := strings.ToLower(info.Repo)
 	return cloneSource{
-		info: info, remote: remote, host: strings.TrimPrefix(strings.TrimPrefix(info.BaseURL, "https://"), "http://"),
+		info: info, remote: remote, inputRemote: raw,
+		host:     strings.TrimPrefix(strings.TrimPrefix(info.BaseURL, "https://"), "http://"),
 		provider: provider, destination: filepath.Join(base, localOwner, localRepo),
 	}, nil
 }
@@ -272,11 +278,12 @@ func (s Service) cloneAuthentication(ctx context.Context, source cloneSource) (g
 		if s.githubBroker == nil {
 			return gitAuthentication{}, nil
 		}
-		token, err := s.githubBroker.Token(ctx, source.info.Owner, source.info.Repo, githubapp.PurposeGitRead)
+		token, err := s.githubBroker.Token(ctx, source.info.Owner, source.info.Repo,
+			source.inputRemote, gitcredential.PurposeGitRead)
 		if err == nil {
 			return gitAuthentication{token: token}, nil
 		}
-		if errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound) {
+		if errors.Is(err, gitcredential.ErrMissing) {
 			return gitAuthentication{}, nil
 		}
 		return gitAuthentication{}, err
@@ -350,9 +357,13 @@ func runGitClone(ctx context.Context, invocation cloneInvocation) error {
 	)
 	switch gitprovider.ProviderType(invocation.Provider) {
 	case gitprovider.ProviderGitHub:
-		cmd.Env = gitutil.GitHubGitEnv(
-			os.Environ(), invocation.Remote, invocation.Owner, invocation.Repo, invocation.Token,
-		)
+		host, path, err := gitcredential.Context(invocation.Remote, invocation.Owner, invocation.Repo)
+		if err != nil {
+			return err
+		}
+		cmd.Env = gitutil.GitHubGitEnv(os.Environ(), []gitutil.GitHubCredential{
+			{Host: host, Path: path, Token: invocation.Token},
+		})
 	case gitprovider.ProviderForgejo:
 		if invocation.Token == "" {
 			cmd.Env = gitutil.AnonymousGitEnv(os.Environ())

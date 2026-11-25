@@ -2,6 +2,7 @@ package og
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -96,24 +97,34 @@ type IssueComment struct {
 
 // AuthStatus is the stable, secret-free authentication status for one repository.
 type AuthStatus struct {
-	Project     string             `json:"project"`
-	Provider    string             `json:"provider"`
-	Host        string             `json:"host"`
-	Owner       string             `json:"owner"`
-	Repo        string             `json:"repo"`
-	AuthMode    string             `json:"auth_mode"`
-	Ready       bool               `json:"ready"`
-	TokenEnv    string             `json:"token_env,omitempty"`
-	TokenSet    bool               `json:"token_set,omitempty"`
-	Permissions []PermissionStatus `json:"permissions,omitempty"`
+	Project  string `json:"project"`
+	Provider string `json:"provider"`
+	Host     string `json:"host"`
+	Owner    string `json:"owner"`
+	Repo     string `json:"repo"`
+	AuthMode string `json:"auth_mode"`
+	Ready    bool   `json:"ready,omitempty"`
+	TokenEnv string `json:"token_env,omitempty"`
+	TokenSet bool   `json:"token_set,omitempty"`
 }
 
-// PermissionStatus reports one required provider permission without secrets.
-type PermissionStatus struct {
-	Name     string `json:"name"`
-	Required string `json:"required"`
-	Actual   string `json:"actual,omitempty"`
-	Ready    bool   `json:"ready"`
+// MarshalJSON omits credential health for GitHub while preserving status for other providers.
+func (a AuthStatus) MarshalJSON() ([]byte, error) {
+	type status AuthStatus
+	var ready *bool
+	var tokenSet bool
+	var tokenEnv string
+	if a.Provider != "github" {
+		ready = &a.Ready
+		tokenEnv = a.TokenEnv
+		tokenSet = a.TokenSet
+	}
+	return json.Marshal(struct {
+		status
+		Ready    *bool  `json:"ready,omitempty"`
+		TokenSet bool   `json:"token_set,omitempty"`
+		TokenEnv string `json:"token_env,omitempty"`
+	}{status: status(a), Ready: ready, TokenSet: tokenSet, TokenEnv: tokenEnv})
 }
 
 // PullRequest is the stable PR shape returned to the CLI.

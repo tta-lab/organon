@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -24,7 +24,7 @@ func (s Service) issueList(req Request, search bool) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueRead)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueRead)
 	if err != nil {
 		return Response{}, err
 	}
@@ -48,7 +48,7 @@ func (s Service) IssueGet(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueRead)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueRead)
 	if err != nil {
 		return Response{}, err
 	}
@@ -73,7 +73,7 @@ func (s Service) IssueComments(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueRead)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueRead)
 	if err != nil {
 		return Response{}, err
 	}
@@ -108,7 +108,7 @@ func (s Service) IssueCreate(req Request) (Response, error) {
 	if err = requireRemoteWrite(ctx, "create issue"); err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueWrite)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueWrite)
 	if err != nil {
 		return Response{}, err
 	}
@@ -161,7 +161,7 @@ func (s Service) IssueEditBody(req Request) (Response, error) {
 	if err = requireRemoteWrite(ctx, "edit issue body"); err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueWrite)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueWrite)
 	if err != nil {
 		return Response{}, err
 	}
@@ -199,7 +199,7 @@ func (s Service) IssueComment(req Request) (Response, error) {
 	if err = requireRemoteWrite(ctx, "comment on issue"); err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueWrite)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueWrite)
 	if err != nil {
 		return Response{}, err
 	}
@@ -233,7 +233,7 @@ func (s Service) writeIssue(req Request, op string, write issueWrite) (Response,
 	if err = requireRemoteWrite(ctx, op); err != nil {
 		return Response{}, err
 	}
-	p, err := issueProviderFor(ctx, githubapp.PurposeIssueWrite)
+	p, err := issueProviderFor(ctx, gitcredential.PurposeIssueWrite)
 	if err != nil {
 		return Response{}, err
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/ogconfig"
 )
@@ -25,7 +25,8 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	defer restoreGit()
 	restoreProvider := stubNewProvider(t, func(ctx *repoContext) (gitprovider.Provider, error) {
 		calls = append(calls, "provider")
-		if _, err := broker.Token(context.Background(), ctx.Owner, ctx.Repo, githubapp.PurposeAPI); err != nil {
+		_, err := broker.Token(context.Background(), ctx.Owner, ctx.Repo, ctx.RemoteURL, gitcredential.PurposeAPI)
+		if err != nil {
 			return nil, err
 		}
 		return fakeProvider{
@@ -50,8 +51,8 @@ func TestPRCreatePushesCurrentBranchBeforeCreatingPR(t *testing.T) {
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
-	wantPurposes := []githubapp.Purpose{githubapp.PurposeGitWrite, githubapp.PurposeAPI}
-	gotPurposes := make([]githubapp.Purpose, 0, len(broker.tokenCalls))
+	wantPurposes := []gitcredential.Purpose{gitcredential.PurposeGitWrite, gitcredential.PurposeAPI}
+	gotPurposes := make([]gitcredential.Purpose, 0, len(broker.tokenCalls))
 	for _, call := range broker.tokenCalls {
 		gotPurposes = append(gotPurposes, call.purpose)
 	}

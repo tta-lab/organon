@@ -15,12 +15,6 @@ import (
 
 func TestLoadNormalizesForgejoAllowedBaseURLs(t *testing.T) {
 	path := writeConfig(t, `
-[github_app]
-app_id = 12345
-key_source = "file"
-key_ref = "og/github-app.pem"
-allowed_owners = ["TTA-LAB"]
-
 [forgejo]
 allowed_base_urls = ["HTTP://Forgejo.Localhost:17480/", "https://code.example:443"]
 `)
@@ -33,9 +27,6 @@ allowed_base_urls = ["HTTP://Forgejo.Localhost:17480/", "https://code.example:44
 	if !reflect.DeepEqual(cfg.Forgejo.AllowedBaseURLs, wantURLs) {
 		t.Fatalf("allowed base URLs = %v, want %v", cfg.Forgejo.AllowedBaseURLs, wantURLs)
 	}
-	if cfg.GitHubApp == nil || cfg.GitHubApp.AllowedOwners[0] != "tta-lab" {
-		t.Fatalf("GitHub App config = %+v, want normalized owner", cfg.GitHubApp)
-	}
 }
 
 func TestLoadAllowsMissingForgejoAndGitHubAppSections(t *testing.T) {
@@ -43,7 +34,7 @@ func TestLoadAllowsMissingForgejoAndGitHubAppSections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.GitHubApp != nil || len(cfg.Forgejo.AllowedBaseURLs) != 0 {
+	if len(cfg.Forgejo.AllowedBaseURLs) != 0 {
 		t.Fatalf("config = %+v, want empty optional sections", cfg)
 	}
 }
@@ -142,6 +133,7 @@ allowed_base_urls = ["http://forgejo.localhost:17480"]
 	}{
 		{"GitHub", "https://github.com/tta-lab/organon.git", gitprovider.ProviderGitHub, ""},
 		{"GitHub over HTTP", "http://github.com/tta-lab/organon.git", "", "not allowed"},
+		{"GitHub unexpected port", "https://github.com:444/tta-lab/organon.git", "", "not allowed"},
 		{"GitHub over SSH", "ssh://git@github.com/tta-lab/organon.git", "", "HTTP(S)"},
 		{"allowed Forgejo", "http://forgejo.localhost:17480/GuionAI/flicknote.git", gitprovider.ProviderForgejo, ""},
 		{"generic HTTPS", "https://codeberg.org/forgejo/forgejo.git", gitprovider.ProviderGeneric, ""},
@@ -209,28 +201,5 @@ func TestLoadMergeApprovalPolicy(t *testing.T) {
 	if _, err := Load(writeConfig(t,
 		"[merge]\napproval = \"deny\"\n[impri]\nbase_url = \"http://fixture\"\n")); err == nil {
 		t.Fatal("explicit malformed Impri ignored under deny")
-	}
-}
-
-func TestGitHubPATConfigurationModes(t *testing.T) {
-	for _, tc := range []struct {
-		name, text string
-		valid      bool
-	}{
-		{"pat", "[github_pat]\nowner = \"Example\"\ntoken_file = \"og/token\"\n", true},
-		{"missing owner", "[github_pat]\ntoken_file = \"og/token\"\n", false},
-		{"missing file", "[github_pat]\nowner = \"Example\"\n", false},
-		{"both", "[github_pat]\nowner = \"Example\"\ntoken_file = \"og/token\"\n[github_app]\napp_id = 1\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "og.toml")
-			if err := os.WriteFile(path, []byte(tc.text), 0600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path)
-			if (err == nil) != tc.valid {
-				t.Fatalf("Load: %v", err)
-			}
-		})
 	}
 }

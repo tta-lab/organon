@@ -70,9 +70,15 @@ func ForgejoGitEnv(baseEnv []string, token string) []string {
 	return env
 }
 
-// GitHubGitEnv returns a complete child-process environment that routes a
-// GitHub origin through canonical HTTPS and uses only the supplied token.
-func GitHubGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []string {
+// GitHubCredential scopes an in-memory token to one verified Git credential context.
+type GitHubCredential struct {
+	Host  string
+	Path  string
+	Token string
+}
+
+// GitHubGitEnv restricts helpers to the verified GitHub credential contexts.
+func GitHubGitEnv(baseEnv []string, targets []GitHubCredential) []string {
 	configs := []gitConfigPair{
 		{key: credentialHelperConfig, value: ""},
 		{key: askPassConfig, value: ""},
@@ -83,23 +89,25 @@ func GitHubGitEnv(baseEnv []string, remoteURL, owner, repo, token string) []stri
 	if proxy := gitProxyFromEnvironment(baseEnv); proxy != "" {
 		configs = append(configs, gitConfigPair{key: "http.proxy", value: proxy})
 	}
-	if token != "" {
-		configs = append(configs, gitConfigPair{
-			key: credentialHelperConfig,
-			value: `!f(){ while IFS= read -r line; do ` +
-				`case "$line" in protocol=*) protocol=${line#protocol=};; host=*) host=${line#host=};; ` +
-				`path=*) path=${line#path=};; esac; done; ` +
-				`if [ "$protocol" = https ] && [ "$host" = github.com ] && [ "$path" = "$GIT_GITHUB_PATH" ]; ` +
-				`then echo username=x-access-token; echo password=$GIT_TOKEN_INJECT; fi; }; f`,
-		})
-	}
-	canonicalURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
-	if remoteURL != canonicalURL {
-		configs = append(configs, gitConfigPair{key: "url." + canonicalURL + ".insteadOf", value: remoteURL})
+	for i, target := range targets {
+		if target.Token == "" {
+			continue
+		}
+		helper := fmt.Sprintf(`!f(){ while IFS= read -r line; do `+
+			`case "$line" in protocol=*) protocol=${line#protocol=};; host=*) host=${line#host=};; `+
+			`path=*) path=${line#path=};; esac; done; `+
+			`if [ "$protocol" = https ] && [ "$host" = "$GIT_GITHUB_HOST_%d" ] && `+
+			`[ "$path" = "$GIT_GITHUB_PATH_%d" ]; then echo username=x-access-token; `+
+			`echo password="$GIT_TOKEN_INJECT_%d"; fi; }; f`, i, i, i)
+		configs = append(configs, gitConfigPair{key: credentialHelperConfig, value: helper})
 	}
 	env := controlledGitEnv(baseEnv, configs)
-	if token != "" {
-		env = append(env, "GIT_TOKEN_INJECT="+token, "GIT_GITHUB_PATH="+owner+"/"+repo+".git")
+	for i, target := range targets {
+		if target.Token == "" {
+			continue
+		}
+		env = append(env, fmt.Sprintf("GIT_GITHUB_HOST_%d=%s", i, target.Host),
+			fmt.Sprintf("GIT_GITHUB_PATH_%d=%s", i, target.Path), fmt.Sprintf("GIT_TOKEN_INJECT_%d=%s", i, target.Token))
 	}
 	return env
 }

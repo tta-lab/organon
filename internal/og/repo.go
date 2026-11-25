@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/gitutil"
 	"github.com/tta-lab/organon/internal/ogconfig"
@@ -47,6 +47,7 @@ type repoContext struct {
 	Owner            string
 	Repo             string
 	RemoteURL        string
+	PushURLs         []string
 	RegistryRemote   string
 	TokenEnv         string
 	Token            string
@@ -54,7 +55,7 @@ type repoContext struct {
 	DefaultBaseKnown bool
 	Branch           string
 	config           ogconfig.Config
-	githubBroker     githubapp.CredentialBroker
+	githubBroker     gitcredential.Broker
 }
 
 func resolveRepoContextFor(ctx context.Context, workDir string) (*repoContext, error) {
@@ -154,9 +155,11 @@ func validateCurrentRemoteTargets(ctxInfo *repoContext, requirePush bool) error 
 		return fmt.Errorf("origin fetch target does not match registered remote")
 	}
 	if requirePush {
-		if err := validatePushTargets(ctx, ctxInfo.WorkDir, ctxInfo.config, expected, provider); err != nil {
+		pushURLs, err := validatePushTargets(ctx, ctxInfo.WorkDir, ctxInfo.config, expected, provider)
+		if err != nil {
 			return err
 		}
+		ctxInfo.PushURLs = pushURLs
 	}
 	ctxInfo.RemoteURL = remote
 	return nil
@@ -168,23 +171,25 @@ func validatePushTargets(
 	cfg ogconfig.Config,
 	expected string,
 	fetchProvider gitprovider.ProviderType,
-) error {
+) ([]string, error) {
 	out, err := controlledGitOutput(ctx, workDir, "remote", "get-url", "--push", "--all", remoteOrigin)
 	if err != nil || strings.TrimSpace(out) == "" {
-		return fmt.Errorf("origin push target cannot be verified")
+		return nil, fmt.Errorf("origin push target cannot be verified")
 	}
+	var targets []string
 	for _, raw := range strings.Split(out, "\n") {
 		raw = strings.TrimSpace(raw)
 		pushInfo, parseErr := gitprovider.ParseHTTPRemoteURL(raw)
 		if parseErr != nil {
-			return fmt.Errorf("origin push target is not an allowed HTTP(S) repository")
+			return nil, fmt.Errorf("origin push target is not an allowed HTTP(S) repository")
 		}
 		pushProvider, classifyErr := cfg.ClassifyRemote(pushInfo)
 		if classifyErr != nil || pushProvider != fetchProvider || pushInfo.CanonicalURL != expected {
-			return fmt.Errorf("origin push target does not match registered remote")
+			return nil, fmt.Errorf("origin push target does not match registered remote")
 		}
+		targets = append(targets, raw)
 	}
-	return nil
+	return targets, nil
 }
 
 func resolveRegisteredRepo(
@@ -284,38 +289,29 @@ func runGit(ctx context.Context, workDir string, args ...string) error {
 }
 
 type gitAuthentication struct {
-	token string
+	token   string
+	targets []gitutil.GitHubCredential
 }
 
 var runGitWithCredsFunc = runGitWithCredsImpl
 
-func runGitWithCreds(ctxInfo *repoContext, purpose githubapp.Purpose, args ...string) error {
+func runGitWithCreds(ctxInfo *repoContext, purpose gitcredential.Purpose, args ...string) error {
 	if err := operationContext(ctxInfo).Err(); err != nil {
 		return err
 	}
-	if err := validateCurrentRemoteTargets(ctxInfo, purpose == githubapp.PurposeGitWrite); err != nil {
+	if err := validateCurrentRemoteTargets(ctxInfo, purpose == gitcredential.PurposeGitWrite); err != nil {
 		return err
 	}
 	auth, err := gitAuthenticationFor(ctxInfo, purpose)
 	if err != nil {
 		return err
 	}
-	err = runGitWithCredsFunc(ctxInfo, auth, args...)
-	if err != nil && ctxInfo.Provider == gitprovider.ProviderGitHub && auth.token != "" &&
-		confirmedGitAuthenticationFailure(err) {
-		invalidateErr := ctxInfo.githubBroker.Invalidate(
-			ctxInfo.Owner, ctxInfo.Repo, purpose, auth.token,
-		)
-		if invalidateErr != nil {
-			return fmt.Errorf("%w (invalidate rejected credential: %v)", err, invalidateErr)
-		}
-	}
-	return err
+	return runGitWithCredsFunc(ctxInfo, auth, args...)
 }
 
-func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitAuthentication, error) {
+func gitAuthenticationFor(ctxInfo *repoContext, purpose gitcredential.Purpose) (gitAuthentication, error) {
 	if ctxInfo.Provider == gitprovider.ProviderGeneric {
-		if purpose != githubapp.PurposeGitRead {
+		if purpose != gitcredential.PurposeGitRead {
 			return gitAuthentication{}, fmt.Errorf("generic HTTPS repository is read-only")
 		}
 		return gitAuthentication{}, nil
@@ -327,17 +323,29 @@ func gitAuthenticationFor(ctxInfo *repoContext, purpose githubapp.Purpose) (gitA
 		return gitAuthentication{token: ctxInfo.Token}, nil
 	}
 	if ctxInfo.githubBroker == nil {
-		return gitAuthentication{}, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
+		return gitAuthentication{}, gitcredential.ErrMissing
 	}
-	token, err := ctxInfo.githubBroker.Token(operationContext(ctxInfo), ctxInfo.Owner, ctxInfo.Repo, purpose)
-	if err != nil {
-		if purpose == githubapp.PurposeGitRead &&
-			(errors.Is(err, githubapp.ErrOwnerNotAllowed) || errors.Is(err, githubapp.ErrInstallationNotFound)) {
-			return gitAuthentication{}, nil
+	remotes := []string{ctxInfo.RemoteURL}
+	if purpose == gitcredential.PurposeGitWrite && len(ctxInfo.PushURLs) != 0 {
+		remotes = ctxInfo.PushURLs
+	}
+	var auth gitAuthentication
+	for _, remote := range remotes {
+		token, err := ctxInfo.githubBroker.Token(operationContext(ctxInfo), ctxInfo.Owner, ctxInfo.Repo, remote, purpose)
+		if err != nil {
+			if purpose == gitcredential.PurposeGitRead && errors.Is(err, gitcredential.ErrMissing) {
+				return gitAuthentication{}, nil
+			}
+			return gitAuthentication{}, err
 		}
-		return gitAuthentication{}, err
+		host, path, err := gitcredential.Context(remote, ctxInfo.Owner, ctxInfo.Repo)
+		if err != nil {
+			return gitAuthentication{}, err
+		}
+		auth.targets = append(auth.targets, gitutil.GitHubCredential{Host: host, Path: path, Token: token})
+		auth.token = token
 	}
-	return gitAuthentication{token: token}, nil
+	return auth, nil
 }
 
 func requireRemoteWrite(ctxInfo *repoContext, operation string) error {
@@ -362,9 +370,7 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", ctxInfo.WorkDir}, args...)...)
 	switch ctxInfo.Provider {
 	case gitprovider.ProviderGitHub:
-		cmd.Env = gitutil.GitHubGitEnv(
-			os.Environ(), ctxInfo.RemoteURL, ctxInfo.Owner, ctxInfo.Repo, auth.token,
-		)
+		cmd.Env = gitutil.GitHubGitEnv(os.Environ(), auth.targets)
 	case gitprovider.ProviderGeneric:
 		cmd.Env = gitutil.AnonymousGitEnv(os.Environ())
 	default:
@@ -375,9 +381,13 @@ func runGitWithCredsImpl(ctxInfo *repoContext, auth gitAuthentication, args ...s
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
+		message := redactSecret(string(out), auth.token)
+		for _, target := range auth.targets {
+			message = redactSecret(message, target.Token)
+		}
 		return fmt.Errorf(
 			"git %s: %w: %s",
-			strings.Join(args, " "), err, redactSecret(string(out), auth.token),
+			strings.Join(args, " "), err, message,
 		)
 	}
 	return nil
@@ -396,14 +406,6 @@ func redactSecret(value, secret string) string {
 		return value
 	}
 	return strings.ReplaceAll(value, secret, "[REDACTED]")
-}
-
-func confirmedGitAuthenticationFailure(err error) bool {
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "authentication failed") ||
-		strings.Contains(message, "http 401") ||
-		strings.Contains(message, "http 403: bad credentials") ||
-		strings.Contains(message, "requested url returned error: 403")
 }
 
 func defaultBranch(ctx context.Context, workDir string) (string, bool) {
@@ -484,7 +486,7 @@ func shouldBumpLatestTag(ctxInfo *repoContext, tag string) (bool, error) {
 	}
 	ref := "refs/tags/" + tag
 	if err := runGitWithCreds(
-		ctxInfo, githubapp.PurposeGitRead, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref,
+		ctxInfo, gitcredential.PurposeGitRead, "ls-remote", "--exit-code", "--tags", remoteOrigin, ref,
 	); err != nil {
 		if exitCode(err) == 2 {
 			return false, nil
@@ -562,7 +564,7 @@ func ensureCleanupWorktreeClean(ctxInfo *repoContext) error {
 }
 
 func refreshCleanupRemote(ctxInfo *repoContext) error {
-	if err := runGitWithCreds(ctxInfo, githubapp.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
+	if err := runGitWithCreds(ctxInfo, gitcredential.PurposeGitRead, "fetch", "--prune", remoteOrigin); err != nil {
 		return fmt.Errorf("refusing closed PR branch cleanup: cannot refresh origin: %w", err)
 	}
 	return nil
@@ -818,7 +820,7 @@ func transitionCleanupBranch(ctxInfo *repoContext, target branchCleanupTarget) e
 		}
 	}
 	if err := runGitWithCreds(
-		ctxInfo, githubapp.PurposeGitRead, "pull", "--ff-only", remoteOrigin, target.BaseBranch,
+		ctxInfo, gitcredential.PurposeGitRead, "pull", "--ff-only", remoteOrigin, target.BaseBranch,
 	); err != nil {
 		return err
 	}
@@ -835,12 +837,12 @@ func deleteCleanupRemote(
 	if target.RequireExactHeadSHA {
 		lease := "--force-with-lease=refs/heads/" + target.HeadBranch + ":" + target.HeadSHA
 		if err := runGitWithCreds(
-			ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", lease, "--", target.HeadBranch,
+			ctxInfo, gitcredential.PurposeGitWrite, "push", remoteOrigin, "--delete", lease, "--", target.HeadBranch,
 		); err != nil {
 			return err
 		}
 	} else if err := runGitWithCreds(
-		ctxInfo, githubapp.PurposeGitWrite, "push", remoteOrigin, "--delete", target.HeadBranch,
+		ctxInfo, gitcredential.PurposeGitWrite, "push", remoteOrigin, "--delete", target.HeadBranch,
 	); err != nil {
 		return err
 	}

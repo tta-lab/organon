@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -88,7 +89,7 @@ func Search(ctx context.Context, root, pattern string, limit int) (SearchResult,
 			err = fmt.Errorf("rg returned a match without UTF-8 path or text")
 			break
 		}
-		path := strings.TrimPrefix(event.Data.Path.Text, "./")
+		path := strings.TrimPrefix(filepath.ToSlash(event.Data.Path.Text), "./")
 		col := 1
 		if len(event.Data.Submatches) > 0 {
 			col = event.Data.Submatches[0].Start + 1
@@ -109,8 +110,8 @@ func Search(ctx context.Context, root, pattern string, limit int) (SearchResult,
 			return SearchResult{}, fmt.Errorf("rg: %w", stopContextErr)
 		}
 		if waitErr != nil {
-			exit, ok := waitErr.(*exec.ExitError)
-			if stopKillErr != nil || !ok || exit.ExitCode() != -1 {
+			_, ok := waitErr.(*exec.ExitError)
+			if stopKillErr != nil || !ok {
 				return SearchResult{}, fmt.Errorf("rg: %w: %s", waitErr, stderr.String())
 			}
 		}

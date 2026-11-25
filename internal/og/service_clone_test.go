@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
 )
@@ -416,7 +416,7 @@ func TestGitCloneRejectsDerivedPathCollisionBeforeClone(t *testing.T) {
 }
 
 func TestGitCloneRoutesOnlyResolvedCredentials(t *testing.T) {
-	t.Run("GitHub App", func(t *testing.T) {
+	t.Run("GitHub credential", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		t.Setenv("GITHUB_TOKEN", "ambient-pat")
@@ -436,7 +436,7 @@ func TestGitCloneRoutesOnlyResolvedCredentials(t *testing.T) {
 			strings.Contains(got.Remote, "installation-token") {
 			t.Fatalf("clone invocation = %+v", got)
 		}
-		if len(broker.tokenCalls) != 1 || broker.tokenCalls[0].purpose != githubapp.PurposeGitRead {
+		if len(broker.tokenCalls) != 1 || broker.tokenCalls[0].purpose != gitcredential.PurposeGitRead {
 			t.Fatalf("broker calls = %+v", broker.tokenCalls)
 		}
 	})
@@ -680,7 +680,7 @@ func TestRunGitCloneUsesAnonymousEnvironmentForPublicForgejo(t *testing.T) {
 
 func TestRunGitCloneDoesNotExposeInjectedTokenInError(t *testing.T) {
 	bin := t.TempDir()
-	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT\" >&2\nexit 1\n"
+	script := "#!/bin/sh\nprintf '%s' \"$GIT_TOKEN_INJECT_0\" >&2\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

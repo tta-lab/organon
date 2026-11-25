@@ -239,16 +239,13 @@ remote = "https://github.com/tta-lab/ko.git"
 	if err := os.Mkdir(filepath.Join(configDir, "og"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, []byte(`[github_app]
-app_id = 1
-key_source = "file"
-key_ref = "og/unavailable.pem"
-allowed_owners = ["tta-lab"]
+	if err := os.WriteFile(configPath, []byte(`[merge]
+approval = "unavailable"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	executor := newDeferredExecutor(func() (og.Executor, error) {
-		return og.LoadService(configPath, configDir)
+		return og.LoadService(configPath)
 	})
 	session := connectDirectMCP(t, executor, project.NewDiscoveryStore(projectsPath, filepath.Join(home, "references")))
 	projectResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -265,7 +262,7 @@ allowed_owners = ["tta-lab"]
 	if ok {
 		content = text.Text
 	}
-	if err != nil || !forgeResult.IsError || !strings.Contains(content, "unavailable.pem") {
+	if err != nil || !forgeResult.IsError || !strings.Contains(content, "merge.approval") {
 		t.Fatalf("forge result = %#v, content = %q, err = %v", forgeResult, content, err)
 	}
 }
@@ -732,7 +729,7 @@ func TestOGMCPUsesLoadedServiceDirectly(t *testing.T) {
 	t.Setenv("HOME", home)
 	writeConfiguredProject(t, home, "https://example.com/owner/repo.git")
 	configDir := filepath.Join(home, ".config", "ttal")
-	service, err := og.LoadService(filepath.Join(configDir, "og.toml"), configDir)
+	service, err := og.LoadService(filepath.Join(configDir, "og.toml"))
 	if err != nil {
 		t.Fatalf("LoadService: %v", err)
 	}
@@ -769,7 +766,7 @@ func TestOGMCPMissingForgejoTokenIsSecretFree(t *testing.T) {
 allowed_base_urls = ["http://forgejo.example"]
 `)
 	configDir := filepath.Join(home, ".config", "ttal")
-	service, err := og.LoadService(filepath.Join(configDir, "og.toml"), configDir)
+	service, err := og.LoadService(filepath.Join(configDir, "og.toml"))
 	if err != nil {
 		t.Fatalf("LoadService: %v", err)
 	}
@@ -983,5 +980,123 @@ func TestGitHubMergeAndChecksRejectedInBothTransports(t *testing.T) {
 		if !result.IsError || !strings.Contains(string(encoded), "not supported") {
 			t.Fatalf("MCP %s: %s", tool, encoded)
 		}
+	}
+}
+
+func TestGitHubAuthStatusEnvelopeDoesNotConsultHelper(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := writeConfiguredProject(t, home, "https://github.com/owner/repo.git")
+	runConfiguredGit(t, repo, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	marker := filepath.Join(home, "helper-called")
+	config := fmt.Sprintf("[credential]\n helper = !touch '%s'\n", marker)
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := og.NewService(nil)
+	stdout, _, err := runDirectCLI(t, service, service.ProjectStore(), "", "auth", "status", "--project", "ko", "--json")
+	if err != nil {
+		t.Fatalf("CLI auth status: %v", err)
+	}
+	for _, key := range []string{`"ready"`, `"token_set"`, `"token_env"`, `"permissions"`} {
+		if strings.Contains(stdout, key) {
+			t.Fatalf("unexpected %s in CLI result %s", key, stdout)
+		}
+	}
+	session := connectDirectMCP(t, service, service.ProjectStore())
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "auth_status", Arguments: map[string]any{"project": "ko"},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("auth_status: %#v, %v", result, err)
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	auth, ok := envelope["auth"].(map[string]any)
+	if !ok || auth["auth_mode"] != "git-credential" {
+		t.Fatalf("status: %s", data)
+	}
+	for _, key := range []string{"ready", "token_set", "token_env", "permissions"} {
+		if _, present := auth[key]; present {
+			t.Fatalf("unexpected %s in %s", key, data)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("helper invoked or marker inaccessible: %v", err)
+	}
+}
+
+func TestNonGitHubAuthStatusEnvelopes(t *testing.T) {
+	for _, tc := range []struct {
+		name, remote string
+		ready        bool
+		forgejo      bool
+		tokenSet     bool
+	}{
+		{name: "forgejo missing token", remote: "http://forgejo.example/owner/repo.git", forgejo: true},
+		{name: "forgejo token", remote: "http://forgejo.example/owner/repo.git", forgejo: true, ready: true, tokenSet: true},
+		{name: "generic", remote: "https://example.com/owner/repo.git", ready: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			for _, name := range []string{"FORGEJO_TOKEN", "FORGEJO_ACCESS_TOKEN", "GITEA_TOKEN"} {
+				t.Setenv(name, "")
+			}
+			if tc.tokenSet {
+				t.Setenv("FORGEJO_TOKEN", "fixture-token")
+			}
+			repo := writeConfiguredProject(t, home, tc.remote)
+			runConfiguredGit(t, repo, "remote", "add", "origin", tc.remote)
+			if tc.forgejo {
+				writeOGConfig(t, home, "[forgejo]\nallowed_base_urls = [\"http://forgejo.example\"]\n")
+			}
+			service, err := og.LoadService(filepath.Join(home, ".config", "ttal", "og.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, _, err := runDirectCLI(t, service, service.ProjectStore(), "", "auth", "status", "--project", "ko", "--json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := connectDirectMCP(t, service, service.ProjectStore())
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "auth_status", Arguments: map[string]any{"project": "ko"},
+			})
+			if err != nil || result.IsError {
+				t.Fatalf("MCP auth: %#v, %v", result, err)
+			}
+			mcpJSON, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, data := range []string{stdout, string(mcpJSON)} {
+				assertNonGitHubAuthStatus(t, data, tc.ready, tc.forgejo, tc.tokenSet)
+			}
+		})
+	}
+}
+
+func assertNonGitHubAuthStatus(t *testing.T, data string, ready, forgejo, tokenSet bool) {
+	t.Helper()
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	auth, ok := envelope["auth"].(map[string]any)
+	if !ok || auth["ready"] != ready {
+		t.Fatalf("status: %s", data)
+	}
+	if actual, present := auth["token_set"]; present != tokenSet || (present && actual != true) {
+		t.Fatalf("unexpected token_set: %s", data)
+	}
+	if forgejo && auth["token_env"] != "FORGEJO_TOKEN" {
+		t.Fatalf("status: %s", data)
 	}
 }

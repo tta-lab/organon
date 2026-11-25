@@ -34,6 +34,11 @@ The canonical remote URL and its provider-specific owner and repository names.
 It identifies the remote repository and is distinct from a derived clone path.
 _Avoid_: clone path, local repository name
 
+**Repository mirror**:
+A repository populated by synchronizing Git refs from a source repository.
+In Organon's development workflow, Forgejo hosts the source repository and
+GitHub hosts its mirror.
+
 **Working diff**:
 The tracked-file change set from the current branch's merge base with the
 local origin default branch through the current working tree. It includes committed,

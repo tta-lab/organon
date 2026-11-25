@@ -26,7 +26,7 @@ func TestControlledGitEnvironmentsRespectSupportedGlobalHTTPVersion(t *testing.T
 			}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, nil),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -60,7 +60,7 @@ func TestControlledGitEnvironmentsIgnoreMissingAndUnsupportedGlobalHTTPVersion(t
 			base := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, nil),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -96,7 +96,7 @@ func TestControlledGitEnvironmentsIgnoreUnavailableGitForGlobalHTTPVersion(t *te
 			base := []string{"PATH=" + gitDir, "HOME=" + t.TempDir()}
 			environments := map[string][]string{
 				"anonymous": AnonymousGitEnv(base),
-				"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", ""),
+				"github":    GitHubGitEnv(base, nil),
 				"forgejo":   ForgejoGitEnv(base, ""),
 			}
 			for name, env := range environments {
@@ -121,42 +121,10 @@ func writeGlobalGitConfig(t *testing.T, home, contents string) {
 	}
 }
 
-func TestGitHubGitEnvRoutesOriginsThroughCanonicalHTTPS(t *testing.T) {
-	tests := []struct {
-		name   string
-		remote string
-	}{
-		{"SSH shorthand", "git@github.com:tta-lab/organon.git"},
-		{"SSH URL", "ssh://git@github.com/tta-lab/organon.git"},
-		{"HTTPS", "https://github.com/tta-lab/organon.git"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := GitHubGitEnv([]string{"PATH=/bin"}, tt.remote, "tta-lab", "organon", "test-token-secret")
-			configs := gitConfigPairs(t, env)
-			canonical := "https://github.com/tta-lab/organon.git"
-			if tt.remote != canonical && configs["url."+canonical+".insteadOf"] != tt.remote {
-				t.Fatalf("configs = %#v, want rewrite from %q to %q", configs, tt.remote, canonical)
-			}
-			for key, value := range configs {
-				if strings.Contains(key, "test-token-secret") || strings.Contains(value, "test-token-secret") {
-					t.Fatalf("token leaked into git config %q=%q", key, value)
-				}
-			}
-			if envValue(env, "GIT_TOKEN_INJECT") != "test-token-secret" {
-				t.Fatalf("GIT_TOKEN_INJECT missing from %v", env)
-			}
-		})
-	}
-}
-
 func TestGitHubGitEnvInjectsHTTPSProxy(t *testing.T) {
 	env := GitHubGitEnv(
 		[]string{"PATH=/bin", "HTTPS_PROXY=http://proxy.invalid:7890"},
-		"https://github.com/tta-lab/organon.git",
-		"tta-lab",
-		"organon",
-		"",
+		nil,
 	)
 	configs := gitConfigPairs(t, env)
 	if got := configs["http.proxy"]; got != "http://proxy.invalid:7890" {
@@ -181,7 +149,7 @@ func TestGitHubGitEnvClearsAmbientCredentialConfiguration(t *testing.T) {
 		"SSH_ASKPASS=/tmp/leaky-ssh-helper",
 		"GCM_INTERACTIVE=always",
 	}
-	env := GitHubGitEnv(base, "git@github.com:tta-lab/organon.git", "tta-lab", "organon", "")
+	env := GitHubGitEnv(base, nil)
 	if envValue(env, "PATH") != "/bin" || envValue(env, "GIT_TERMINAL_PROMPT") != "0" {
 		t.Fatalf("environment = %v", env)
 	}
@@ -336,8 +304,10 @@ func TestControlledGitEnvironmentsDisableAmbientTracing(t *testing.T) {
 	}
 	environments := map[string][]string{
 		"anonymous": AnonymousGitEnv(base),
-		"github":    GitHubGitEnv(base, "https://github.com/tta-lab/example.git", "tta-lab", "example", "secret"),
-		"forgejo":   ForgejoGitEnv(base, "secret"),
+		"github": GitHubGitEnv(base, []GitHubCredential{
+			{Host: "github.com", Path: "tta-lab/example.git", Token: "secret"},
+		}),
+		"forgejo": ForgejoGitEnv(base, "secret"),
 	}
 	for name, env := range environments {
 		t.Run(name, func(t *testing.T) {
@@ -379,7 +349,7 @@ func TestGitHubCredentialHelperRestrictsRepository(t *testing.T) {
 	home := t.TempDir()
 	env := GitHubGitEnv(
 		[]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home},
-		"https://github.com/owner/repo.git", "owner", "repo", "fixture-secret",
+		[]GitHubCredential{{Host: "github.com", Path: "owner/repo.git", Token: "fixture-secret"}},
 	)
 	for _, tc := range []struct {
 		protocol, host, path string
@@ -397,5 +367,33 @@ func TestGitHubCredentialHelperRestrictsRepository(t *testing.T) {
 		if got := strings.Contains(string(output), "password=fixture-secret"); got != tc.allowed {
 			t.Fatalf("target %s %s %s allowed=%v", tc.protocol, tc.host, tc.path, got)
 		}
+	}
+}
+
+func TestGitHubCredentialHelperOverridesCheckoutHelper(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "repo")
+	init := exec.Command("git", "init", "-q", repo)
+	init.Env = AnonymousGitEnv([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home})
+	if output, err := init.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	marker := filepath.Join(home, "checkout-helper")
+	localConfig := exec.Command("git", "-C", repo, "config", "--local",
+		"credential.https://github.com.helper", "!touch "+marker)
+	localConfig.Env = AnonymousGitEnv([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home})
+	if output, err := localConfig.CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v: %s", err, output)
+	}
+	cmd := exec.Command("git", "-C", repo, "credential", "fill")
+	cmd.Env = GitHubGitEnv([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home},
+		[]GitHubCredential{{Host: "github.com", Path: "owner/repo.git", Token: "fixture-secret"}})
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=owner/repo.git\n\n")
+	output, err := cmd.Output()
+	if err != nil || !strings.Contains(string(output), "password=fixture-secret") {
+		t.Fatalf("credential fill: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("checkout helper invoked: %v", err)
 	}
 }

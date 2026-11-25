@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/reporef"
 )
@@ -141,7 +139,7 @@ func (s *Store) Register(ctx context.Context, requested Entry) (Entry, bool, err
 	if err := lockFile(ctx, lock); err != nil {
 		return Entry{}, false, err
 	}
-	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
+	defer unlockRegistry(lock)
 
 	catalog, err := s.Snapshot()
 	if err != nil {
@@ -151,7 +149,7 @@ func (s *Store) Register(ctx context.Context, requested Entry) (Entry, bool, err
 		return existing, false, err
 	}
 
-	if err := s.appendEntry(requested); err != nil {
+	if err := s.appendEntry(ctx, requested); err != nil {
 		return Entry{}, false, err
 	}
 	return requested, true, nil
@@ -198,11 +196,11 @@ func lockFile(ctx context.Context, file *os.File) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("locking project registry: %w", err)
 		}
-		err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		busy, err := tryLockRegistry(file)
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
+		if !busy {
 			return fmt.Errorf("locking project registry: %w", err)
 		}
 		select {
@@ -213,7 +211,7 @@ func lockFile(ctx context.Context, file *os.File) error {
 	}
 }
 
-func (s *Store) appendEntry(entry Entry) error {
+func (s *Store) appendEntry(ctx context.Context, entry Entry) error {
 	data, mode, err := readRegistryFile(s.path)
 	if err != nil {
 		return err
@@ -234,7 +232,7 @@ func (s *Store) appendEntry(entry Entry) error {
 	fmt.Fprintf(&appended, "path = %s\n", strconv.Quote(entry.Path))
 	fmt.Fprintf(&appended, "remote = %s\n", strconv.Quote(entry.Remote))
 
-	return writeRegistryFile(s.path, appended.String(), mode)
+	return writeRegistryFile(ctx, s.path, appended.String(), mode)
 }
 
 func readRegistryFile(path string) ([]byte, os.FileMode, error) {
@@ -251,7 +249,7 @@ func readRegistryFile(path string) ([]byte, os.FileMode, error) {
 	return data, mode, nil
 }
 
-func writeRegistryFile(path, content string, mode os.FileMode) error {
+func writeRegistryFile(ctx context.Context, path, content string, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -274,16 +272,8 @@ func writeRegistryFile(path, content string, mode os.FileMode) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("closing temporary projects file: %w", err)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := replaceRegistryFile(ctx, tempPath, path); err != nil {
 		return fmt.Errorf("replacing projects file: %w", err)
 	}
-	directory, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("opening project registry directory: %w", err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil {
-		return fmt.Errorf("syncing project registry directory: %w", err)
-	}
-	return nil
+	return syncRegistryDirectory(dir)
 }

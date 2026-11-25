@@ -693,7 +693,7 @@ func newOGMCPCmd() *cobra.Command {
 				return err
 			}
 			executor := newDeferredExecutor(func() (og.Executor, error) {
-				return og.LoadService(config.OGConfigPath(), config.DefaultConfigDir())
+				return og.LoadService(config.OGConfigPath())
 			})
 			return newOGMCPServer(projects, executor).Run(cmd.Context(), &mcp.StdioTransport{})
 		},

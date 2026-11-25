@@ -160,17 +160,12 @@ unique original-body matches; empty `newText` deletes. PR edits preserve the
 title and comments. An uncertain write is not automatically retried; a
 provider error after writing does not guarantee rollback.
 
-`og` runs GitHub PR and Git network operations directly inside the calling CLI or MCP
-process. Configure exactly one GitHub mode: an owner-scoped fine-grained PAT or
-a GitHub App. `GITHUB_TOKEN`, `GH_TOKEN`, and `github_token_env` are not used.
-Forgejo continues to use its token environment variables. GitHub merge and CI
-queries are unsupported in both modes; GitHub PR view omits CI. Forgejo keeps
-merge and CI status, while CI logs and failure details are outside og.
+`og` uses the execution user's Git credential helper for GitHub. Forgejo uses
+its token environment variables and provides merge and CI status. Use Woodpecker
+for CI logs and failure details.
 
-Controlled `og` Git transport honors only a supported user-global `http.version`
-value (`HTTP/1.1` or `HTTP/2`); all other global and system Git configuration
-remains isolated. To select HTTP/1.1 for a proxy path with HTTP/2 framing
-failures, run:
+For a proxy path with HTTP/2 framing failures, set the transport version in
+the execution user's Git configuration. `og` honors `HTTP/1.1` and `HTTP/2`.
 
 ```bash
 git config --global http.version HTTP/1.1
@@ -291,15 +286,16 @@ real merge.
 
 ### GitHub authentication setup
 
-Choose **one** section in `~/.config/ttal/og.toml`: `[github_pat]` or
-`[github_app]`. Configuring both is an error. PAT mode uses exactly one resource
-owner, checked before reading credentials. Out-of-owner Git clone and pull may
-proceed anonymously for public repositories; writes and API operations are
-rejected. In-scope authentication failures never fall back to anonymous access
-or an App. App mode
-retains its allowed-owner and repository-scoped installation token behavior.
+Configure the Git credential helper and sign in for GitHub HTTPS as the same
+user who runs `og` or launches `og mcp`. Set up the helper in the user's Git
+configuration. Store or rotate the token through that helper. [Git credential helpers](https://git-scm.com/docs/gitcredentials)
 
-To create a fine-grained PAT, open GitHub **Settings → Developer settings →
+Remove the retired `[github_pat]` and `[github_app]` sections from any existing
+`og.toml`. `og --project <alias> auth status` reports `git-credential` for GitHub.
+To verify that the credential grants access, run the operation you need or try
+a permitted read such as `og --project <alias> pr get <number>`.
+
+If you use a fine-grained PAT, open GitHub **Settings → Developer settings →
 Personal access tokens → Fine-grained tokens → Generate new token**. Choose a
 name and expiration, select the organization or user as **Resource owner**,
 and select only the repositories og needs. Request the repository permissions
@@ -328,60 +324,9 @@ documents the endpoint requirements. Checks and Actions permissions are not
 needed by og. If an operation is unused, omit its permission. Branch rules and
 organization policy still govern writes.
 
-Store the token in a private file outside the checkout; do not put it in shell
-history, command arguments, environment variables, URLs, Git config, logs, or
-agent messages. Create a `0700` directory and a current-user-owned regular
-`0600` file, then paste the token into that file using a private editor. The
-file must not be a symlink and contains only the token, optionally followed by
-one newline. One way to create it without placing the token in a command is:
-
-```bash
-umask 077
-install -d -m 700 ~/.config/ttal/og
-${EDITOR:-vi} ~/.config/ttal/og/github-pat # paste and save the token privately
-chmod 600 ~/.config/ttal/og/github-pat
-```
-
-For example, with the token privately placed in
-`~/.config/ttal/og/github-pat`, configure:
-
-```toml
-[github_pat]
-owner = "example-org"
-token_file = "og/github-pat"
-
-[forgejo]
-allowed_base_urls = ["https://forge.example.com"]
-```
-
-Relative token paths are resolved against the directory containing `og.toml`.
-Restart a running MCP server after changing the config. `og auth status --project
-<alias>` checks owner and file accessibility but does not validate the token
-with GitHub or prove permissions; its PAT `ready` field is false. Verify access
-with a permitted read such as `og pr get <number> --project <alias>`. A 401 or
-403, or a private repository appearing absent, can mean expiry, revocation,
-missing selected repository/permission, or organization approval/policy. Check
-those settings without printing the token. For rotation, create and approve a
-replacement with the same intended scope, replace the protected file, verify a
-read, then revoke the old token. og reads the file for each operation.
-
-For multiple owners, configure a GitHub App instead (not alongside PAT):
-
-```toml
-[github_app]
-app_id = 123456
-key_source = "file"
-key_ref = "og/github-app.pem"
-allowed_owners = ["example-org", "another-org"]
-```
-
-Install the App on selected repositories and obtain owner approval. For the
-full retained feature set grant Contents, Pull requests, and Issues read/write;
-Workflows read/write is optional for workflow-file pushes. App private keys use
-the same private directory and file protections. `og auth status` checks App
-installation permissions; it does not require Checks, Actions, or optional
-Workflows. Installation tokens are repository and purpose scoped and are
-kept in memory. GitHub's own rulesets remain the default-branch boundary.
+A 401 or 403, or a private repository appearing absent, can mean expiry,
+revocation, missing repository access, or organization approval. Check the
+helper's selected account and the credential's repository access and permissions.
 
 Clone URLs through og so destination, authentication, and registration share one
 boundary: `og clone <registered-alias>` or `og clone --reference
@@ -515,6 +460,11 @@ CGO_ENABLED=0 go install github.com/tta-lab/organon/cmd/nd-playlist@latest
 ### From release
 
 Download binaries from [GitHub Releases](https://github.com/tta-lab/organon/releases).
+
+On Windows x64, extract `og.exe` from the Windows ZIP and make Git for Windows
+and `rg.exe` available on `PATH`. Use the Windows user's
+`%USERPROFILE%\.config\ttal\projects.toml` for the project registry, with Windows
+checkout paths. Configure your MCP client to run `og.exe` with the `mcp` argument.
 
 ## How it fits
 

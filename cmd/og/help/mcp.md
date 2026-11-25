@@ -160,6 +160,9 @@ ID independently of the branch. The PR title and comments stay unchanged.
 Uncertain writes are not automatically retried; an error after an attempted
 write does not guarantee rollback. Concurrent remote body edits can still race.
 
+For GitHub, `auth_status` reports the credential source as `git-credential`.
+Use an authorized read to verify access to the repository.
+
 Example MCP client configuration:
 
 ```json

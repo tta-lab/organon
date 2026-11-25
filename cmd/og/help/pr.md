@@ -94,5 +94,5 @@ variables and a second Impri config file are not supported.
 Telegram notifications, webhooks, a polling daemon, and API-key provisioning
 and rotation are outside this version.
 
-GitHub uses an owner-scoped PAT or a repository-scoped App installation token.
-GitHub merge (including dry-run) and CI are unsupported. See README for setup.
+GitHub uses the execution user's Git credential helper. See the README for
+setup. PR merge (including dry-run) and CI status are Forgejo operations.

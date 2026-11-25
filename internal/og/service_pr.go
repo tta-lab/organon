@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -20,7 +20,7 @@ func (s Service) PRCreate(req Request) (Response, error) {
 	if err := requireRemoteWrite(ctx, "create pull request"); err != nil {
 		return Response{}, err
 	}
-	if err := runGitWithCreds(ctx, githubapp.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
+	if err := runGitWithCreds(ctx, gitcredential.PurposeGitWrite, "push", "-u", remoteOrigin, ctx.Branch); err != nil {
 		return Response{}, err
 	}
 	pr, err := createPR(ctx, title, stringValue(req.Body))

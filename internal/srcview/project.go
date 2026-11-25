@@ -9,8 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/tta-lab/organon/internal/project"
 )
 
@@ -68,7 +66,7 @@ func (s *ProjectService) ReadFile(selector, path string) (File, error) {
 		return File{}, fmt.Errorf("open project root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	file, err := root.OpenFile(clean, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	file, err := root.OpenFile(clean, os.O_RDONLY|nonblockingOpenFlag, 0)
 	if err != nil {
 		return File{}, fmt.Errorf("open project file %q: %w", clean, err)
 	}

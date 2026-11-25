@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-
-	"golang.org/x/sys/unix"
 )
 
 const MaxListEntries = 200
@@ -44,7 +42,7 @@ func (s *ProjectService) ListDirectory(selector, path string) (ListResult, error
 		return ListResult{}, fmt.Errorf("open project root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	dir, err := root.OpenFile(clean, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	dir, err := root.OpenFile(clean, os.O_RDONLY|nonblockingOpenFlag, 0)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("open project directory %q: %w", clean, err)
 	}

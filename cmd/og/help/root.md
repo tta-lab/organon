@@ -70,9 +70,9 @@ For registered projects, the registry remote is the repository identity. Before
 each Git network operation, og requires the effective origin fetch URL—and every
 push URL for writes—to match it. Repository-local hooks run normally.
 
-GitHub uses either an owner-scoped PAT or a GitHub App configured in og.toml;
-see the README for setup and permissions. GitHub merge and CI are unsupported;
-Forgejo retains merge and CI status. Logs and failure details are outside og.
+GitHub uses the execution user's Git credential helper. See the README for
+setup and permissions. Forgejo provides merge and CI status. Use Woodpecker
+for CI logs.
 
 Run push, pull, and PR commands inside a linked worktree or its subdirectories.
 Use `og --worktree /absolute/feature push` to select it from another directory.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tta-lab/organon/internal/config"
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 	"github.com/tta-lab/organon/internal/ogconfig"
 	"github.com/tta-lab/organon/internal/project"
@@ -13,15 +13,14 @@ import (
 
 // Service owns configured dependencies shared across direct operations.
 type Service struct {
-	githubBroker        githubapp.CredentialBroker
+	githubBroker        gitcredential.Broker
 	projects            *project.Store
 	config              ogconfig.Config
 	dryRunMergeExecutor DryRunMergeExecutor
 }
 
-// NewService constructs a service with the default project registry. A nil broker
-// leaves GitHub App authentication unavailable while preserving non-GitHub operations.
-func NewService(githubBroker githubapp.CredentialBroker) Service {
+// NewService constructs a service with the default project registry.
+func NewService(githubBroker gitcredential.Broker) Service {
 	return NewServiceWithConfig(
 		githubBroker, project.NewStore(config.ProjectsPath()), ogconfig.Config{},
 	)
@@ -29,19 +28,14 @@ func NewService(githubBroker githubapp.CredentialBroker) Service {
 
 // NewServiceWithConfig constructs a service with an explicit hot registry and trust policy.
 func NewServiceWithConfig(
-	githubBroker githubapp.CredentialBroker,
+	githubBroker gitcredential.Broker,
 	projects *project.Store,
 	cfg ogconfig.Config,
 ) Service {
-	return Service{githubBroker: githubBroker, projects: projects, config: cfg}
-}
-
-// GitHubAppConfigured reports whether this service has GitHub App credentials.
-func (s Service) GitHubAppConfigured() bool {
-	if _, ok := s.githubBroker.(*patBroker); ok {
-		return false
+	if githubBroker == nil {
+		githubBroker = gitcredential.Git{}
 	}
-	return s.githubBroker != nil
+	return Service{githubBroker: githubBroker, projects: projects, config: cfg}
 }
 
 // Validate checks configured project and remote policy without network operations.

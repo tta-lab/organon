@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -93,8 +93,8 @@ func TestServiceIssueEditBodyWritesOnceOnlyAfterValidation(t *testing.T) {
 	repo := testRegisteredHTTPRepo(t, home, "feature")
 	provider := &recordingIssueProvider{body: "alpha beta"}
 	original := issueProviderFor
-	issueProviderFor = func(_ *repoContext, purpose githubapp.Purpose) (gitprovider.IssueProvider, error) {
-		if purpose != githubapp.PurposeIssueWrite {
+	issueProviderFor = func(_ *repoContext, purpose gitcredential.Purpose) (gitprovider.IssueProvider, error) {
+		if purpose != gitcredential.PurposeIssueWrite {
 			t.Fatalf("purpose=%s", purpose)
 		}
 		return provider, nil

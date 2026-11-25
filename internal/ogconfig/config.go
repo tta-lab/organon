@@ -8,23 +8,14 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/tta-lab/organon/internal/githubapp"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
 // Config is the validated content of og.toml.
 type Config struct {
-	GitHubApp *githubapp.Config `toml:"github_app"`
-	GitHubPAT *GitHubPATConfig  `toml:"github_pat"`
-	Forgejo   ForgejoConfig     `toml:"forgejo"`
-	Impri     *ImpriConfig      `toml:"impri"`
-	Merge     MergeConfig       `toml:"merge"`
-}
-
-// GitHubPATConfig selects a single owner and a private token file.
-type GitHubPATConfig struct {
-	Owner     string `toml:"owner"`
-	TokenFile string `toml:"token_file"`
+	Forgejo ForgejoConfig `toml:"forgejo"`
+	Impri   *ImpriConfig  `toml:"impri"`
+	Merge   MergeConfig   `toml:"merge"`
 }
 
 // MergeConfig selects the global approval policy for both merge transports.
@@ -114,9 +105,6 @@ func Load(path string) (Config, error) {
 	if err := cfg.Merge.Validate(); err != nil {
 		return Config{}, err
 	}
-	if err := validateGitHubAuth(&cfg); err != nil {
-		return Config{}, err
-	}
 	if cfg.Impri != nil {
 		if err := cfg.Impri.Validate(); err != nil {
 			return Config{}, err
@@ -137,28 +125,6 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-func validateGitHubAuth(cfg *Config) error {
-	if cfg.GitHubApp != nil && cfg.GitHubPAT != nil {
-		return fmt.Errorf("github_app and github_pat are mutually exclusive")
-	}
-	if cfg.GitHubPAT != nil {
-		c := cfg.GitHubPAT
-		if strings.TrimSpace(c.Owner) == "" || strings.TrimSpace(c.Owner) != c.Owner ||
-			strings.ContainsAny(c.Owner, "/\\ \t\r\n") {
-			return fmt.Errorf("github_pat.owner must be one GitHub owner")
-		}
-		if strings.TrimSpace(c.TokenFile) == "" || strings.TrimSpace(c.TokenFile) != c.TokenFile {
-			return fmt.Errorf("github_pat.token_file is required")
-		}
-	}
-	if cfg.GitHubApp != nil {
-		if err := cfg.GitHubApp.Validate(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ClassifyRemote applies the configured credential boundary to parsed repository metadata.
 func (c Config) ClassifyRemote(info *gitprovider.RepoInfo) (gitprovider.ProviderType, error) {
 	if info == nil {
@@ -172,10 +138,10 @@ func (c Config) ClassifyRemote(info *gitprovider.RepoInfo) (gitprovider.Provider
 		return "", err
 	}
 	if strings.EqualFold(info.Host, "github.com") {
-		if strings.HasPrefix(baseURL, "https://") {
+		if baseURL == "https://github.com" {
 			return gitprovider.ProviderGitHub, nil
 		}
-		return "", fmt.Errorf("GitHub HTTP remote base URL %q is not allowed", baseURL)
+		return "", fmt.Errorf("GitHub remote base URL %q is not allowed", baseURL)
 	}
 	for _, allowed := range c.Forgejo.AllowedBaseURLs {
 		if baseURL == allowed {

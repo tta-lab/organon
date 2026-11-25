@@ -3,7 +3,7 @@ package og
 import (
 	"fmt"
 
-	"github.com/tta-lab/organon/internal/githubapp"
+	"github.com/tta-lab/organon/internal/gitcredential"
 	"github.com/tta-lab/organon/internal/gitprovider"
 )
 
@@ -194,22 +194,23 @@ func newProvider(ctx *repoContext) (gitprovider.Provider, error) {
 	return newProviderFunc(ctx)
 }
 
-func newIssueProvider(ctx *repoContext, purpose githubapp.Purpose) (gitprovider.IssueProvider, error) {
+func newIssueProvider(ctx *repoContext, purpose gitcredential.Purpose) (gitprovider.IssueProvider, error) {
 	if ctx.Provider == gitprovider.ProviderGeneric {
 		return nil, fmt.Errorf("issue workflows are supported only by GitHub and Forgejo")
 	}
 	var provider gitprovider.Provider
 	if ctx.Provider == gitprovider.ProviderGitHub {
-		if ctx.githubBroker == nil {
-			return nil, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
+		if err := validateCurrentRemoteTargets(ctx, false); err != nil {
+			return nil, err
 		}
-		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, purpose)
+		if ctx.githubBroker == nil {
+			return nil, gitcredential.ErrMissing
+		}
+		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, ctx.RemoteURL, purpose)
 		if err != nil {
 			return nil, err
 		}
-		provider, err = gitprovider.NewGitHubProviderWithTokenAndAuthFailure(
-			operationContext(ctx), token, func() { _ = ctx.githubBroker.Invalidate(ctx.Owner, ctx.Repo, purpose, token) },
-		)
+		provider, err = gitprovider.NewGitHubProviderWithToken(operationContext(ctx), token)
 		if err != nil {
 			return nil, err
 		}
@@ -241,16 +242,18 @@ func newProviderImpl(ctx *repoContext) (gitprovider.Provider, error) {
 		return nil, fmt.Errorf("generic HTTPS repository has no provider API")
 	}
 	if ctx.Provider == gitprovider.ProviderGitHub {
-		if ctx.githubBroker == nil {
-			return nil, fmt.Errorf("GitHub authentication is not configured; configure a PAT or GitHub App")
+		if err := validateCurrentRemoteTargets(ctx, false); err != nil {
+			return nil, err
 		}
-		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, githubapp.PurposeAPI)
+		if ctx.githubBroker == nil {
+			return nil, gitcredential.ErrMissing
+		}
+		token, err := ctx.githubBroker.Token(operationContext(ctx), ctx.Owner, ctx.Repo, ctx.RemoteURL,
+			gitcredential.PurposeAPI)
 		if err != nil {
 			return nil, err
 		}
-		return gitprovider.NewGitHubProviderWithTokenAndAuthFailure(operationContext(ctx), token, func() {
-			_ = ctx.githubBroker.Invalidate(ctx.Owner, ctx.Repo, githubapp.PurposeAPI, token)
-		})
+		return gitprovider.NewGitHubProviderWithToken(operationContext(ctx), token)
 	}
 	if err := requireToken(ctx); err != nil {
 		return nil, err
